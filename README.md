@@ -1,30 +1,20 @@
 # Lagoon Links
 
-A low-poly 3D mini golf game for Android phones, built with Godot 4.4.
-It's an original game, not a port of any existing one: an **18-hole course (par 54)** of
-tropical islands. There are ramps, windmills, spinners, sliding blocks, bumpers, forks,
-a spiral and water hazards. The front nine is played in daytime and the back nine at golden hour.
+A low-poly 3D mini golf game for Android phones, built with Godot 4.4. It's an original game,
+not a port of any existing one.
 
-![All 18 holes](docs/screenshots/all_holes.png)
+You explore **one big island in first person**. All 18 holes (par 54) sit around it in playing
+order, joined by sandy footpaths. There's a volcano in the middle, plus inland lakes, palm groves,
+a clubhouse and a lighthouse. Walk up to any tee to play that hole. When you're ready to shoot,
+switch to putt mode.
 
-![Aiming from the tee](docs/screenshots/aim.png)
-![Island overview](docs/screenshots/over.png)
+![Walking up to the first tee](docs/screenshots/walk_tee.png)
 
-| Windmill | Scorecard / hole picker |
+| Exploring | Putt mode |
 | --- | --- |
-| ![Windmill](docs/screenshots/mill.png) | ![Scorecard](docs/screenshots/scorecard.png) |
+| ![Island](docs/screenshots/walk_island.png) | ![Putt](docs/screenshots/putt.png) |
 
-| # | Hole | Par | # | Hole | Par |
-| --- | --- | --- | --- | --- | --- |
-| 1 | Lagoon Lane | 3 | 10 | Sunset Strip | 2 |
-| 2 | Palm Bend | 2 | 11 | Hook Harbor | 3 |
-| 3 | Coral Steps | 3 | 12 | Log Hump | 3 |
-| 4 | Twin Trails | 3 | 13 | Lighthouse Loop | 4 |
-| 5 | Volcano Rise | 3 | 14 | Stepping Stones | 3 |
-| 6 | Windmill Isle | 3 | 15 | Crab Canyon | 3 |
-| 7 | Tiki Pinball | 2 | 16 | Spiral Shell | 4 |
-| 8 | Snake Pass | 3 | 17 | Coconut Chute | 3 |
-| 9 | Sunken Treasure | 3 | 18 | Grand Finale | 4 |
+![The island](docs/screenshots/island.png)
 
 ## Build the APK in Android Studio
 
@@ -48,40 +38,68 @@ Notes:
 - The game uses Godot's Mobile (Vulkan) renderer. On phones without Vulkan,
   Godot falls back to OpenGL ES 3.
 
-## Touch controls
+## How to play (touch)
+
+**Walk mode (first person)**
+
+| Action | Touch |
+| --- | --- |
+| Walk | Left thumb anywhere on the left side: a joystick appears under it |
+| Look around | Drag with your right thumb |
+| Start a hole | Stand at a tee → **Play Hole N** |
+| Go back to your ball | Walk up to it → **Putt** (or **Go to ball** from far away) |
+| Fast travel | **Card** → tap a hole number |
+
+A floating gold marker shows where to go: your ball while you're playing a hole, otherwise the
+next hole you haven't played. The minimap (top right) shows every hole, you and your ball. Every
+tee also has a big floating number.
+
+**Putt mode**
 
 | Action | Touch |
 | --- | --- |
 | Aim + putt | Touch the ball, pull back (the arrow and meter show power), let go |
-| Orbit camera | One-finger drag anywhere else |
-| Zoom | Two-finger pinch |
-| Reset ball | "Reset ball" button |
-| Scorecard / jump to any hole | "Card" button, then tap a hole number |
+| Orbit / zoom | Drag elsewhere / pinch |
+| Back to exploring | **Walk** |
+| Retry from the last spot | **Reset ball** |
 
-Water costs a one-stroke penalty and puts the ball back where it last stopped.
-When you sink the ball, tap the score banner to go to the next hole. After hole 18 you get
-the full scorecard and can play again. The touch controls are covered by the automated
-tests, which feed in simulated screen touches.
+Water costs a one-stroke penalty. Sink the ball and your score goes on the card. Tap the banner
+to go back to exploring, facing the next tee. Play the holes in any order; after all 18 the card
+offers a new round. On desktop, mouse drags act as touches and WASD also walks.
+
+## The 18 holes
+
+| # | Hole | Par | # | Hole | Par |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Lagoon Lane | 3 | 10 | Sunset Strip | 2 |
+| 2 | Palm Bend | 2 | 11 | Hook Harbor | 3 |
+| 3 | Coral Steps | 3 | 12 | Log Hump | 3 |
+| 4 | Twin Trails | 3 | 13 | Lighthouse Loop | 4 |
+| 5 | Volcano Rise | 3 | 14 | Stepping Stones | 3 |
+| 6 | Windmill Isle | 3 | 15 | Crab Canyon | 3 |
+| 7 | Tiki Pinball | 2 | 16 | Spiral Shell | 4 |
+| 8 | Snake Pass | 3 | 17 | Coconut Chute | 3 |
+| 9 | Sunken Treasure | 3 | 18 | Grand Finale | 4 |
+
+![All 18 hole layouts](docs/screenshots/all_holes.png)
 
 ## Working on the game
 
-The game source is a normal Godot 4.4 project at the repo root (open
-`project.godot`). Everything is built procedurally from code, so there are no
-binary art assets:
+The game source is a normal Godot 4.4 project at the repo root (open `project.godot`).
+Everything is generated from code (no binary art assets), then **baked** into
+`world/world.scn` so phones load the island in about a second instead of generating it.
 
 | Path | What it does |
 | --- | --- |
 | `scripts/course/holes.gd` | All 18 hole layouts as data: path control points (x, height, z), widths, cup, obstacles, decor |
-| `scripts/course/lane_shape.gd`, `course_field.gd` | Lane shape as a signed-distance field on a grid |
-| `scripts/course/course_builder.gd` | Marching-squares turf, chamfered rails, stone walls, cup, collisions |
+| `scripts/world/world_builder.gd` | Places the holes around the island, footpaths, landmarks; bakes `world/world.scn` |
+| `scripts/world/island.gd` | Island terrain (walkable), mountain, lakes, hills, palms, bushes, grass |
+| `scripts/course/lane_shape.gd`, `course_field.gd`, `course_builder.gd` | Turf, rails, walls and cup from a signed-distance field |
 | `scripts/course/windmill.gd`, `spinner.gd`, `sliding_block.gd`, `obstacles.gd` | Moving obstacles and bumpers |
-| `scripts/world/*` | Island terrain, water, sky, clouds, palms, bushes, rocks, flowers |
-| `scripts/gameplay/*` | Ball physics (Jolt), orbit camera, aim arrow |
-| `scripts/ui/hud.gd` | HUD |
-| `shaders/*` | Flat-shaded "facet" look, turf stripes, water with foam, swaying foliage |
-
-To change or add a hole, edit `holes.gd`. Ramps are just control points at
-different heights, and a fork is simply a second path.
+| `scripts/gameplay/walker.gd` | First-person walking (ground following, no walking into the sea) |
+| `scripts/gameplay/golf_ball.gd`, `camera_rig.gd`, `aim_arrow.gd` | Ball physics (Jolt), putt camera, aim arrow |
+| `scripts/ui/*` | HUD, joystick, minimap, scorecard |
+| `scripts/main.gd` | Walk/putt modes, touch input, scoring, tests |
 
 ### After changing the game, refresh the Android project
 
@@ -89,15 +107,14 @@ different heights, and a fork is simply a second path.
 GODOT=/path/to/Godot_v4.4.1 tools/sync_android_assets.sh
 ```
 
-This re-exports the game data into `android/build/assets`. You can also export
-from the Godot editor: *Project → Export → Android* (it uses the Gradle build in
-`android/build`).
+This re-bakes the island and re-exports the game data into `android/build/assets`.
 
-### Tests and screenshots (headless)
+### Tests and screenshots
 
 ```sh
-godot --headless -- --autotest            # all 18 holes + touch controls + putt/drive/hole-out/water checks
-godot -- --hole=5 --screenshot=out.png    # render a hole's tee view to a PNG
-godot -- --contact=sheet.png              # render all 18 holes into one image
-godot -- --screenshot=out.png --view=-5.5,7.5,4.5,3.4,-0.5,-5.8   # custom camera (pos, target)
+godot --headless -- --bake                 # regenerate world/world.scn
+godot --headless -- --autotest             # 75 checks: every hole, walking, touch, full play flow
+godot -- --screenshot=out.png --fp=5       # first person behind hole 5's tee
+godot -- --screenshot=out.png --putt=5     # putt mode on hole 5
+godot -- --screenshot=out.png --aerial     # whole island
 ```

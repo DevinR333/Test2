@@ -11,6 +11,8 @@ assets="$root/android/build/assets"
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
+# Regenerate the baked island (all 18 holes) so it matches the hole data.
+"$godot" --headless --path "$root" -- --bake
 "$godot" --headless --path "$root" --export-pack "Android" "$tmp/game.zip"
 
 # Keep the engine command-line file (_cl_) Godot wrote; replace everything else.

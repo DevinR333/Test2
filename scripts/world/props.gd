@@ -399,3 +399,35 @@ static func log_tunnel() -> Node3D:
 		MeshKit.box(st, Vector3(x * (r_out + r_in) * 0.5, -0.25, 0), Vector3(r_out - r_in, 0.5, half_len * 2.0), bark)
 	root.add_child(_mesh_node(st))
 	return root
+
+
+## Tiki-style clubhouse hut next to the first tee. Faces local +Z.
+static func clubhouse() -> Node3D:
+	var root := Node3D.new()
+	root.name = "Clubhouse"
+	var st := MeshKit.begin()
+	var wood := Color(0.6, 0.4, 0.24)
+	var cream := Color(0.97, 0.92, 0.8)
+	var thatch := Color(0.86, 0.7, 0.38)
+	MeshKit.box(st, Vector3(0, 0.1, 0), Vector3(3.4, 0.2, 2.8), wood.darkened(0.15))
+	MeshKit.box(st, Vector3(0, 1.2, -0.2), Vector3(3.0, 2.0, 2.2), cream)
+	for x in [-1.55, 1.55]:
+		for z in [-1.35, 1.35]:
+			MeshKit.box(st, Vector3(x, 1.2, z), Vector3(0.16, 2.2, 0.16), wood)
+	MeshKit.prism(st, Vector3(0, 2.25, 0), 2.6, 0.0, 1.4, 4, thatch, false, PI / 4.0)
+	MeshKit.box(st, Vector3(0, 0.85, 0.92), Vector3(0.7, 1.3, 0.06), wood.darkened(0.25))
+	MeshKit.box(st, Vector3(-1.0, 1.35, 0.92), Vector3(0.6, 0.5, 0.06), Color(0.35, 0.6, 0.7))
+	MeshKit.box(st, Vector3(1.0, 1.35, 0.92), Vector3(0.6, 0.5, 0.06), Color(0.35, 0.6, 0.7))
+	MeshKit.box(st, Vector3(0, 2.05, 1.05), Vector3(2.4, 0.42, 0.08), wood)
+	root.add_child(_mesh_node(st))
+	var label := Label3D.new()
+	label.text = "LAGOON LINKS"
+	label.font_size = 72
+	label.pixel_size = 0.004
+	label.outline_size = 14
+	label.modulate = Color(1.0, 0.95, 0.8)
+	label.outline_modulate = Color(0.3, 0.16, 0.06)
+	label.position = Vector3(0, 2.05, 1.1)
+	label.shaded = false
+	root.add_child(label)
+	return root

@@ -1,41 +1,51 @@
 extends Node3D
-## Runs an 18-hole round: builds each hole from Holes data, handles aiming,
-## shots, scoring and moving on to the next hole.
+## Lagoon Links: explore one big island in first person and play its 18
+## holes in any order.
 ##
-## Controls (touch; mouse works the same on desktop):
-##   drag starting on/near the ball  -> pull back to aim, release to putt
-##   drag anywhere else              -> orbit camera
-##   pinch / mouse wheel             -> zoom
+## Walk mode:  left thumb = virtual joystick, right thumb = look around.
+##             Walk up to a tee and tap "Play Hole N"; walk up to your ball and
+##             tap "Putt".
+## Putt mode:  touch the ball, pull back, let go. Drag elsewhere to orbit,
+##             pinch to zoom. "Walk" returns to first person.
 ##
 ## Command-line helpers (after `--`):
-##   --hole=N                                   start on hole N
-##   --screenshot=<file.png> [--view=cx,cy,cz,tx,ty,tz | --view=auto]
-##   --contact=<file.png>                       render all 18 holes into one sheet
-##   --autotest                                 run physics/geometry checks and quit
+##   --bake                       generate the island and save res://world/world.scn
+##   --autotest                   run gameplay/geometry/touch checks and quit
+##   --screenshot=<file.png>      render one frame, with one of:
+##       --fp=N          first person, standing behind hole N's tee
+##       --putt=N        putt mode on hole N's tee
+##       --aerial        view of the whole island
+##       --view=cx,cy,cz,tx,ty,tz
 
-enum State { LOADING, READY, AIMING, ROLLING, HOLED }
+enum Mode { LOADING, WALK, PUTT, AIMING, ROLLING, HOLED }
 
 const AIM_GRAB_RADIUS := 0.16     # fraction of screen height
 const FULL_PULL := 0.32           # drag length (fraction of screen height) for max power
-const TEE_PAD_RADIUS := 0.85
+const STICK_ZONE := 0.42          # left fraction of the screen that spawns the joystick
+const TEE_REACH := 2.8
+const BALL_REACH := 2.4
 
-var state := State.LOADING
-var hole_number := 1
-var hole: Dictionary
-var strokes := 0
+var mode := Mode.LOADING
+var holes: Array = []
 var scores: Array = []
+var active := 0                   # hole being played, 0 = just exploring
+var strokes := 0
 var last_rest := Vector3.ZERO
-var tee := Vector3.ZERO
 
-var course: CourseBuilder
-var level: Node3D
-var island: Island
+var world: Node3D
 var ball: GolfBall
+var walker: Walker
 var rig: CameraRig
 var arrow: AimArrow
 var hud: Hud
+var beacon: Node3D
 
+var _primary_action := ""
+var _primary_arg := 0
+var _secondary_action := ""
 var _touches := {}
+var _stick_index := -1
+var _stick_origin := Vector2.ZERO
 var _aim_index := -1
 var _aim_start := Vector2.ZERO
 var _aim_power := 0.0
@@ -45,193 +55,388 @@ var _args := {}
 
 func _ready() -> void:
 	_parse_args()
+	if _args.has("bake"):
+		var t0 := Time.get_ticks_msec()
+		var err := WorldBuilder.bake()
+		print("Baked world to %s in %d ms (error %d)" % [WorldBuilder.BAKED_PATH, Time.get_ticks_msec() - t0, err])
+		get_tree().quit(0 if err == OK else 1)
+		return
+
 	scores.resize(Holes.COUNT)
 	scores.fill(0)
+	hud = Hud.new()
+	add_child(hud)
+	hud.show_loading("Lagoon Links")
+	await get_tree().process_frame
+	await get_tree().process_frame
+
+	var t_load := Time.get_ticks_msec()
+	world = WorldBuilder.load_or_build()
+	add_child(world)
+	print("World ready in %d ms" % (Time.get_ticks_msec() - t_load))
+	holes = world.get_meta("holes")
 
 	ball = GolfBall.new()
 	add_child(ball)
+	ball.visible = false
 	ball.came_to_rest.connect(_on_ball_rest)
 	arrow = AimArrow.new()
 	add_child(arrow)
 	rig = CameraRig.new()
 	add_child(rig)
 	rig.target = ball
-	rig.camera.current = true
-	hud = Hud.new()
-	add_child(hud)
-	hud.reset_pressed.connect(_on_reset_pressed)
+	walker = Walker.new()
+	add_child(walker)
+	walker.exclude = [ball.get_rid()]
+	beacon = _make_beacon()
+	add_child(beacon)
+
+	hud.minimap.setup(holes, world.get_meta("island_radius"))
+	hud.primary_pressed.connect(_on_primary)
+	hud.secondary_pressed.connect(_on_secondary)
 	hud.banner_tapped.connect(_on_banner_tapped)
-	hud.hole_chosen.connect(func(n: int): load_hole(n))
+	hud.hole_chosen.connect(_travel_to_hole)
 	hud.play_again.connect(_new_round)
 
-	var start := clampi(int(_args.get("hole", "1")), 1, Holes.COUNT)
-	if _args.has("contact"):
-		_contact_sheet.call_deferred()
-		return
-	await load_hole(start)
+	await get_tree().physics_frame
+	_enter_walk_at(world.get_meta("spawn"), world.get_meta("spawn_yaw"))
+	hud.set_hint("Left thumb: walk  ·  Right thumb: look around\nFollow the path to the Hole 1 tee")
+	hud.hide_loading()
+
 	if _args.has("screenshot"):
 		_take_screenshot()
 	elif _args.has("autotest"):
 		_autotest()
 
 
-# --- building a hole -------------------------------------------------------
+# --- modes ------------------------------------------------------------------
 
-func load_hole(n: int) -> void:
-	state = State.LOADING
-	hud.hide_banner()
-	hud.hide_scorecard()
-	hud.show_loading("Hole %d" % n)
-	# Let the loading card draw before the (blocking) build.
-	await get_tree().process_frame
-	await get_tree().process_frame
+func _enter_walk_at(pos: Vector3, yaw: float) -> void:
+	mode = Mode.WALK
+	_clear_touches()
+	arrow.visible = false
+	hud.set_power(0.0, false)
+	walker.place(pos, yaw)
+	walker.camera.current = true
 
-	if level:
-		remove_child(level)
-		level.queue_free()
-	hole_number = n
-	hole = Holes.get_hole(n)
-	_build_level()
 
+func start_hole(n: int) -> void:
+	var h: Dictionary = holes[n - 1]
+	active = n
 	strokes = 0
-	hud.setup(n, hole["title"], int(hole["par"]))
-	_update_totals()
-	last_rest = tee + Vector3.UP * (GolfBall.RADIUS + 0.005)
+	ball.visible = true
+	last_rest = (h["tee"] as Vector3) + Vector3.UP * (GolfBall.RADIUS + 0.005)
 	ball.place(last_rest)
-	var first_path: Array = hole["paths"][0][0]
-	rig.face_toward(first_path[2] if first_path.size() > 2 else first_path[1])
-	rig.distance = 3.0
-	rig.pitch = deg_to_rad(24.0)
+	hud.set_hint("")
+	enter_putt()
+	var t: Vector3 = h["tee"]
+	var f: Vector2 = h["forward"]
+	rig.face_toward(t + Vector3(f.x, 0, f.y))
 	rig.snap()
-	hud.hide_loading()
-	if n == 1 and scores[0] == 0:
-		hud.set_hint("Touch the ball and pull back to aim, let go to putt  ·  drag to look  ·  pinch to zoom")
-	state = State.READY
 
 
-func _build_level() -> void:
-	level = Node3D.new()
-	level.name = "Hole%d" % hole_number
-	add_child(level)
-
-	var shape := LaneShape.new()
-	for p: Array in hole["paths"]:
-		shape.add_path(p[0], p[1])
-	var first_path: Array = hole["paths"][0][0]
-	tee = first_path[0]
-	shape.add_pad(tee, TEE_PAD_RADIUS)
-	for pad: Array in hole["pads"]:
-		shape.add_pad(pad[0], pad[1])
-
-	course = CourseBuilder.new()
-	course.build(shape, hole["cup"], level)
-
-	var bounds := shape.bounds()
-	var centre := bounds.get_center()
-	var radius := maxf(bounds.size.x, bounds.size.y) * 0.5 + 3.5
-	SkyAndSea.build(level, Vector3(centre.x, 0, centre.y), hole["golden"])
-
-	island = Island.new(CourseField.new(shape, 0.25, 3.0), centre, radius, hole_number)
-	for pond: Array in hole["ponds"]:
-		island.add_pond(pond[0], pond[1])
-	island.build(level)
-	island.place_palms(level, 6 + hole_number % 3, 77 + hole_number)
-
-	Obstacles.build(level, hole["obstacles"], course.field)
-	for d: Dictionary in hole["decor"]:
-		var node := Props.decor(d)
-		var at: Vector2 = d["at"]
-		var on_course: bool = d["type"] == "log_tunnel"
-		var y := course.field.sample(at).y if on_course else island.height_at(at) - 0.05
-		node.position = Vector3(at.x, y, at.y)
-		node.rotation.y = d.get("yaw", 0.0)
-		level.add_child(node)
-
-	var flag := Props.pin_flag()
-	flag.position = course.cup
-	level.add_child(flag)
-
-	_place_sign(first_path)
-
-	var tee_mark := MeshInstance3D.new()
-	var tee_st := MeshKit.begin()
-	MeshKit.prism(tee_st, Vector3.ZERO, 0.16, 0.16, 0.004, 10, Color(0.24, 0.52, 0.2))
-	tee_mark.mesh = MeshKit.finish(tee_st)
-	tee_mark.material_override = MeshKit.facet_material()
-	tee_mark.position = tee
-	level.add_child(tee_mark)
+func enter_putt() -> void:
+	mode = Mode.PUTT
+	_clear_touches()
+	rig.yaw = walker.yaw
+	rig.pitch = deg_to_rad(24.0)
+	rig.distance = 2.6
+	rig.snap()
+	rig.camera.current = true
 
 
-func _place_sign(first_path: Array) -> void:
-	var t2 := Vector2(tee.x, tee.z)
-	var nxt: Vector3 = first_path[1]
-	var dir := (Vector2(nxt.x, nxt.z) - t2).normalized()
-	var side := Vector2(-dir.y, dir.x)
-	for offset in [-side * 1.4 - dir * 0.3, side * 1.4 - dir * 0.3, -side * 1.9 + dir * 0.6, -dir * 1.6 - side * 0.9]:
-		var p: Vector2 = t2 + offset
-		if island.is_land(p, 0.35):
-			var sign := Props.hole_sign(hole_number, hole["title"], int(hole["par"]))
-			sign.position = Vector3(p.x, island.height_at(p), p.y)
-			sign.rotation.y = atan2(-dir.x, -dir.y)
-			level.add_child(sign)
-			return
+func exit_putt() -> void:
+	var back := Basis(Vector3.UP, rig.yaw) * Vector3(0, 0, 1.1)
+	_enter_walk_at(ball.global_position + back, rig.yaw)
 
 
-# --- per-frame rules -------------------------------------------------------
+# --- per-frame ----------------------------------------------------------------
+
+func _process(_delta: float) -> void:
+	if mode == Mode.LOADING or walker == null:
+		return
+	_update_context()
+	var target_hole := active if active != 0 else _next_unplayed()
+	var ball_pos: Variant = ball.global_position if active != 0 else null
+	var viewer := walker.global_position if mode == Mode.WALK else rig.global_position
+	hud.minimap.update_state(viewer, walker.yaw if mode == Mode.WALK else rig.yaw, ball_pos, target_hole)
+	# Beacon floats over your ball, or over the next tee when not playing.
+	if active != 0:
+		beacon.global_position = ball.global_position + Vector3.UP * 1.1
+		beacon.visible = mode == Mode.WALK
+	elif target_hole != 0:
+		beacon.global_position = (holes[target_hole - 1]["tee"] as Vector3) + Vector3.UP * 3.2
+		beacon.visible = true
+	else:
+		beacon.visible = false
+
+
+func _update_context() -> void:
+	var primary := ""
+	var secondary := ""
+	_primary_action = ""
+	_secondary_action = ""
+	match mode:
+		Mode.WALK:
+			var p := walker.global_position
+			var near_tee := _hole_near(p)
+			if active != 0 and _flat_dist(p, ball.global_position) < BALL_REACH:
+				_primary_action = "putt"
+				primary = "Putt"
+			elif near_tee != 0 and near_tee != active:
+				_primary_action = "play"
+				_primary_arg = near_tee
+				primary = "Play Hole %d" % near_tee
+			if active != 0 and _flat_dist(p, ball.global_position) > 8.0:
+				_secondary_action = "goto_ball"
+				secondary = "Go to ball"
+		Mode.PUTT:
+			_primary_action = "walk"
+			primary = "Walk"
+			_secondary_action = "reset"
+			secondary = "Reset ball"
+	hud.set_actions(primary, secondary)
+	if active != 0:
+		var h: Dictionary = holes[active - 1]
+		hud.set_info("Hole %d  ·  %s  ·  Par %d" % [active, h["title"], h["par"]], "Strokes: %d" % strokes)
+	else:
+		var n := _next_unplayed()
+		hud.set_info("Exploring Lagoon Links", "Next: Hole %d" % n if n != 0 else "Round complete!")
+
 
 func _physics_process(_delta: float) -> void:
-	if state != State.ROLLING:
+	if mode != Mode.ROLLING:
 		return
+	var h: Dictionary = holes[active - 1]
+	var cup: Vector3 = h["cup"]
 	var p := ball.global_position
-	var to_cup := Vector2(p.x - course.cup.x, p.z - course.cup.z).length()
-	if to_cup < CourseBuilder.CUP_RADIUS and p.y < course.cup.y - GolfBall.RADIUS * 1.2:
+	if Vector2(p.x - cup.x, p.z - cup.z).length() < CourseBuilder.CUP_RADIUS and p.y < cup.y - GolfBall.RADIUS * 1.2:
 		_holed()
-	elif p.y < SkyAndSea.WATER_LEVEL + 0.2 or p.y < tee.y - 3.0:
+	elif p.y < SkyAndSea.WATER_LEVEL + 0.2 or p.y < last_rest.y - 4.0:
 		hud.toast("Splash!  +1")
 		strokes += 1
-		hud.set_strokes(strokes)
 		_return_ball()
 
 
-# --- input -----------------------------------------------------------------
+# --- actions ------------------------------------------------------------------
+
+func _on_primary() -> void:
+	match _primary_action:
+		"putt":
+			enter_putt()
+		"play":
+			start_hole(_primary_arg)
+		"walk":
+			if mode == Mode.PUTT:
+				exit_putt()
+
+
+func _on_secondary() -> void:
+	match _secondary_action:
+		"goto_ball":
+			var to_ball := ball.global_position - walker.global_position
+			to_ball.y = 0.0
+			var dir := to_ball.normalized()
+			_enter_walk_at(ball.global_position - dir * 1.4, atan2(-dir.x, -dir.z))
+		"reset":
+			_return_ball()
+
+
+func _travel_to_hole(n: int) -> void:
+	hud.hide_scorecard()
+	var h: Dictionary = holes[n - 1]
+	var t: Vector3 = h["tee"]
+	var f: Vector2 = h["forward"]
+	_enter_walk_at(t - Vector3(f.x, 0, f.y) * 1.8, atan2(-f.x, -f.y))
+
+
+func _new_round() -> void:
+	hud.hide_scorecard()
+	scores.fill(0)
+	active = 0
+	ball.visible = false
+	_update_totals()
+	_enter_walk_at(world.get_meta("spawn"), world.get_meta("spawn_yaw"))
+
+
+func shoot(direction: Vector3, power: float) -> void:
+	strokes += 1
+	mode = Mode.ROLLING
+	var speed := lerpf(0.25, GolfBall.MAX_SPEED, pow(power, 1.35))
+	ball.strike(Vector3(direction.x, 0, direction.z).normalized() * speed)
+
+
+func _on_ball_rest() -> void:
+	if mode != Mode.ROLLING:
+		return
+	last_rest = ball.global_position
+	mode = Mode.PUTT
+
+
+func _return_ball() -> void:
+	arrow.visible = false
+	hud.set_power(0.0, false)
+	ball.place(last_rest)
+	rig.snap()
+	mode = Mode.PUTT
+
+
+func _holed() -> void:
+	mode = Mode.HOLED
+	scores[active - 1] = strokes
+	_update_totals()
+	var par := int(holes[active - 1]["par"])
+	var names := {-3: "Albatross!", -2: "Eagle!", -1: "Birdie!", 0: "Par", 1: "Bogey", 2: "Double Bogey"}
+	var title: String = "Hole in One!" if strokes == 1 else names.get(strokes - par, "+%d" % (strokes - par))
+	hud.show_banner(title, "%d stroke%s  ·  tap to continue" % [strokes, "" if strokes == 1 else "s"])
+
+
+func _on_banner_tapped() -> void:
+	if mode != Mode.HOLED:
+		return
+	hud.hide_banner()
+	var finished := active
+	active = 0
+	ball.visible = false
+	var cup: Vector3 = holes[finished - 1]["cup"]
+	var nxt := _next_unplayed()
+	var yaw := walker.yaw
+	if nxt != 0:
+		var d: Vector3 = (holes[nxt - 1]["tee"] as Vector3) - cup
+		yaw = atan2(-d.x, -d.z)
+	_enter_walk_at(cup + Basis(Vector3.UP, yaw) * Vector3(0.6, 0, 0.8), yaw)
+	if nxt == 0:
+		hud.show_scorecard(scores, true)
+
+
+func _update_totals() -> void:
+	var played := 0
+	var par_played := 0
+	for i in Holes.COUNT:
+		if scores[i] > 0:
+			played += scores[i]
+			par_played += int(holes[i]["par"])
+	hud.set_total(played, played - par_played)
+
+
+func _next_unplayed() -> int:
+	for i in Holes.COUNT:
+		if scores[i] == 0:
+			return i + 1
+	return 0
+
+
+func _hole_near(p: Vector3) -> int:
+	for h: Dictionary in holes:
+		var t: Vector3 = h["tee"]
+		if _flat_dist(p, t) < TEE_REACH and absf(p.y - t.y) < 1.6:
+			return h["number"]
+	return 0
+
+
+func _flat_dist(a: Vector3, b: Vector3) -> float:
+	return Vector2(a.x - b.x, a.z - b.z).length()
+
+
+func _make_beacon() -> Node3D:
+	var node := Node3D.new()
+	node.set_script(load("res://scripts/world/spin_bob.gd"))
+	var st := MeshKit.begin()
+	MeshKit.prism(st, Vector3(0, -0.35, 0), 0.001, 0.28, 0.35, 4, Color(1.0, 0.8, 0.25), true)
+	MeshKit.prism(st, Vector3(0, 0.0, 0), 0.12, 0.12, 0.35, 4, Color(1.0, 0.8, 0.25), true)
+	var mi := MeshInstance3D.new()
+	mi.mesh = MeshKit.finish(st)
+	var mat := StandardMaterial3D.new()
+	mat.vertex_color_use_as_albedo = true
+	mat.emission_enabled = true
+	mat.emission = Color(1.0, 0.6, 0.15)
+	mat.emission_energy_multiplier = 0.8
+	mi.material_override = mat
+	mi.cast_shadow = GeometryInstance3D.SHADOW_CASTING_SETTING_OFF
+	node.add_child(mi)
+	return node
+
+
+# --- input ------------------------------------------------------------------
+
+func _clear_touches() -> void:
+	_touches.clear()
+	_stick_index = -1
+	_aim_index = -1
+	if walker:
+		walker.move_input = Vector2.ZERO
+	if hud:
+		hud.joystick.hide_stick()
+
 
 func _unhandled_input(event: InputEvent) -> void:
-	if state == State.LOADING:
+	if mode == Mode.LOADING or mode == Mode.HOLED:
 		return
-	var vh := get_viewport().get_visible_rect().size.y
+	var vp := get_viewport().get_visible_rect().size
 	if event is InputEventScreenTouch:
 		if event.pressed:
 			_touches[event.index] = event.position
-			if _touches.size() == 1 and state == State.READY and _near_ball(event.position, vh):
-				state = State.AIMING
-				_aim_index = event.index
-				_aim_start = event.position
-				_aim_power = 0.0
+			_on_press(event.index, event.position, vp)
 		else:
-			if state == State.AIMING and event.index == _aim_index:
-				_release_shot()
+			_on_release(event.index)
 			_touches.erase(event.index)
 	elif event is InputEventScreenDrag:
 		var prev: Vector2 = _touches.get(event.index, event.position)
 		_touches[event.index] = event.position
-		if state == State.AIMING and event.index == _aim_index:
-			_update_aim(event.position, vh)
-		elif _touches.size() == 2:
-			var other: Vector2
-			for k in _touches:
-				if k != event.index:
-					other = _touches[k]
-			var before: float = prev.distance_to(other)
-			var after: float = event.position.distance_to(other)
-			if before > 1.0 and after > 1.0:
-				rig.zoom(before / after)
-		elif _touches.size() == 1:
-			rig.orbit(event.relative, vh)
-	elif event is InputEventMouseButton and event.pressed:
+		_on_drag(event, prev, vp)
+	elif event is InputEventMouseButton and event.pressed and mode != Mode.WALK:
 		if event.button_index == MOUSE_BUTTON_WHEEL_UP:
 			rig.zoom(0.9)
 		elif event.button_index == MOUSE_BUTTON_WHEEL_DOWN:
 			rig.zoom(1.1)
+
+
+func _on_press(index: int, pos: Vector2, vp: Vector2) -> void:
+	if mode == Mode.WALK:
+		if pos.x < vp.x * STICK_ZONE and _stick_index == -1:
+			_stick_index = index
+			_stick_origin = pos
+			hud.joystick.show_at(pos, pos)
+	elif mode == Mode.PUTT and _touches.size() == 1 and _near_ball(pos, vp.y):
+		mode = Mode.AIMING
+		_aim_index = index
+		_aim_start = pos
+		_aim_power = 0.0
+
+
+func _on_release(index: int) -> void:
+	if index == _stick_index:
+		_stick_index = -1
+		walker.move_input = Vector2.ZERO
+		hud.joystick.hide_stick()
+	elif mode == Mode.AIMING and index == _aim_index:
+		_release_shot()
+
+
+func _on_drag(event: InputEventScreenDrag, prev: Vector2, vp: Vector2) -> void:
+	if mode == Mode.WALK:
+		if event.index == _stick_index:
+			var v := (event.position - _stick_origin) / JoystickView.RADIUS
+			if v.length() > 1.0:
+				v = v.normalized()
+			walker.move_input = Vector2(v.x, -v.y)
+			hud.joystick.show_at(_stick_origin, _stick_origin + v * JoystickView.RADIUS)
+		else:
+			walker.look(event.relative, vp.y)
+		return
+	if mode == Mode.AIMING and event.index == _aim_index:
+		_update_aim(event.position, vp.y)
+	elif _touches.size() == 2:
+		var other: Vector2
+		for k in _touches:
+			if k != event.index:
+				other = _touches[k]
+		var before: float = prev.distance_to(other)
+		var after: float = event.position.distance_to(other)
+		if before > 1.0 and after > 1.0:
+			rig.zoom(before / after)
+	elif _touches.size() == 1:
+		rig.orbit(event.relative, vp.y)
 
 
 func _near_ball(screen_pos: Vector2, vh: float) -> bool:
@@ -262,79 +467,12 @@ func _release_shot() -> void:
 	hud.set_power(0.0, false)
 	_aim_index = -1
 	if _aim_power < 0.04:
-		state = State.READY
+		mode = Mode.PUTT
 		return
 	shoot(_aim_dir, _aim_power)
 
 
-# --- game flow -------------------------------------------------------------
-
-func shoot(direction: Vector3, power: float) -> void:
-	hud.set_hint("")
-	strokes += 1
-	hud.set_strokes(strokes)
-	state = State.ROLLING
-	var speed := lerpf(0.25, GolfBall.MAX_SPEED, pow(power, 1.35))
-	ball.strike(Vector3(direction.x, 0, direction.z).normalized() * speed)
-
-
-func _on_ball_rest() -> void:
-	if state != State.ROLLING:
-		return
-	last_rest = ball.global_position
-	state = State.READY
-
-
-func _return_ball() -> void:
-	ball.place(last_rest)
-	rig.snap()
-	state = State.READY
-
-
-func _on_reset_pressed() -> void:
-	if state == State.READY or state == State.ROLLING or state == State.AIMING:
-		arrow.visible = false
-		hud.set_power(0.0, false)
-		_return_ball()
-
-
-func _holed() -> void:
-	state = State.HOLED
-	scores[hole_number - 1] = strokes
-	_update_totals()
-	var par := int(hole["par"])
-	var names := {-3: "Albatross!", -2: "Eagle!", -1: "Birdie!", 0: "Par", 1: "Bogey", 2: "Double Bogey"}
-	var title: String = "Hole in One!" if strokes == 1 else names.get(strokes - par, "+%d" % (strokes - par))
-	var next := "tap for Hole %d" % (hole_number + 1) if hole_number < Holes.COUNT else "tap for your scorecard"
-	hud.show_banner(title, "%d stroke%s  ·  %s" % [strokes, "" if strokes == 1 else "s", next])
-
-
-func _on_banner_tapped() -> void:
-	if state != State.HOLED:
-		return
-	if hole_number < Holes.COUNT:
-		load_hole(hole_number + 1)
-	else:
-		hud.hide_banner()
-		hud.show_scorecard(scores, true)
-
-
-func _new_round() -> void:
-	scores.fill(0)
-	load_hole(1)
-
-
-func _update_totals() -> void:
-	var played := 0
-	var par_played := 0
-	for i in Holes.COUNT:
-		if scores[i] > 0:
-			played += scores[i]
-			par_played += int(Holes.get_hole(i + 1)["par"])
-	hud.set_total(played, played - par_played)
-
-
-# --- tooling ---------------------------------------------------------------
+# --- tooling ------------------------------------------------------------------
 
 func _parse_args() -> void:
 	for a in OS.get_cmdline_user_args():
@@ -342,32 +480,27 @@ func _parse_args() -> void:
 		_args[parts[0]] = parts[1] if parts.size() > 1 else ""
 
 
-func _overview_view() -> void:
-	var b := course.field
-	var centre := b.origin + Vector2(b.nx, b.nz) * b.cell * 0.5
-	var size := maxf(b.nx, b.nz) * b.cell
-	var target := Vector3(centre.x, 0.0, centre.y)
-	rig.set_process(false)
-	rig.camera.global_position = target + Vector3(-0.4, 0.9, 0.75) * (size * 0.5 + 1.5)
-	rig.camera.look_at(target)
-
-
 func _take_screenshot() -> void:
-	if _args.has("view"):
-		if _args["view"] == "auto":
-			_overview_view()
-		else:
-			var v: PackedFloat64Array = (_args["view"] as String).split_floats(",")
-			rig.set_process(false)
-			rig.camera.global_position = Vector3(v[0], v[1], v[2])
-			rig.camera.look_at(Vector3(v[3], v[4], v[5]))
-	if _args.has("aim"):
-		var p := float(_args["aim"])
-		arrow.show_aim(ball.global_position - Vector3.UP * GolfBall.RADIUS, -rig.camera.global_basis.z, p)
-		hud.set_power(p, true)
-	if _args.has("banner"):
-		strokes = 2
-		_holed()
+	hud.set_hint("")
+	if _args.has("fp"):
+		_travel_to_hole(int(_args["fp"]))
+		walker.pitch = -0.12
+		walker.look(Vector2.ZERO, 1.0)
+	elif _args.has("putt"):
+		_travel_to_hole(int(_args["putt"]))
+		start_hole(int(_args["putt"]))
+	elif _args.has("aerial"):
+		var r: float = world.get_meta("island_radius")
+		rig.set_process(false)
+		rig.camera.global_position = Vector3(-r * 0.55, r * 1.05, r * 1.05)
+		rig.camera.look_at(Vector3(0, 0, -r * 0.05))
+		rig.camera.current = true
+	elif _args.has("view"):
+		var v: PackedFloat64Array = (_args["view"] as String).split_floats(",")
+		rig.set_process(false)
+		rig.camera.global_position = Vector3(v[0], v[1], v[2])
+		rig.camera.look_at(Vector3(v[3], v[4], v[5]))
+		rig.camera.current = true
 	if _args.has("card"):
 		hud.show_scorecard(scores, false)
 	for i in 90:
@@ -377,72 +510,177 @@ func _take_screenshot() -> void:
 	get_tree().quit()
 
 
-func _contact_sheet() -> void:
-	var cols := 6
-	var tw := 480
-	var th := 270
-	var sheet := Image.create(tw * cols, th * 3, false, Image.FORMAT_RGB8)
-	for n in range(1, Holes.COUNT + 1):
-		await load_hole(n)
-		hud.visible = false
-		_overview_view()
-		for i in 40:
-			await get_tree().process_frame
-		var img := get_viewport().get_texture().get_image()
-		img.convert(Image.FORMAT_RGB8)
-		img.resize(tw, th, Image.INTERPOLATE_BILINEAR)
-		sheet.blit_rect(img, Rect2i(0, 0, tw, th), Vector2i(((n - 1) % cols) * tw, ((n - 1) / cols) * th))
-		print("captured hole ", n)
-	sheet.save_png(_args["contact"])
-	print("Saved contact sheet to ", _args["contact"])
-	get_tree().quit()
-
-
 func _autotest() -> void:
 	var ok := true
-	# Every hole: geometry sanity + floor exists under the whole route.
-	for n in range(1, Holes.COUNT + 1):
-		var t0 := Time.get_ticks_msec()
-		await load_hole(n)
-		var build_ms := Time.get_ticks_msec() - t0
-		ok = await _check_hole(build_ms) and ok
+	for h: Dictionary in holes:
+		ok = _check_hole(h) and ok
+	ok = await _walk_test() and ok
+	ok = await _flow_test() and ok
+	print("AUTOTEST ", "PASS" if ok else "FAIL")
+	get_tree().quit(0 if ok else 1)
 
-	# Touch controls: press on the ball, drag back toward the bottom of the
-	# screen, release -> the ball is struck away from the camera.
-	await load_hole(1)
-	ok = await _touch_test() and ok
 
-	# Gameplay on hole 1.
-	await load_hole(1)
-	shoot(Vector3.FORWARD, 0.25)
-	ok = await _wait_rest(8.0, "short putt") and ok
-	ok = _check(ball.global_position.z < tee.z - 0.3 and ball.global_position.y > 0.55, "putt rolled forward on the raised tee") and ok
-	shoot(Vector3.FORWARD, 1.0)
-	ok = await _wait_rest(20.0, "drive") and ok
-	ok = _check(ball.global_position.z < -4.0, "drive reached lower level (%s)" % ball.global_position) and ok
+func _ray_down(p: Vector3, mask := 1) -> Dictionary:
+	var q := PhysicsRayQueryParameters3D.create(p + Vector3.UP * 2.5, p + Vector3.DOWN * 1.0, mask, [ball.get_rid()])
+	return get_world_3d().direct_space_state.intersect_ray(q)
 
-	ball.place(course.cup + Vector3(-0.5, GolfBall.RADIUS + 0.005, 0))
+
+func _check_hole(h: Dictionary) -> bool:
+	var ok := true
+	var label := "hole %d %s" % [h["number"], h["title"]]
+	var tee: Vector3 = h["tee"]
+	var cup: Vector3 = h["cup"]
+	var th := _ray_down(tee + Vector3(0.013, 0, 0.007))
+	ok = _check(not th.is_empty() and absf((th["position"] as Vector3).y - tee.y) < 0.02, label + ": turf on the tee") and ok
+	var ch := _ray_down(cup)
+	ok = _check(not ch.is_empty() and (ch["position"] as Vector3).y < cup.y - 0.1, label + ": cup is a real hole") and ok
+	var misses := 0
+	var samples := 0
+	for p: Array in h["paths"]:
+		var pts: Array = p[0]
+		for i in pts.size() - 1:
+			var a: Vector3 = pts[i]
+			var b: Vector3 = pts[i + 1]
+			var steps := maxi(1, int(a.distance_to(b) / 0.3))
+			for s in steps:
+				var q := a.lerp(b, float(s) / steps) + Vector3(0.0137, 0, 0.0071)
+				var q2 := Vector2(q.x, q.z)
+				if _near_obstacle(h, q2) or q2.distance_to(Vector2(cup.x, cup.z)) < 0.3:
+					continue
+				samples += 1
+				var hit := _ray_down(q)
+				# Path heights are exact at control points and eased between, so
+				# only require turf within a few cm of the eased height range.
+				if hit.is_empty() or (hit["collider"] as Node).name != "Turf" or (hit["position"] as Vector3).y > maxf(a.y, b.y) + 0.03 or (hit["position"] as Vector3).y < minf(a.y, b.y) - 0.03:
+					misses += 1
+	ok = _check(misses == 0, "%s: turf under route (%d/%d)" % [label, samples - misses, samples]) and ok
+	return ok
+
+
+func _near_obstacle(h: Dictionary, p: Vector2) -> bool:
+	for o: Dictionary in h["obstacles"]:
+		if p.distance_to(o["at"]) < (0.95 if o["type"] == "windmill" else 0.75):
+			return true
+	for d: Dictionary in h["decor"]:
+		if d["type"] == "log_tunnel" and p.distance_to(d["at"]) < 1.0:
+			return true
+	return false
+
+
+func _walk_test() -> bool:
+	var ok := true
+	var spawn: Vector3 = world.get_meta("spawn")
+	_enter_walk_at(spawn, world.get_meta("spawn_yaw"))
+	await get_tree().physics_frame
+	var start := walker.global_position
+	walker.move_input = Vector2(0, 1)
+	for i in 120:
+		await get_tree().physics_frame
+	walker.move_input = Vector2.ZERO
+	var moved := _flat_dist(start, walker.global_position)
+	ok = _check(moved > 2.0, "walk: joystick forward moves the player (%.1f m)" % moved) and ok
+	var g: Variant = walker.ground_at(walker.global_position)
+	ok = _check(g != null and absf(walker.global_position.y - float(g)) < 0.2, "walk: player follows the ground") and ok
+
+	# Walk straight at the sea: the player must stop on the beach.
+	var r: float = world.get_meta("island_radius")
+	var dir := Vector3(1, 0, 0.3).normalized()
+	var p := Vector3.ZERO
+	for k in 400:
+		p = dir * (r * 0.5 + k * 0.25)
+		var gh: Variant = walker.ground_at(p + Vector3.UP * 20.0)
+		if gh != null and float(gh) < SkyAndSea.WATER_LEVEL + 0.2:
+			break
+	var shore := p - dir * 4.0
+	_enter_walk_at(shore + Vector3.UP * 5.0, atan2(-dir.x, -dir.z))
+	await get_tree().physics_frame
+	walker.move_input = Vector2(0, 1)
+	for i in 400:
+		await get_tree().physics_frame
+	walker.move_input = Vector2.ZERO
+	var gy: Variant = walker.ground_at(walker.global_position)
+	ok = _check(gy != null and float(gy) > SkyAndSea.WATER_LEVEL, "walk: can't walk into the sea") and ok
+
+	# Touch joystick on the left half + look drag on the right half.
+	_enter_walk_at(spawn, world.get_meta("spawn_yaw"))
+	var vp := get_viewport().get_visible_rect().size
+	var yaw0 := walker.yaw
+	_touch(1, Vector2(vp.x * 0.8, vp.y * 0.5), true)
+	_drag(1, Vector2(vp.x * 0.8 + 60, vp.y * 0.5), Vector2(60, 0))
+	_touch(1, Vector2(vp.x * 0.8 + 60, vp.y * 0.5), false)
+	ok = _check(not is_equal_approx(walker.yaw, yaw0), "touch: right-side drag looks around") and ok
+	var before := walker.global_position
+	var o := Vector2(vp.x * 0.15, vp.y * 0.7)
+	_touch(0, o, true)
+	_drag(0, o + Vector2(0, -80), Vector2(0, -80))
+	for i in 60:
+		await get_tree().physics_frame
+	_touch(0, o + Vector2(0, -80), false)
+	ok = _check(_flat_dist(before, walker.global_position) > 1.0, "touch: left-side joystick walks") and ok
+	ok = _check(walker.move_input == Vector2.ZERO, "touch: releasing the joystick stops") and ok
+	return ok
+
+
+func _flow_test() -> bool:
+	var ok := true
+	_travel_to_hole(1)
+	await get_tree().process_frame
+	ok = _check(_primary_action == "play" and _primary_arg == 1, "flow: standing at tee 1 offers 'Play Hole 1'") and ok
+	_on_primary()
+	ok = _check(mode == Mode.PUTT and active == 1 and ball.visible, "flow: playing starts putt mode at the tee") and ok
+
+	# Touch putt: press on the ball, pull back, release.
+	await get_tree().process_frame
+	await get_tree().process_frame
+	var vh := get_viewport().get_visible_rect().size.y
+	var start := rig.camera.unproject_position(ball.global_position)
+	var tee: Vector3 = holes[0]["tee"]
+	_touch(0, start, true)
+	ok = _check(mode == Mode.AIMING, "touch: pressing the ball starts aiming") and ok
+	var pos := start
+	for i in 6:
+		pos += Vector2(0, vh * 0.02)
+		_drag(0, pos, Vector2(0, vh * 0.02))
+	ok = _check(arrow.visible and _aim_power > 0.2, "touch: pulling back shows the aim arrow") and ok
+	_touch(0, pos, false)
+	ok = _check(mode == Mode.ROLLING and strokes == 1, "touch: releasing takes the shot") and ok
+	ok = await _wait_rest(10.0, "touch putt") and ok
+	ok = _check(ball.global_position.distance_to(tee) > 0.5, "touch: ball rolled down the lane") and ok
+
+	await get_tree().process_frame
+	ok = _check(_primary_action == "walk", "flow: putt mode offers 'Walk'") and ok
+	_on_primary()
+	ok = _check(mode == Mode.WALK and walker.camera.current, "flow: 'Walk' returns to first person") and ok
+	await get_tree().process_frame
+	ok = _check(_primary_action == "putt", "flow: next to the ball offers 'Putt'") and ok
+	_on_primary()
+	ok = _check(mode == Mode.PUTT, "flow: 'Putt' re-enters putt mode") and ok
+
+	# Sink it from close range.
+	var cup: Vector3 = holes[0]["cup"]
+	ball.place(cup + Vector3(-0.5, GolfBall.RADIUS + 0.005, 0))
 	shoot(Vector3.RIGHT, 0.22)
 	for i in 600:
 		await get_tree().physics_frame
-		if state == State.HOLED:
+		if mode == Mode.HOLED:
 			break
-	ok = _check(state == State.HOLED, "putt into cup is holed") and ok
-	ok = _check(scores[0] == strokes, "score recorded on the card") and ok
+	ok = _check(mode == Mode.HOLED and scores[0] == 2, "flow: holing out records the score") and ok
+	_on_banner_tapped()
+	ok = _check(mode == Mode.WALK and active == 0, "flow: continuing returns to exploring") and ok
+	ok = _check(_next_unplayed() == 2, "flow: next target is hole 2") and ok
 
-	await load_hole(1)
-	var pond: Vector2 = hole["ponds"][0][0]
+	# Water hazard on hole 1's pond.
+	start_hole(1)
+	var pond: Vector2 = holes[0]["ponds"][0][0]
 	ball.place(Vector3(pond.x, 1.0, pond.y))
 	ball.strike(Vector3.ZERO)
-	state = State.ROLLING
+	mode = Mode.ROLLING
 	for i in 400:
 		await get_tree().physics_frame
-		if state == State.READY:
+		if mode == Mode.PUTT:
 			break
-	ok = _check(state == State.READY and strokes == 1, "water hazard resets with penalty") and ok
-
-	print("AUTOTEST ", "PASS" if ok else "FAIL")
-	get_tree().quit(0 if ok else 1)
+	ok = _check(mode == Mode.PUTT and strokes == 1, "flow: water resets the ball with a penalty") and ok
+	return ok
 
 
 func _touch(index: int, pos: Vector2, pressed: bool) -> void:
@@ -461,113 +699,12 @@ func _drag(index: int, pos: Vector2, relative: Vector2) -> void:
 	get_viewport().push_input(e, true)
 
 
-func _touch_test() -> bool:
-	var ok := true
-	await get_tree().process_frame
-	var start := rig.camera.unproject_position(ball.global_position)
-	var vh := get_viewport().get_visible_rect().size.y
-
-	# One-finger drag away from the ball orbits the camera.
-	var yaw0 := rig.yaw
-	var far := start + Vector2(vh * 0.5, -vh * 0.3)
-	_touch(0, far, true)
-	_drag(0, far + Vector2(80, 0), Vector2(80, 0))
-	_touch(0, far + Vector2(80, 0), false)
-	ok = _check(not is_equal_approx(rig.yaw, yaw0) and strokes == 0, "touch: drag off the ball orbits the camera") and ok
-	rig.face_toward(Vector3(0, 0, -6))
-	rig.snap()
-	await get_tree().process_frame
-	start = rig.camera.unproject_position(ball.global_position)
-
-	# Two-finger pinch zooms.
-	var d0 := rig.distance
-	_touch(0, start + Vector2(-200, -150), true)
-	_touch(1, start + Vector2(200, -150), true)
-	_drag(1, start + Vector2(300, -150), Vector2(100, 0))
-	_touch(1, start + Vector2(300, -150), false)
-	_touch(0, start + Vector2(-200, -150), false)
-	ok = _check(rig.distance < d0, "touch: pinch zooms in") and ok
-
-	# Pull back from the ball and release to putt.
-	await get_tree().process_frame
-	start = rig.camera.unproject_position(ball.global_position)
-	var z0 := ball.global_position.z
-	_touch(0, start, true)
-	ok = _check(state == State.AIMING, "touch: pressing on the ball starts aiming") and ok
-	var pos := start
-	for i in 6:
-		pos += Vector2(0, vh * 0.02)
-		_drag(0, pos, Vector2(0, vh * 0.02))
-	ok = _check(arrow.visible and _aim_power > 0.2, "touch: pulling back shows the aim arrow (power %.2f)" % _aim_power) and ok
-	_touch(0, pos, false)
-	ok = _check(state == State.ROLLING and strokes == 1, "touch: releasing takes the shot") and ok
-	ok = await _wait_rest(10.0, "touch putt") and ok
-	ok = _check(ball.global_position.z < z0 - 0.5, "touch: ball rolled toward the hole") and ok
-	return ok
-
-
-func _check_hole(build_ms: int) -> bool:
-	var ok := true
-	var label := "hole %d %s" % [hole_number, hole["title"]]
-	var cup2: Vector2 = hole["cup"]
-	ok = _check(course.field.sample(cup2).x < -0.25, label + ": cup well inside the lane") and ok
-	ok = _check(course.field.sample(Vector2(tee.x, tee.z)).x < -0.3, label + ": tee inside the lane") and ok
-
-	# Ray-cast down along every path: there must be turf at the expected height.
-	var space := get_world_3d().direct_space_state
-	var misses := 0
-	var samples := 0
-	for p: Array in hole["paths"]:
-		var pts: Array = p[0]
-		for i in pts.size() - 1:
-			var a: Vector3 = pts[i]
-			var b: Vector3 = pts[i + 1]
-			var steps := maxi(1, int(a.distance_to(b) / 0.3))
-			for s in steps:
-				# Nudge off exact grid lines so rays never graze a triangle edge.
-				var q := a.lerp(b, float(s) / steps) + Vector3(0.0137, 0, 0.0071)
-				var q2 := Vector2(q.x, q.z)
-				if _near_obstacle(q2) or q2.distance_to(cup2) < 0.3:
-					continue
-				var expect := course.field.sample(q2).y
-				var ray := PhysicsRayQueryParameters3D.create(Vector3(q.x, expect + 2.5, q.z), Vector3(q.x, expect - 1.0, q.z))
-				ray.exclude = [ball.get_rid()]
-				var hit := space.intersect_ray(ray)
-				samples += 1
-				if hit.is_empty() or absf((hit["position"] as Vector3).y - expect) > 0.03:
-					misses += 1
-	ok = _check(misses == 0, "%s: turf under route (%d/%d samples ok)" % [label, samples - misses, samples]) and ok
-
-	# Ball dropped on the tee settles there.
-	ball.place(tee + Vector3.UP * 0.2)
-	ball.strike(Vector3.ZERO)
-	state = State.ROLLING
-	for i in 120:
-		await get_tree().physics_frame
-	var y := ball.global_position.y
-	ok = _check(absf(y - (tee.y + GolfBall.RADIUS)) < 0.01, "%s: ball rests on tee (build %d ms)" % [label, build_ms]) and ok
-	ball.place(last_rest)
-	state = State.READY
-	return ok
-
-
-func _near_obstacle(p: Vector2) -> bool:
-	for o: Dictionary in hole["obstacles"]:
-		var r := 0.95 if o["type"] == "windmill" else 0.75
-		if p.distance_to(o["at"]) < r:
-			return true
-	for d: Dictionary in hole["decor"]:
-		if d["type"] == "log_tunnel" and p.distance_to(d["at"]) < 1.0:
-			return true
-	return false
-
-
 func _wait_rest(timeout: float, label: String) -> bool:
 	var t := 0.0
-	while state == State.ROLLING and t < timeout:
+	while mode == Mode.ROLLING and t < timeout:
 		await get_tree().physics_frame
 		t += get_physics_process_delta_time()
-	return _check(state == State.READY, "%s came to rest (at %s, speed %.3f, state %d, moving %s, frozen %s)" % [label, ball.global_position, ball.linear_velocity.length(), state, ball.moving, ball.freeze])
+	return _check(mode == Mode.PUTT, "%s came to rest (%s)" % [label, ball.global_position])
 
 
 func _check(cond: bool, label: String) -> bool:

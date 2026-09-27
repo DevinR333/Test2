@@ -1,32 +1,39 @@
 class_name Hud
 extends CanvasLayer
-## On-screen UI: hole info, stroke counter, power meter, banners, the
-## scorecard (which doubles as a hole picker) and the loading card.
+## On-screen UI: info card, minimap, context action buttons, virtual joystick,
+## power meter, banners, the scorecard (doubles as fast travel) and loading card.
 
-signal reset_pressed
+signal primary_pressed
+signal secondary_pressed
 signal banner_tapped
 signal hole_chosen(number: int)
 signal play_again
 
 const INK := Color(0.12, 0.25, 0.3)
 
-var _hole_label: Label
-var _strokes: Label
+var joystick: JoystickView
+var minimap: Minimap
+
+var _title: Label
+var _sub: Label
 var _total: Label
-var _card: PanelContainer
-var _card_grid: GridContainer
-var _card_total: Label
-var _card_again: Button
-var _loading: PanelContainer
-var _loading_label: Label
+var _primary: Button
+var _secondary: Button
 var _banner: PanelContainer
 var _banner_title: Label
 var _banner_sub: Label
 var _power_back: Panel
 var _power_fill: ColorRect
 var _toast: Label
-var _hint: Label
 var _toast_time := 0.0
+var _hint: Label
+var _card: PanelContainer
+var _card_grid: GridContainer
+var _card_total: Label
+var _card_again: Button
+var _loading: PanelContainer
+var _loading_label: Label
+var _last_scores: Array = []
 
 
 func _init() -> void:
@@ -35,35 +42,53 @@ func _init() -> void:
 	root.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	add_child(root)
 
+	joystick = JoystickView.new()
+	root.add_child(joystick)
+
 	var card := PanelContainer.new()
 	card.add_theme_stylebox_override("panel", _style(Color(1, 1, 1, 0.88), 22))
 	card.position = Vector2(24, 20)
+	card.mouse_filter = Control.MOUSE_FILTER_IGNORE
 	root.add_child(card)
 	var box := VBoxContainer.new()
 	card.add_child(box)
-	_hole_label = _label("", 26, INK)
-	box.add_child(_hole_label)
+	_title = _label("", 26, INK)
+	box.add_child(_title)
 	var row := HBoxContainer.new()
-	row.add_theme_constant_override("separation", 28)
+	row.add_theme_constant_override("separation", 24)
 	box.add_child(row)
-	_strokes = _label("", 34, Color(0.1, 0.55, 0.5))
-	row.add_child(_strokes)
-	_total = _label("", 24, INK)
+	_sub = _label("", 30, Color(0.1, 0.55, 0.5))
+	row.add_child(_sub)
+	_total = _label("", 22, INK)
 	_total.size_flags_vertical = Control.SIZE_SHRINK_END
 	row.add_child(_total)
 
-	var reset := _button("Reset ball", 24)
-	_anchor(reset, Vector2(1, 0), Vector2(-230, 24), Vector2(206, 56))
-	reset.pressed.connect(func(): reset_pressed.emit())
-	root.add_child(reset)
+	minimap = Minimap.new()
+	_anchor(minimap, Vector2(1, 0), Vector2(-234, 20), Vector2(Minimap.SIZE, Minimap.SIZE))
+	root.add_child(minimap)
 	var card_btn := _button("Card", 24)
-	_anchor(card_btn, Vector2(1, 0), Vector2(-360, 24), Vector2(116, 56))
+	_anchor(card_btn, Vector2(1, 0), Vector2(-190, 244), Vector2(120, 56))
 	card_btn.pressed.connect(func():
 		if _card.visible:
 			hide_scorecard()
 		else:
 			show_scorecard(_last_scores, false))
 	root.add_child(card_btn)
+
+	_primary = _button("", 34)
+	_primary.add_theme_stylebox_override("normal", _style(Color(1.0, 0.55, 0.35, 0.95), 30))
+	_primary.add_theme_stylebox_override("pressed", _style(Color(0.9, 0.45, 0.28, 0.98), 30))
+	_primary.add_theme_stylebox_override("hover", _style(Color(1.0, 0.6, 0.4, 0.98), 30))
+	_primary.add_theme_color_override("font_color", Color.WHITE)
+	_primary.add_theme_color_override("font_pressed_color", Color.WHITE)
+	_primary.add_theme_color_override("font_hover_color", Color.WHITE)
+	_anchor(_primary, Vector2(1, 1), Vector2(-330, -120), Vector2(300, 90))
+	_primary.pressed.connect(func(): primary_pressed.emit())
+	root.add_child(_primary)
+	_secondary = _button("", 24)
+	_anchor(_secondary, Vector2(1, 1), Vector2(-330, -190), Vector2(300, 56))
+	_secondary.pressed.connect(func(): secondary_pressed.emit())
+	root.add_child(_secondary)
 
 	_power_back = Panel.new()
 	_power_back.add_theme_stylebox_override("panel", _style(Color(0, 0, 0, 0.35), 14))
@@ -75,12 +100,13 @@ func _init() -> void:
 	_power_fill.size = Vector2(0, 20)
 	_power_back.add_child(_power_fill)
 
-	_toast = _label("", 44, Color.WHITE)
-	_toast.add_theme_constant_override("outline_size", 12)
-	_toast.add_theme_color_override("font_outline_color", INK)
-	_toast.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	_toast = _outlined("", 44)
 	_anchor(_toast, Vector2(0.5, 0), Vector2(-300, 110), Vector2(600, 60))
 	root.add_child(_toast)
+	_hint = _outlined("", 28)
+	_hint.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
+	_anchor(_hint, Vector2(0.5, 1), Vector2(-360, -200), Vector2(720, 90))
+	root.add_child(_hint)
 
 	_banner = PanelContainer.new()
 	_banner.add_theme_stylebox_override("panel", _style(Color(1, 1, 1, 0.94), 32))
@@ -100,17 +126,10 @@ func _init() -> void:
 	_banner_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	bbox.add_child(_banner_sub)
 
-	_hint = _label("", 30, Color.WHITE)
-	_hint.add_theme_constant_override("outline_size", 10)
-	_hint.add_theme_color_override("font_outline_color", INK)
-	_hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	_anchor(_hint, Vector2(0.5, 1), Vector2(-450, -130), Vector2(900, 50))
-	root.add_child(_hint)
-
 	_build_scorecard(root)
 
 	_loading = PanelContainer.new()
-	_loading.add_theme_stylebox_override("panel", _style(Color(0.1, 0.42, 0.5, 0.96), 0))
+	_loading.add_theme_stylebox_override("panel", _style(Color(0.1, 0.42, 0.5, 1.0), 0))
 	_loading.set_anchors_preset(Control.PRESET_FULL_RECT)
 	_loading.visible = false
 	root.add_child(_loading)
@@ -118,10 +137,80 @@ func _init() -> void:
 	_loading_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	_loading_label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 	_loading.add_child(_loading_label)
+	set_actions("", "")
 
 
-var _last_scores: Array = []
+# --- info & actions -----------------------------------------------------------
 
+func set_info(title: String, sub: String) -> void:
+	_title.text = title
+	_sub.text = sub
+
+
+func set_total(total: int, to_par: int) -> void:
+	_total.text = "" if total == 0 else "Round: %d (%s)" % [total, "E" if to_par == 0 else "%+d" % to_par]
+
+
+## Context buttons; "" hides a button.
+func set_actions(primary: String, secondary: String) -> void:
+	_primary.text = primary
+	_primary.visible = primary != ""
+	_secondary.text = secondary
+	_secondary.visible = secondary != ""
+
+
+func set_power(power: float, show: bool) -> void:
+	_power_back.visible = show
+	_power_fill.size.x = 412.0 * clampf(power, 0.0, 1.0)
+	var c := Color(0.35, 0.95, 0.4).lerp(Color(1.0, 0.85, 0.2), clampf(power * 2.0, 0.0, 1.0))
+	_power_fill.color = c.lerp(Color(1.0, 0.3, 0.25), clampf(power * 2.0 - 1.0, 0.0, 1.0))
+
+
+func toast(text: String) -> void:
+	_toast.text = text
+	_toast.modulate.a = 1.0
+	_toast_time = 1.8
+
+
+func set_hint(text: String) -> void:
+	_hint.text = text
+
+
+func show_banner(title: String, subtitle: String) -> void:
+	_banner_title.text = title
+	_banner_sub.text = subtitle
+	_banner.visible = true
+
+
+func hide_banner() -> void:
+	_banner.visible = false
+
+
+func banner_visible() -> bool:
+	return _banner.visible
+
+
+func show_loading(text: String) -> void:
+	_loading_label.text = text
+	_loading.visible = true
+
+
+func hide_loading() -> void:
+	_loading.visible = false
+
+
+func _process(delta: float) -> void:
+	if _toast_time > 0.0:
+		_toast_time -= delta
+		_toast.modulate.a = clampf(_toast_time / 0.5, 0.0, 1.0)
+
+
+func _on_banner_input(event: InputEvent) -> void:
+	if (event is InputEventScreenTouch and not event.pressed) or (event is InputEventMouseButton and not event.pressed):
+		banner_tapped.emit()
+
+
+# --- scorecard ----------------------------------------------------------------
 
 func _build_scorecard(root: Control) -> void:
 	_card = PanelContainer.new()
@@ -137,7 +226,7 @@ func _build_scorecard(root: Control) -> void:
 	var title := _label("Lagoon Links  ·  Scorecard", 34, INK)
 	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(title)
-	var hint := _label("Tap a hole number to play it", 20, Color(0.35, 0.45, 0.5))
+	var hint := _label("Tap a hole number to travel to its tee", 20, Color(0.35, 0.45, 0.5))
 	hint.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	v.add_child(hint)
 	_card_grid = GridContainer.new()
@@ -152,7 +241,7 @@ func _build_scorecard(root: Control) -> void:
 	buttons.alignment = BoxContainer.ALIGNMENT_CENTER
 	buttons.add_theme_constant_override("separation", 20)
 	v.add_child(buttons)
-	_card_again = _button("Play again", 26)
+	_card_again = _button("New round", 26)
 	_card_again.pressed.connect(func(): play_again.emit())
 	buttons.add_child(_card_again)
 	var close := _button("Close", 26)
@@ -177,8 +266,7 @@ func show_scorecard(scores: Array, final: bool) -> void:
 			_card_grid.add_child(b)
 		_card_grid.add_child(_cell("Par", true))
 		for i in range(half * 9, half * 9 + 9):
-			var par := int(Holes.get_hole(i + 1)["par"])
-			_card_grid.add_child(_cell(str(par), false))
+			_card_grid.add_child(_cell(str(Holes.get_hole(i + 1)["par"]), false))
 		_card_grid.add_child(_cell("Score", true))
 		for i in range(half * 9, half * 9 + 9):
 			var sc: int = scores[i] if i < scores.size() else 0
@@ -199,66 +287,11 @@ func hide_scorecard() -> void:
 	_card.visible = false
 
 
-func show_loading(text: String) -> void:
-	_loading_label.text = text
-	_loading.visible = true
+func scorecard_visible() -> bool:
+	return _card.visible
 
 
-func hide_loading() -> void:
-	_loading.visible = false
-
-
-## Persistent helper text above the power meter ("" hides it).
-func set_hint(text: String) -> void:
-	_hint.text = text
-
-
-func set_total(total: int, to_par: int) -> void:
-	_total.text = "" if total == 0 else "Round: %d (%s)" % [total, "E" if to_par == 0 else "%+d" % to_par]
-
-
-func setup(number: int, hole_name: String, par: int) -> void:
-	_hole_label.text = "Hole %d  ·  %s  ·  Par %d" % [number, hole_name, par]
-	set_strokes(0)
-
-
-func set_strokes(n: int) -> void:
-	_strokes.text = "Strokes: %d" % n
-
-
-func set_power(power: float, show: bool) -> void:
-	_power_back.visible = show
-	_power_fill.size.x = 412.0 * clampf(power, 0.0, 1.0)
-	var c := Color(0.35, 0.95, 0.4).lerp(Color(1.0, 0.85, 0.2), clampf(power * 2.0, 0.0, 1.0))
-	_power_fill.color = c.lerp(Color(1.0, 0.3, 0.25), clampf(power * 2.0 - 1.0, 0.0, 1.0))
-
-
-func toast(text: String) -> void:
-	_toast.text = text
-	_toast.modulate.a = 1.0
-	_toast_time = 1.8
-
-
-func show_banner(title: String, subtitle: String) -> void:
-	_banner_title.text = title
-	_banner_sub.text = subtitle
-	_banner.visible = true
-
-
-func hide_banner() -> void:
-	_banner.visible = false
-
-
-func _process(delta: float) -> void:
-	if _toast_time > 0.0:
-		_toast_time -= delta
-		_toast.modulate.a = clampf(_toast_time / 0.5, 0.0, 1.0)
-
-
-func _on_banner_input(event: InputEvent) -> void:
-	if (event is InputEventScreenTouch and not event.pressed) or (event is InputEventMouseButton and not event.pressed):
-		banner_tapped.emit()
-
+# --- helpers ------------------------------------------------------------------
 
 ## Pins a control to an anchor point of the screen with a fixed-size box.
 func _anchor(c: Control, anchor: Vector2, offset: Vector2, size: Vector2) -> void:
@@ -288,7 +321,7 @@ func _button(text: String, size: int) -> Button:
 	b.add_theme_color_override("font_color", INK)
 	b.add_theme_color_override("font_pressed_color", INK)
 	b.add_theme_color_override("font_hover_color", INK)
-	b.add_theme_stylebox_override("normal", _style(Color(1, 1, 1, 0.85), 22))
+	b.add_theme_stylebox_override("normal", _style(Color(1, 1, 1, 0.88), 22))
 	b.add_theme_stylebox_override("pressed", _style(Color(0.8, 0.94, 0.94, 0.95), 22))
 	b.add_theme_stylebox_override("hover", _style(Color(0.95, 0.98, 0.98, 0.95), 22))
 	return b
@@ -299,6 +332,14 @@ func _label(text: String, size: int, color: Color) -> Label:
 	l.text = text
 	l.add_theme_font_size_override("font_size", size)
 	l.add_theme_color_override("font_color", color)
+	return l
+
+
+func _outlined(text: String, size: int) -> Label:
+	var l := _label(text, size, Color.WHITE)
+	l.add_theme_constant_override("outline_size", 12)
+	l.add_theme_color_override("font_outline_color", INK)
+	l.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	return l
 
 
