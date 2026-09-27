@@ -32,10 +32,16 @@ if errorlevel 1 (
 echo Quest connected.
 echo.
 
+rem Run adb from its own folder so the commands below need no quoted path
+pushd "%LOCALAPPDATA%\Android\Sdk\platform-tools"
+
 set "PKG="
-for /f "usebackq tokens=2 delims=:" %%p in (`"%ADB%" shell "pm list packages | grep -i walk"`) do if not defined PKG set "PKG=%%p"
+for /f "usebackq tokens=2 delims=:" %%p in (`adb.exe shell "pm list packages | grep -iE 'walk|coconut'"`) do if not defined PKG set "PKG=%%p"
 if not defined PKG (
   echo Could not find Walkabout on the Quest. Is it installed?
+  echo.
+  echo Apps you installed on the Quest:
+  adb.exe shell pm list packages -3
   pause
   exit /b
 )
@@ -45,12 +51,12 @@ echo.
 if not exist "%OUT%" mkdir "%OUT%"
 
 echo Copying the app files...
-for /f "usebackq tokens=2 delims=:" %%a in (`"%ADB%" shell pm path %PKG%`) do "%ADB%" pull %%a "%OUT%"
+for /f "usebackq tokens=2 delims=:" %%a in (`adb.exe shell pm path %PKG%`) do adb.exe pull %%a "%OUT%"
 echo.
 
 echo Copying game data (can take several minutes)...
-"%ADB%" pull /sdcard/Android/obb/%PKG% "%OUT%\obb"
-"%ADB%" pull /sdcard/Android/data/%PKG% "%OUT%\data"
+adb.exe pull /sdcard/Android/obb/%PKG% "%OUT%\obb"
+adb.exe pull /sdcard/Android/data/%PKG% "%OUT%\data"
 echo.
 
 echo Done. Opening %OUT% ...
