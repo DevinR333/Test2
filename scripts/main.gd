@@ -66,7 +66,7 @@ func _ready() -> void:
 	scores.fill(0)
 	hud = Hud.new()
 	add_child(hud)
-	hud.show_loading("Lagoon Links")
+	hud.show_loading("Lagoon Links\n" + Hud.VERSION)
 	await get_tree().process_frame
 	await get_tree().process_frame
 
@@ -481,7 +481,8 @@ func _parse_args() -> void:
 
 
 func _take_screenshot() -> void:
-	hud.set_hint("")
+	if _args.has("fp") or _args.has("putt") or _args.has("aerial") or _args.has("view"):
+		hud.set_hint("")
 	if _args.has("fp"):
 		_travel_to_hole(int(_args["fp"]))
 		walker.pitch = -0.12

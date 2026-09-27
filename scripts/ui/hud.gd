@@ -10,6 +10,7 @@ signal hole_chosen(number: int)
 signal play_again
 
 const INK := Color(0.12, 0.25, 0.3)
+const VERSION := "v0.3 · open world"
 
 var joystick: JoystickView
 var minimap: Minimap
@@ -125,6 +126,13 @@ func _init() -> void:
 	_banner_sub = _label("", 28, INK)
 	_banner_sub.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
 	bbox.add_child(_banner_sub)
+
+	# Build tag so it's obvious which version is installed.
+	var tag := _label("Lagoon Links " + VERSION, 18, Color(1, 1, 1, 0.8))
+	tag.add_theme_constant_override("outline_size", 6)
+	tag.add_theme_color_override("font_outline_color", INK)
+	_anchor(tag, Vector2(0, 1), Vector2(16, -34), Vector2(420, 28))
+	root.add_child(tag)
 
 	_build_scorecard(root)
 
