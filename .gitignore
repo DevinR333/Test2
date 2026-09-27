@@ -1,0 +1,17 @@
+# Godot editor cache (the copy inside android/build/assets is exported data and is kept)
+/.godot/
+/build/
+*.apk
+*.aab
+
+# Android Studio / Gradle outputs
+android/build/.gradle/
+android/build/build/
+android/build/assetPacks/installTime/build/
+android/build/local.properties
+android/build/.idea/
+android/build/*.iml
+
+# Prebuilt Godot engine libraries (100 MB+ each). Gradle downloads the same
+# library from Maven Central when these are missing.
+android/build/libs/**/*.aar
