@@ -5,12 +5,14 @@ extends RefCounted
 const WATER_LEVEL := -0.55
 
 
-static func build(parent: Node3D, focus: Vector3) -> void:
+## golden = warm late-afternoon light (used on the back nine).
+static func build(parent: Node3D, focus: Vector3, golden := false) -> void:
 	var sky_mat := ProceduralSkyMaterial.new()
-	sky_mat.sky_top_color = Color(0.25, 0.55, 0.93)
-	sky_mat.sky_horizon_color = Color(0.72, 0.87, 0.97)
+	var horizon := Color(1.0, 0.76, 0.56) if golden else Color(0.72, 0.87, 0.97)
+	sky_mat.sky_top_color = Color(0.3, 0.42, 0.78) if golden else Color(0.25, 0.55, 0.93)
+	sky_mat.sky_horizon_color = horizon
 	sky_mat.sky_curve = 0.12
-	sky_mat.ground_horizon_color = Color(0.72, 0.87, 0.97)
+	sky_mat.ground_horizon_color = horizon
 	sky_mat.ground_bottom_color = Color(0.16, 0.45, 0.62)
 	sky_mat.sun_angle_max = 25.0
 	sky_mat.sun_curve = 0.1
@@ -31,7 +33,7 @@ static func build(parent: Node3D, focus: Vector3) -> void:
 	env.glow_bloom = 0.04
 	env.glow_hdr_threshold = 1.1
 	env.fog_enabled = true
-	env.fog_light_color = Color(0.74, 0.87, 0.97)
+	env.fog_light_color = horizon
 	env.fog_density = 0.006
 	env.fog_sky_affect = 0.0
 	env.fog_aerial_perspective = 0.3
@@ -44,15 +46,15 @@ static func build(parent: Node3D, focus: Vector3) -> void:
 
 	var sun := DirectionalLight3D.new()
 	sun.name = "Sun"
-	sun.light_color = Color(1.0, 0.95, 0.85)
-	sun.light_energy = 1.35
+	sun.light_color = Color(1.0, 0.78, 0.55) if golden else Color(1.0, 0.95, 0.85)
+	sun.light_energy = 1.45 if golden else 1.35
 	sun.shadow_enabled = true
 	sun.shadow_bias = 0.02
 	sun.shadow_normal_bias = 0.8
 	sun.shadow_blur = 1.5
 	sun.directional_shadow_mode = DirectionalLight3D.SHADOW_PARALLEL_2_SPLITS
 	sun.directional_shadow_max_distance = 30.0
-	sun.rotation = Vector3(deg_to_rad(-52.0), deg_to_rad(-35.0), 0.0)
+	sun.rotation = Vector3(deg_to_rad(-28.0 if golden else -52.0), deg_to_rad(-35.0), 0.0)
 	parent.add_child(sun)
 
 	# Faceted water: a subdivided plane whose vertices bob in the shader.

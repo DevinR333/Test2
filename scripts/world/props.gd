@@ -265,3 +265,137 @@ static func hole_sign(number: int, title: String, par: int) -> Node3D:
 		label.shaded = false
 		root.add_child(label)
 	return root
+
+
+## Decorative set pieces referenced from hole data ("decor").
+static func decor(d: Dictionary) -> Node3D:
+	match d["type"]:
+		"volcano":
+			return volcano()
+		"lighthouse":
+			return lighthouse()
+		"chest":
+			return treasure_chest()
+		"log_tunnel":
+			return log_tunnel()
+		"rock":
+			var s: float = d.get("size", 0.5)
+			var holder := Node3D.new()
+			holder.add_child(rock(int(s * 1000), Vector3(s, s * 0.8, s)))
+			return holder
+	push_warning("Unknown decor type %s" % d["type"])
+	return Node3D.new()
+
+
+static func _mesh_node(st: SurfaceTool, mat: Material = null) -> MeshInstance3D:
+	var mi := MeshInstance3D.new()
+	mi.mesh = MeshKit.finish(st)
+	mi.material_override = mat if mat else facet_mat()
+	return mi
+
+
+static func volcano() -> Node3D:
+	var root := Node3D.new()
+	root.name = "Volcano"
+	var st := MeshKit.begin()
+	MeshKit.prism(st, Vector3(0, -0.3, 0), 1.7, 1.1, 0.9, 9, Color(0.46, 0.38, 0.33), false)
+	MeshKit.prism(st, Vector3(0, 0.6, 0), 1.1, 0.5, 1.0, 9, Color(0.38, 0.31, 0.28), false, 0.3)
+	MeshKit.prism(st, Vector3(0, 1.6, 0), 0.5, 0.42, 0.1, 9, Color(0.3, 0.24, 0.22), false, 0.3)
+	root.add_child(_mesh_node(st))
+	var lava := MeshKit.begin()
+	MeshKit.prism(lava, Vector3(0, 1.55, 0), 0.42, 0.42, 0.1, 9, Color(1.0, 0.45, 0.1), true, 0.3)
+	for i in 3:
+		var a := i * 2.1
+		var p0 := Vector3(cos(a) * 0.4, 1.62, sin(a) * 0.4)
+		var p1 := Vector3(cos(a) * 0.75, 1.0, sin(a) * 0.75)
+		var side := Vector3(-sin(a), 0, cos(a)) * 0.09
+		MeshKit.face(lava, p0 - side, p0 + side, p1, Color(1.0, 0.5, 0.12), Vector3(cos(a), 0.6, sin(a)))
+	var glow := StandardMaterial3D.new()
+	glow.vertex_color_use_as_albedo = true
+	glow.emission_enabled = true
+	glow.emission = Color(1.0, 0.4, 0.05)
+	glow.emission_energy_multiplier = 1.6
+	root.add_child(_mesh_node(lava, glow))
+	return root
+
+
+static func lighthouse() -> Node3D:
+	var root := Node3D.new()
+	root.name = "Lighthouse"
+	var st := MeshKit.begin()
+	var red := Color(0.88, 0.25, 0.22)
+	var white := Color(0.97, 0.95, 0.9)
+	MeshKit.prism(st, Vector3(0, -0.2, 0), 0.75, 0.62, 0.3, 8, Color(0.6, 0.58, 0.55))
+	var bands := 5
+	for i in bands:
+		var t0 := float(i) / bands
+		var t1 := float(i + 1) / bands
+		MeshKit.prism(st, Vector3(0, 0.1 + t0 * 2.4, 0), lerpf(0.48, 0.32, t0), lerpf(0.48, 0.32, t1), 2.4 / bands, 8, red if i % 2 == 0 else white, false)
+	MeshKit.prism(st, Vector3(0, 2.5, 0), 0.46, 0.46, 0.06, 8, Color(0.2, 0.2, 0.22))
+	MeshKit.prism(st, Vector3(0, 2.56, 0), 0.26, 0.26, 0.34, 8, Color(0.3, 0.3, 0.32), false)
+	MeshKit.prism(st, Vector3(0, 2.9, 0), 0.34, 0.0, 0.34, 8, red, false)
+	root.add_child(_mesh_node(st))
+	var lamp := MeshKit.begin()
+	MeshKit.prism(lamp, Vector3(0, 2.6, 0), 0.2, 0.2, 0.26, 8, Color(1.0, 0.92, 0.5))
+	var glow := StandardMaterial3D.new()
+	glow.vertex_color_use_as_albedo = true
+	glow.emission_enabled = true
+	glow.emission = Color(1.0, 0.85, 0.4)
+	glow.emission_energy_multiplier = 2.0
+	root.add_child(_mesh_node(lamp, glow))
+	return root
+
+
+static func treasure_chest() -> Node3D:
+	var root := Node3D.new()
+	root.name = "Chest"
+	var st := MeshKit.begin()
+	var wood := Color(0.55, 0.33, 0.17)
+	var gold := Color(1.0, 0.8, 0.25)
+	MeshKit.box(st, Vector3(0, 0.14, 0), Vector3(0.55, 0.28, 0.36), wood)
+	MeshKit.box(st, Vector3(0, 0.14, 0), Vector3(0.57, 0.05, 0.38), gold)
+	MeshKit.box(st, Vector3(0, 0.3, 0), Vector3(0.5, 0.06, 0.32), gold.lightened(0.1))
+	root.add_child(_mesh_node(st))
+	var lid := MeshKit.begin()
+	MeshKit.box(lid, Vector3(0, 0.05, 0.16), Vector3(0.56, 0.1, 0.34), wood.darkened(0.1))
+	var lid_node := _mesh_node(lid)
+	lid_node.position = Vector3(0, 0.28, -0.18)
+	lid_node.rotation.x = -1.0
+	root.add_child(lid_node)
+	return root
+
+
+## Hollow log arch the lane passes under (decoration only).
+static func log_tunnel() -> Node3D:
+	var root := Node3D.new()
+	root.name = "LogTunnel"
+	var st := MeshKit.begin()
+	var bark := Color(0.45, 0.3, 0.18)
+	var inner := Color(0.8, 0.62, 0.4)
+	var r_out := 0.95
+	var r_in := 0.85
+	var half_len := 0.55
+	var sides := 10
+	for s in sides:
+		var a0 := PI * float(s) / sides
+		var a1 := PI * float(s + 1) / sides
+		var o0 := Vector3(cos(a0) * r_out, sin(a0) * r_out * 0.7, 0)
+		var o1 := Vector3(cos(a1) * r_out, sin(a1) * r_out * 0.7, 0)
+		var i0 := Vector3(cos(a0) * r_in, sin(a0) * r_in * 0.7, 0)
+		var i1 := Vector3(cos(a1) * r_in, sin(a1) * r_in * 0.7, 0)
+		var f := Vector3(0, 0, half_len)
+		var out_n := (o0 + o1).normalized()
+		var shade := bark.darkened(0.06 * (s % 2))
+		MeshKit.face(st, o0 - f, o1 - f, o1 + f, shade, out_n)
+		MeshKit.face(st, o0 - f, o1 + f, o0 + f, shade, out_n)
+		MeshKit.face(st, i0 - f, i1 - f, i1 + f, inner.darkened(0.2), -out_n)
+		MeshKit.face(st, i0 - f, i1 + f, i0 + f, inner.darkened(0.2), -out_n)
+		for z in [-1.0, 1.0]:
+			var zf: Vector3 = f * z
+			MeshKit.face(st, o0 + zf, o1 + zf, i1 + zf, inner, Vector3(0, 0, z))
+			MeshKit.face(st, o0 + zf, i1 + zf, i0 + zf, inner, Vector3(0, 0, z))
+	# Legs down past the rail walls into the ground.
+	for x in [-1.0, 1.0]:
+		MeshKit.box(st, Vector3(x * (r_out + r_in) * 0.5, -0.25, 0), Vector3(r_out - r_in, 0.5, half_len * 2.0), bark)
+	root.add_child(_mesh_node(st))
+	return root

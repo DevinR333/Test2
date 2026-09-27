@@ -14,13 +14,17 @@ var _noise := FastNoiseLite.new()
 var _detail := FastNoiseLite.new()
 
 
-func _init(course_field: CourseField, island_centre: Vector2, island_radius: float) -> void:
+var seed_value := 0
+
+
+func _init(course_field: CourseField, island_centre: Vector2, island_radius: float, variation := 0) -> void:
 	field = course_field
 	centre = island_centre
 	radius = island_radius
-	_noise.seed = 11
+	seed_value = variation
+	_noise.seed = 11 + variation * 17
 	_noise.frequency = 0.06
-	_detail.seed = 3
+	_detail.seed = 3 + variation * 5
 	_detail.frequency = 0.28
 
 
@@ -40,7 +44,7 @@ func height_at(p: Vector2) -> float:
 		var k := 1.0 - smoothstep(pr * 0.55, pr * 1.25, p.distance_to(pc))
 		h = lerpf(h, -1.2, k)
 	var s := field.sample(p)
-	var near := 1.0 - smoothstep(CourseBuilder.RAIL_WIDTH, CourseBuilder.RAIL_WIDTH + 2.0, s.x)
+	var near := 1.0 - smoothstep(CourseBuilder.RAIL_WIDTH, CourseBuilder.RAIL_WIDTH + 1.4, s.x)
 	h = lerpf(h, s.y - 0.3, near)
 	return h
 
@@ -121,7 +125,7 @@ func _place(parent: Node3D, node: Node3D, p: Vector2, sink := 0.02) -> void:
 
 func _scatter(parent: Node3D) -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 1234
+	rng.seed = 1234 + seed_value
 
 	# Grass tufts and flower patches via MultiMesh (cheap on mobile).
 	var tufts: Array = []
@@ -183,14 +187,26 @@ func _scatter(parent: Node3D) -> void:
 			parent.add_child(pad)
 
 
-func place_palms(parent: Node3D, spots: Array) -> void:
+## Scatters palms around the course, keeping them off the lane and apart.
+func place_palms(parent: Node3D, count: int, seed_value: int) -> void:
 	var rng := RandomNumberGenerator.new()
-	rng.seed = 77
-	for s: Vector2 in spots:
-		if not is_land(s, 0.6):
-			push_warning("Palm at %s skipped: not on land" % s)
+	rng.seed = seed_value
+	var placed: Array = []
+	var tries := 0
+	while placed.size() < count and tries < 2000:
+		tries += 1
+		var p := centre + Vector2(rng.randf_range(-1, 1), rng.randf_range(-1, 1)) * radius * 0.95
+		var d := field.sample(p).x
+		if d < 1.8 or d > 6.0 or not is_land(p, 0.8):
 			continue
-		_place(parent, Props.palm(rng.randi(), rng.randf_range(2.6, 3.6)), s, 0.05)
+		var ok := true
+		for q: Vector2 in placed:
+			if q.distance_to(p) < 2.4:
+				ok = false
+				break
+		if ok:
+			placed.append(p)
+			_place(parent, Props.palm(rng.randi(), rng.randf_range(2.6, 3.6)), p, 0.05)
 
 
 func _multimesh(parent: Node3D, mesh: Mesh, xforms: Array, mat: Material) -> void:

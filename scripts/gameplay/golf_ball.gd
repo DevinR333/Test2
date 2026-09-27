@@ -80,10 +80,11 @@ func _integrate_forces(state: PhysicsDirectBodyState3D) -> void:
 		return
 	var v := state.linear_velocity
 	var speed := v.length()
-	if grounded and speed > 0.0:
-		var factor := maxf(speed - rolling_resistance * state.step, 0.0) / speed
-		state.linear_velocity = v * factor
-		state.angular_velocity *= factor
+	if grounded:
+		if speed > 0.0:
+			var factor := maxf(speed - rolling_resistance * state.step, 0.0) / speed
+			state.linear_velocity = v * factor
+			state.angular_velocity *= factor
 		if speed < rest_speed:
 			_still_time += state.step
 			if _still_time > 0.35:
