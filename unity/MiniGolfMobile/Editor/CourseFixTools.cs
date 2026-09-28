@@ -136,8 +136,13 @@ namespace MiniGolfMobile.EditorTools
             string mainProp = urp ? "_BaseMap" : "_MainTex";
             string colorProp = urp ? "_BaseColor" : "_Color";
 
-            var main = Pick(saved.textures, MainTexNames, n => Regex.IsMatch(n, "albedo|base|main|diff|col", RegexOptions.IgnoreCase)
-                                                             && !Regex.IsMatch(n, "normal|bump|mask|emis|light|detail|noise", RegexOptions.IgnoreCase), anyAsLastResort: true);
+            // Pattern textures (dots, noise, masks...) are mixed in by the game's shaders; they aren't the picture of the surface.
+            var pictures = saved.textures
+                .Where(kv => !Regex.IsMatch(kv.Value.tex.name + " " + kv.Key, PatternTexture, RegexOptions.IgnoreCase))
+                .ToDictionary(kv => kv.Key, kv => kv.Value);
+            var main = Pick(pictures, MainTexNames, n => Regex.IsMatch(n, "albedo|base|main|diff|col", RegexOptions.IgnoreCase)
+                                                        && !Regex.IsMatch(n, "normal|bump|mask|emis|light|detail|noise", RegexOptions.IgnoreCase), anyAsLastResort: true);
+            if (!main.HasValue) mat.SetTexture(mainProp, null);
             if (main.HasValue)
             {
                 mat.SetTexture(mainProp, main.Value.tex);
@@ -146,16 +151,8 @@ namespace MiniGolfMobile.EditorTools
                 if (urp && mat.HasProperty("_MainTex")) mat.SetTexture("_MainTex", main.Value.tex);
             }
 
-            Color color = Color.white;
-            foreach (var n in ColorNames)
-                if (saved.colors.TryGetValue(n, out var c)) { color = c; break; }
-            if (!main.HasValue && color == Color.white)
-            {
-                // Untextured and uncoloured would stay plain white; use any colour the material had instead.
-                var any = saved.colors.FirstOrDefault(kv => !Regex.IsMatch(kv.Key, "emis|spec|rim|fresnel", RegexOptions.IgnoreCase));
-                if (any.Key != null) color = any.Value;
-            }
-            color.a = Mathf.Max(color.a, 0.01f);
+            Color color = ChooseColor(saved, mat.name, textured: main.HasValue);
+            color.a = 1f;
             mat.SetColor(colorProp, color);
 
             var normal = Pick(saved.textures, NormalNames, n => Regex.IsMatch(n, "normal|bump", RegexOptions.IgnoreCase));
@@ -192,6 +189,43 @@ namespace MiniGolfMobile.EditorTools
 
             if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.2f);
             if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", 0.2f);
+        }
+
+        const string PatternTexture = "dot|noise|mask|grad|caustic|ramp|lut|pattern|cloud|flow|foam|ripple|wave|streak|sparkle|gloss|matcap|cube|reflect";
+
+        // Colour properties that describe lighting or effects rather than the surface itself.
+        const string NotSurfaceColor = "rim|fog|caustic|emis|spec|sun|light|vector|pan|scale|offset|rotation|shadow|outline|fresnel|reflect|position|wave|tint|glow|fade|edge|foam|depth|horizon|sky|ambient";
+
+        static readonly string[] SurfaceWords = { "sand", "grass", "green", "turf", "ground", "dirt", "rock", "stone", "wood", "leaf", "leaves", "palm", "trunk", "bark", "water", "metal", "brick", "roof", "wall", "path", "concrete" };
+
+        // The game's shaders keep the real colour in custom properties like _SandColor or Color_F87F0502,
+        // while _Color/_BaseColor are often left white. Score each colour and take the best.
+        static Color ChooseColor(Saved saved, string materialName, bool textured)
+        {
+            string matLower = materialName.ToLowerInvariant();
+            Color best = Color.white;
+            int bestScore = int.MinValue;
+            foreach (var kv in saved.colors)
+            {
+                string key = kv.Key.ToLowerInvariant();
+                Color c = kv.Value;
+                if (Regex.IsMatch(key, NotSurfaceColor)) continue;
+                bool nearWhite = c.r > 0.97f && c.g > 0.97f && c.b > 0.97f;
+                bool nearBlack = c.maxColorComponent < 0.02f;
+                if (nearWhite || nearBlack) continue;
+
+                int score = 0;
+                foreach (var w in SurfaceWords)
+                    if (key.Contains(w) && matLower.Contains(w)) score += 6;
+                    else if (key.Contains(w)) score += 1;
+                if (Regex.IsMatch(key, "albedo|diffuse|main|base|top|surface")) score += 3;
+                if (key.Contains("color")) score += 1;
+                if (key == "_color" || key == "_basecolor") score += textured ? 2 : 0;
+                if (score > bestScore) { bestScore = score; best = c; }
+            }
+            // A textured surface keeps its texture's own colours unless the material clearly tints it.
+            if (textured && bestScore < 3) return Color.white;
+            return best;
         }
 
         static (Texture tex, Vector2 scale, Vector2 offset)? Pick(Dictionary<string, (Texture, Vector2, Vector2)> textures,
