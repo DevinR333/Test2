@@ -55,7 +55,7 @@ $Here     = $PSScriptRoot
 $GameDir  = Join-Path $WorkDir 'game'
 $FableDir = Join-Path $WorkDir 'Fable-2-Recomp'
 $SdkDir   = Join-Path $WorkDir 'rexglue-sdk'
-$HostDir  = Join-Path $WorkDir 'build-host'
+$HostDir  = Join-Path $WorkDir 'build-host-sdk'
 $SdkRoot  = Join-Path $WorkDir 'android-sdk'
 
 function Step($text) { Write-Host "`n=== $text ===" -ForegroundColor Cyan }
@@ -387,13 +387,19 @@ if (-not (Test-Path $stamp)) {
     $rexglue = Join-Path $SdkDir 'out\win-amd64\rexglue.exe'
     if (-not (Test-Path $rexglue)) {
         Info 'Building the rexglue code generator for Windows ...'
-        Run cmake @('-S', $SdkDir, '-B', $HostDir, '-G', 'Ninja',
+        # Configured exactly like the recomp author's tools\build_sdk_vulkan.cmd:
+        # through their tools\vulkan_sdk wrapper (skips the SDK's broken
+        # top-level install step) with Vulkan + D3D12 on. On Windows the fork
+        # exports a fixed symbol list from rexruntime.dll (rexruntime.def)
+        # that includes Vulkan functions, so a D3D12-only build cannot link.
+        Run cmake @('-S', (Join-Path $FableDir 'tools\vulkan_sdk'), '-B', $HostDir, '-G', 'Ninja',
                     '-DCMAKE_BUILD_TYPE=Release',
                     '-DCMAKE_C_COMPILER=clang', '-DCMAKE_CXX_COMPILER=clang++',
-                    # Same as the SDK's own windows preset: the runtime uses
-                    # SSSE3/SSE4 intrinsics, which clang rejects without it.
+                    # Same flags as the SDK's windows preset: the runtime uses
+                    # SSSE3/SSE4 intrinsics, which clang rejects without them.
                     '-DCMAKE_C_FLAGS=-march=x86-64-v2', '-DCMAKE_CXX_FLAGS=-march=x86-64-v2',
                     '-DCMAKE_CXX_STANDARD=23',
+                    "-DREXGLUE_SDK_SOURCE=$($SdkDir -replace '\\', '/')",
                     '-DREXGLUE_ENABLE_TRACY=OFF')
         Run-Build cmake @('--build', $HostDir, '--target', 'rexglue', '--', '-k', '0') (Join-Path $WorkDir 'build-host.log')
     }
