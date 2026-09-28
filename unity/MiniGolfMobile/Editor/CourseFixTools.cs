@@ -71,7 +71,10 @@ namespace MiniGolfMobile.EditorTools
                         mat.shader = particle && unlit ? unlit : lit;
                         Apply(mat, saved, urp);
                         if (mat.HasProperty("_UseVertexColor"))
-                            mat.SetFloat("_UseVertexColor", vertexColored.Contains(mat) ? 1f : 0f);
+                        {
+                            bool isWater = Regex.IsMatch(mat.name, "water|ocean|sea|lake|pond|river|pool", RegexOptions.IgnoreCase);
+                            mat.SetFloat("_UseVertexColor", vertexColored.Contains(mat) && !isWater ? 1f : 0f);
+                        }
                     }
                     EditorUtility.SetDirty(mat);
                     converted++;
@@ -81,10 +84,48 @@ namespace MiniGolfMobile.EditorTools
             {
                 EditorUtility.ClearProgressBar();
             }
+            int sceneFixed = FixBrokenSceneMaterials(lit);
             AssetDatabase.SaveAssets();
             report.AppendLine($"Materials switched: {converted}  (left alone: {skipped})");
+            report.AppendLine($"Pink materials in this scene fixed: {sceneFixed}");
             Debug.Log("Mini Golf: " + report);
             EditorUtility.DisplayDialog("Mini Golf", report.ToString(), "OK");
+        }
+
+        static bool IsBroken(Material m) => m && (!m.shader || m.shader.name == "Hidden/InternalErrorShader" || !m.shader.isSupported);
+
+        static int FixBrokenSceneMaterials(Shader lit)
+        {
+            Shader particleShader = Shader.Find("Particles/Standard Unlit");
+            if (!particleShader) particleShader = Shader.Find("Legacy Shaders/Particles/Alpha Blended");
+            var done = new HashSet<Material>();
+            foreach (var r in Object.FindObjectsByType<Renderer>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                bool effect = r is ParticleSystemRenderer || r is TrailRenderer || r is LineRenderer;
+                foreach (var m in r.sharedMaterials)
+                {
+                    if (!IsBroken(m) || done.Contains(m)) continue;
+                    if (Regex.IsMatch(m.name + (m.shader ? m.shader.name : ""), "TextMesh|TMP|Font|SDF", RegexOptions.IgnoreCase)) continue;
+                    var saved = ReadSavedProperties(m);
+                    Undo.RecordObject(m, "Fix material");
+                    if (effect && particleShader)
+                    {
+                        m.shader = particleShader;
+                        var tex = saved.textures.Values.Select(v => v.tex).FirstOrDefault();
+                        if (tex) m.SetTexture("_MainTex", tex);
+                        foreach (var n in ColorNames)
+                            if (saved.colors.TryGetValue(n, out var c)) { m.SetColor("_Color", c); break; }
+                    }
+                    else
+                    {
+                        m.shader = lit;
+                        Apply(m, saved, false);
+                    }
+                    EditorUtility.SetDirty(m);
+                    done.Add(m);
+                }
+            }
+            return done.Count;
         }
 
         // Custom shaders from the export live under Assets/; Unity's own shaders live in packages or are built in.
@@ -156,6 +197,19 @@ namespace MiniGolfMobile.EditorTools
             color.a = 1f;
             mat.SetColor(colorProp, color);
             if (water) mat.SetTexture(mainProp, null);
+
+            // Nothing but a pattern texture (e.g. a grass pattern on the greens): better to show that than plain white.
+            if (!water && !main.HasValue && color == Color.white)
+            {
+                var pattern = saved.textures.Where(kv => !Regex.IsMatch(kv.Key, "normal|bump|emis|noise|caustic|flow", RegexOptions.IgnoreCase))
+                    .Select(kv => kv.Value).Cast<(Texture tex, Vector2 scale, Vector2 offset)?>().FirstOrDefault();
+                if (pattern.HasValue)
+                {
+                    mat.SetTexture(mainProp, pattern.Value.tex);
+                    mat.SetTextureScale(mainProp, pattern.Value.scale);
+                    mat.SetTextureOffset(mainProp, pattern.Value.offset);
+                }
+            }
 
             var normal = Pick(saved.textures, NormalNames, n => Regex.IsMatch(n, "normal|bump", RegexOptions.IgnoreCase));
             if (normal.HasValue && mat.HasProperty("_BumpMap"))
@@ -353,9 +407,11 @@ namespace MiniGolfMobile.EditorTools
                 if (l.intensity > 2f) { l.intensity = 2f; tamed++; }
                 l.lightmapBakeType = LightmapBakeType.Realtime;
                 l.shadows = LightShadows.None;
+                l.renderMode = LightRenderMode.ForceVertex;
             }
             report.AppendLine($"Sun: {sun.name}; other lights adjusted: {tamed}");
 
+            QualitySettings.pixelLightCount = 1;
             DynamicGI.UpdateEnvironment();
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
             report.AppendLine("Save the scene (Ctrl+S).");
