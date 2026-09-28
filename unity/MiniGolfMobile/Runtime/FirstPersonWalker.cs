@@ -18,6 +18,8 @@ namespace MiniGolfMobile
         public float gravity = 15f;
         public float tapMaxMove = 12f;
         public float tapMaxTime = 0.35f;
+        [Tooltip("The player's feet never go below this height (lets you wade in the sea). Set automatically from the water level.")]
+        public float minFeetHeight = float.NegativeInfinity;
 
         public event Action<Vector2> Tapped;
 
@@ -93,6 +95,15 @@ namespace MiniGolfMobile
             fallSpeed = controller.isGrounded ? -1f : fallSpeed - gravity * Time.deltaTime;
             velocity.y = fallSpeed;
             controller.Move(velocity * Time.deltaTime);
+
+            // Standing on the sea bed: wade instead of sinking.
+            if (transform.position.y < minFeetHeight)
+            {
+                controller.enabled = false;
+                transform.position = new Vector3(transform.position.x, minFeetHeight, transform.position.z);
+                controller.enabled = true;
+                fallSpeed = 0f;
+            }
         }
 
         static bool Input_NoTouches() => TouchSticks.ReadFingers().Count == 0;

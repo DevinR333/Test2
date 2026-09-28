@@ -151,9 +151,11 @@ namespace MiniGolfMobile.EditorTools
                 if (urp && mat.HasProperty("_MainTex")) mat.SetTexture("_MainTex", main.Value.tex);
             }
 
-            Color color = ChooseColor(saved, mat.name, textured: main.HasValue);
+            bool water = Regex.IsMatch(mat.name, "water|ocean|sea|lake|pond|river|pool", RegexOptions.IgnoreCase);
+            Color color = water ? WaterColor(saved) : ChooseColor(saved, mat.name, textured: main.HasValue);
             color.a = 1f;
             mat.SetColor(colorProp, color);
+            if (water) mat.SetTexture(mainProp, null);
 
             var normal = Pick(saved.textures, NormalNames, n => Regex.IsMatch(n, "normal|bump", RegexOptions.IgnoreCase));
             if (normal.HasValue && mat.HasProperty("_BumpMap"))
@@ -187,8 +189,8 @@ namespace MiniGolfMobile.EditorTools
                 mat.renderQueue = (int)RenderQueue.AlphaTest;
             }
 
-            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.2f);
-            if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", 0.2f);
+            if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", water ? 0.85f : 0.2f);
+            if (mat.HasProperty("_Glossiness")) mat.SetFloat("_Glossiness", water ? 0.85f : 0.2f);
         }
 
         const string PatternTexture = "dot|noise|mask|grad|caustic|ramp|lut|pattern|cloud|flow|foam|ripple|wave|streak|sparkle|gloss|matcap|cube|reflect";
@@ -226,6 +228,16 @@ namespace MiniGolfMobile.EditorTools
             // A textured surface keeps its texture's own colours unless the material clearly tints it.
             if (textured && bestScore < 3) return Color.white;
             return best;
+        }
+
+        static Color WaterColor(Saved saved)
+        {
+            foreach (var pattern in new[] { "shallow", "water", "surface", "top", "deep" })
+                foreach (var kv in saved.colors)
+                    if (kv.Key.ToLowerInvariant().Contains(pattern) && kv.Value.maxColorComponent > 0.1f
+                        && !(kv.Value.r > 0.97f && kv.Value.g > 0.97f && kv.Value.b > 0.97f))
+                        return kv.Value;
+            return new Color(0.16f, 0.55f, 0.72f);
         }
 
         static (Texture tex, Vector2 scale, Vector2 offset)? Pick(Dictionary<string, (Texture, Vector2, Vector2)> textures,
@@ -374,7 +386,8 @@ namespace MiniGolfMobile.EditorTools
                 bool pinMarker = go.GetComponentsInParent<MonoBehaviour>(true).Any(m => m && (m.GetType().Name == "Pin" || m.GetType().Name == "CustomPin"));
                 bool broken = r.sharedMaterials.Any(m => !m || !m.shader || m.shader.name == "Hidden/InternalErrorShader" || !m.shader.isSupported);
                 bool simpleBox = go.GetComponent<MeshFilter>() is var f && f && f.sharedMesh && f.sharedMesh.name.StartsWith("Cube");
-                if (!(trigger || helperName || pinMarker || (broken && simpleBox)) || !r.enabled) continue;
+                bool magenta = r.sharedMaterials.Any(IsDebugMagenta);
+                if (!(trigger || helperName || pinMarker || magenta || (broken && simpleBox)) || !r.enabled) continue;
                 if (Regex.IsMatch(go.name, "water", RegexOptions.IgnoreCase) && !trigger) continue;
                 Undo.RecordObject(r, "Hide helper");
                 r.enabled = false;
@@ -384,6 +397,18 @@ namespace MiniGolfMobile.EditorTools
             string msg = $"Hid {hidden} helper objects. Save the scene (Ctrl+S).";
             Debug.Log("Mini Golf: " + msg);
             EditorUtility.DisplayDialog("Mini Golf", msg, "OK");
+        }
+
+        static bool IsDebugMagenta(Material m)
+        {
+            if (!m) return false;
+            foreach (var prop in new[] { "_Color", "_BaseColor" })
+            {
+                if (!m.HasProperty(prop)) continue;
+                Color c = m.GetColor(prop);
+                if (c.r > 0.6f && c.b > 0.6f && c.g < 0.35f) return true;
+            }
+            return Regex.IsMatch(m.name, "debug|trigger|invisible|volume|nodraw|hidden|blocker", RegexOptions.IgnoreCase);
         }
 
         [MenuItem("Mini Golf/Copy Selected Object's Material Info", priority = 41)]

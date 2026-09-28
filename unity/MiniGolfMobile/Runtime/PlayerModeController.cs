@@ -26,8 +26,10 @@ namespace MiniGolfMobile
 
         public bool Putting { get; private set; }
 
-        [Tooltip("Respawn the player if they fall this far below where they started.")]
-        public float fallRespawnDepth = 15f;
+        [Tooltip("Respawn the player if they somehow fall this far below where they started.")]
+        public float fallRespawnDepth = 40f;
+        [Tooltip("How deep the player wades into water (metres below the water surface).")]
+        public float wadeDepth = 0.5f;
 
         Vector3 spawnPosition;
         Quaternion spawnRotation;
@@ -38,7 +40,6 @@ namespace MiniGolfMobile
             {
                 Vector3 target = course.ActiveHole && ball.gameObject.activeInHierarchy ? ball.transform.position : spawnPosition;
                 walker.TeleportTo(target + Vector3.up * 0.1f, target + spawnRotation * Vector3.forward * 3f);
-                course.ShowBanner("Oops, fell off!", 1.5f);
             }
         }
 
@@ -57,6 +58,7 @@ namespace MiniGolfMobile
                 for (int other = 0; other < 32; other++)
                     Physics.IgnoreLayerCollision(layer, other, false);
 
+            walker.minFeetHeight = WaterLevel() - wadeDepth;
             spawnPosition = walker.transform.position;
             spawnRotation = walker.transform.rotation;
             walker.Tapped += OnWalkerTap;
@@ -64,6 +66,23 @@ namespace MiniGolfMobile
             course.HoleFinished += _ => EnterWalk();
             LostBallPickup.RecordTotalForActiveScene();
             EnterWalk();
+        }
+
+        // Height of the sea: the top of the largest water surface in the scene.
+        float WaterLevel()
+        {
+            float level = float.NegativeInfinity, biggest = 0f;
+            foreach (var r in FindObjectsByType<MeshRenderer>(FindObjectsSortMode.None))
+            {
+                string n = r.name + " " + (r.sharedMaterial ? r.sharedMaterial.name : "");
+                if (!System.Text.RegularExpressions.Regex.IsMatch(n, "water|ocean|sea", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) continue;
+                if (r.GetComponent<Collider>() is Collider col && col.isTrigger) continue;
+                var b = r.bounds;
+                float area = b.size.x * b.size.z;
+                if (area > biggest) { biggest = area; level = b.max.y; }
+            }
+            // No water found: allow walking down to a little below the start.
+            return biggest > 25f ? level : walker.transform.position.y - 3f;
         }
 
         void OnWalkerTap(Vector2 screenPos)
