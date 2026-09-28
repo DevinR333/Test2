@@ -270,11 +270,19 @@ Run git @('config', '--global', 'core.longpaths', 'true')
 function Checkout-Pinned {
     param([string]$Url, [string]$Commit, [string]$Dir)
     if (-not (Test-Path (Join-Path $Dir '.git'))) {
-        Run git @('clone', '--filter=blob:none', $Url, $Dir)
+        Run git @('-c', 'core.autocrlf=false', 'clone', '--filter=blob:none', $Url, $Dir)
     }
+    # Git for Windows converts line endings to CRLF on checkout by default,
+    # which makes every patch below fail to apply. Keep files exactly as
+    # committed (the compilers do not care either way).
+    Run git @('-C', $Dir, 'config', 'core.autocrlf', 'false')
     Run git @('-C', $Dir, 'fetch', '--quiet', 'origin', $Commit)
     # Start from a clean tree so patches apply the same way on every run.
+    # Dropping the index forces files written by an earlier CRLF checkout to
+    # be rewritten by the reset.
     Run git @('-C', $Dir, 'checkout', '--quiet', '--force', $Commit)
+    Run git @('-C', $Dir, 'rm', '-r', '-q', '--cached', '--ignore-unmatch', '.')
+    Run git @('-C', $Dir, 'reset', '--quiet', '--hard')
     Run git @('-C', $Dir, 'clean', '-fdq', '-e', 'generated/', '-e', 'out/', '-e', 'default.xex')
 }
 
@@ -302,6 +310,7 @@ foreach ($line in $pins) {
         New-Item -ItemType Directory -Force -Path $sub | Out-Null
         Run git @('-C', $sub, 'init', '--quiet')
     }
+    Run git @('-C', $sub, 'config', 'core.autocrlf', 'false')
     Native { & git -C $sub remote remove origin 2>$null } | Out-Null
     Run git @('-C', $sub, 'remote', 'add', 'origin', $url)
     Run git @('-C', $sub, 'fetch', '--quiet', '--depth', '1', 'origin', $sha)
