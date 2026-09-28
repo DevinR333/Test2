@@ -84,6 +84,28 @@ function Native([scriptblock]$Block) {
     & $Block
 }
 
+# Run a long build: keep going past the first failure, save everything to a
+# log, and on failure print every distinct error together (the console
+# scrollback usually only shows warnings by the time the build stops).
+function Run-Build {
+    param([string]$Exe, [string[]]$Arguments, [string]$Log, [string]$Dir = $null)
+    $ErrorActionPreference = 'Continue'
+    if ($Dir) { Push-Location $Dir }
+    try {
+        & $Exe @Arguments 2>&1 | ForEach-Object { "$_" } | Tee-Object -FilePath $Log | Out-Host
+        $code = $LASTEXITCODE
+    } finally {
+        if ($Dir) { Pop-Location }
+    }
+    if ($code -ne 0) {
+        Write-Host "`n----- errors (full log: $Log) -----" -ForegroundColor Red
+        Select-String -Path $Log -Pattern '(error:|error [A-Z]+\d+|FAILED:|fatal error|undefined (symbol|reference)|What went wrong)' |
+            ForEach-Object { $_.Line.Trim() } | Select-Object -Unique -First 60 |
+            ForEach-Object { Write-Host $_ -ForegroundColor Red }
+        Fail "Build failed (exit $code). Send a screenshot of the red lines above, or the file $Log"
+    }
+}
+
 function Refresh-Path {
     $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
                 [Environment]::GetEnvironmentVariable('Path', 'User')
@@ -369,7 +391,7 @@ if (-not (Test-Path $stamp)) {
                     '-DCMAKE_BUILD_TYPE=Release',
                     '-DCMAKE_C_COMPILER=clang', '-DCMAKE_CXX_COMPILER=clang++',
                     '-DREXGLUE_ENABLE_TRACY=OFF')
-        Run cmake @('--build', $HostDir, '--target', 'rexglue')
+        Run-Build cmake @('--build', $HostDir, '--target', 'rexglue', '--', '-k', '0') (Join-Path $WorkDir 'build-host.log')
     }
     Copy-Item (Join-Path $GameDir 'default.xex') (Join-Path $FableDir 'default.xex') -Force
     Info 'Running codegen (several minutes) ...'
@@ -394,14 +416,14 @@ $props = @(
 )
 Set-Content -Path (Join-Path $androidDir 'local.properties') -Value $props -Encoding ASCII
 
-Run (Join-Path $androidDir 'gradlew.bat') @(
-    'assembleRelease', '--no-daemon', '--console=plain',
+Run-Build (Join-Path $androidDir 'gradlew.bat') @(
+    'assembleRelease', '--no-daemon', '--console=plain', '--continue',
     "-Pfable2Dir=$($FableDir -replace '\\', '/')",
     "-PrexsdkDir=$($SdkDir -replace '\\', '/')",
     "-Pfable2CmakeVersion=$cmakeVersion",
     "-Pfable2Ninja=$($ninjaExe -replace '\\', '/')",
     "-Pfable2Staging=$((Join-Path $WorkDir 'cxx') -replace '\\', '/')"
-) $androidDir
+) (Join-Path $WorkDir 'build-android.log') $androidDir
 
 $apkOut = Join-Path $androidDir 'app\build\outputs\apk\release\app-release.apk'
 if (-not (Test-Path $apkOut)) { Fail "Gradle finished but $apkOut is missing." }
