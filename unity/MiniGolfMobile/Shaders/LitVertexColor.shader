@@ -7,7 +7,7 @@ Shader "MiniGolf/Lit Vertex Color"
         _Color ("Color", Color) = (1,1,1,1)
         _MainTex ("Albedo", 2D) = "white" {}
         _BumpMap ("Normal Map", 2D) = "bump" {}
-        _EmissionMap ("Emission", 2D) = "white" {}
+        _EmissionMap ("Emission", 2D) = "black" {}
         [HDR] _EmissionColor ("Emission Color", Color) = (0,0,0,1)
         _UseVertexColor ("Use Vertex Color", Range(0,1)) = 0
         _Cutoff ("Alpha Cutoff", Range(0,1)) = 0

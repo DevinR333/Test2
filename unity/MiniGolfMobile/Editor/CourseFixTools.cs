@@ -165,11 +165,17 @@ namespace MiniGolfMobile.EditorTools
                 mat.EnableKeyword("_NORMALMAP");
             }
 
+            // Start with no glow; leftover emission colours from the original shader would make everything glow white.
+            if (mat.HasProperty("_EmissionColor")) mat.SetColor("_EmissionColor", Color.black);
+            if (mat.HasProperty("_EmissionMap")) mat.SetTexture("_EmissionMap", null);
+            mat.DisableKeyword("_EMISSION");
+
             var emission = Pick(saved.textures, EmissionNames, n => Regex.IsMatch(n, "emis", RegexOptions.IgnoreCase));
             if (emission.HasValue && mat.HasProperty("_EmissionMap"))
             {
                 mat.SetTexture("_EmissionMap", emission.Value.tex);
-                mat.SetColor("_EmissionColor", saved.colors.TryGetValue("_EmissionColor", out var ec) ? ec : Color.white);
+                Color ec = saved.colors.TryGetValue("_EmissionColor", out var savedEc) ? savedEc : Color.white;
+                mat.SetColor("_EmissionColor", ec.maxColorComponent > 1f ? ec / ec.maxColorComponent : ec);
                 mat.EnableKeyword("_EMISSION");
                 mat.globalIlluminationFlags = MaterialGlobalIlluminationFlags.BakedEmissive;
             }
@@ -332,7 +338,9 @@ namespace MiniGolfMobile.EditorTools
                 bool trigger = go.GetComponents<Collider>().Any(c => c.isTrigger);
                 bool helperName = Regex.IsMatch(go.name, "trigger|keepalive|holecover|trapperkeeper|^collider|bounds|blocker|invisible", RegexOptions.IgnoreCase);
                 bool pinMarker = go.GetComponentsInParent<MonoBehaviour>(true).Any(m => m && (m.GetType().Name == "Pin" || m.GetType().Name == "CustomPin"));
-                if (!(trigger || helperName || pinMarker) || !r.enabled) continue;
+                bool broken = r.sharedMaterials.Any(m => !m || !m.shader || m.shader.name == "Hidden/InternalErrorShader" || !m.shader.isSupported);
+                bool simpleBox = go.GetComponent<MeshFilter>() is var f && f && f.sharedMesh && f.sharedMesh.name.StartsWith("Cube");
+                if (!(trigger || helperName || pinMarker || (broken && simpleBox)) || !r.enabled) continue;
                 if (Regex.IsMatch(go.name, "water", RegexOptions.IgnoreCase) && !trigger) continue;
                 Undo.RecordObject(r, "Hide helper");
                 r.enabled = false;
