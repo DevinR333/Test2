@@ -207,11 +207,13 @@ namespace MiniGolfMobile.EditorTools
             if (asset)
             {
                 GraphicsSettings.defaultRenderPipeline = asset;
+                int current = QualitySettings.GetQualityLevel();
                 for (int i = 0; i < QualitySettings.names.Length; i++)
                 {
                     QualitySettings.SetQualityLevel(i, false);
                     QualitySettings.renderPipeline = asset;
                 }
+                QualitySettings.SetQualityLevel(current, false);
                 report.AppendLine($"Render pipeline set to: {asset.name}");
             }
             else
