@@ -289,7 +289,8 @@ namespace MiniGolfMobile.EditorTools
             foreach (var pattern in new[] { "shallow", "water", "surface", "top", "deep" })
                 foreach (var kv in saved.colors)
                     if (kv.Key.ToLowerInvariant().Contains(pattern) && kv.Value.maxColorComponent > 0.1f
-                        && !(kv.Value.r > 0.97f && kv.Value.g > 0.97f && kv.Value.b > 0.97f))
+                        && !(kv.Value.r > 0.97f && kv.Value.g > 0.97f && kv.Value.b > 0.97f)
+                        && kv.Value.b >= kv.Value.r && kv.Value.b >= kv.Value.g * 0.9f)   // only blue-ish water colours
                         return kv.Value;
             return new Color(0.16f, 0.55f, 0.72f);
         }
