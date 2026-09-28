@@ -1,0 +1,74 @@
+diff --git a/src/core/fable_2_app.h b/src/core/fable_2_app.h
+index 10736f6..8630a8f 100644
+--- a/src/core/fable_2_app.h
++++ b/src/core/fable_2_app.h
+@@ -50,6 +50,10 @@ void record_a_press(std::int64_t ms);
+ }
+ #endif  // FABLE2_REMOTE_CONTROL
+ #include "xex_verify.h"
++#ifdef __ANDROID__
++// On-screen touch controls (Android build, see fable2-android/).
++#include "touch_gamepad.h"
++#endif
+ 
+ class Fable2App : public rex::ReXApp {
+  public:
+@@ -104,6 +108,12 @@ class Fable2App : public rex::ReXApp {
+       auto system = rex::input::CreateDefaultInputSystem(tool_mode);
+       system->AddDriver(
+           std::make_unique<fable2::KeyboardGamepadDriver>(system->window(), 0));
++#ifdef __ANDROID__
++      // Touch overlay pad: every Xbox 360 control, OR-merged with any real
++      // (Bluetooth/USB) controller that SDL picks up.
++      system->AddDriver(std::make_unique<fable2::touch::TouchGamepadDriver>(
++          system->window(), 0));
++#endif
+ #ifdef FABLE2_REMOTE_CONTROL
+       // Remote (AI) pad: driven over localhost TCP by an external harness
+       // (src/input/remote_control_server.h). OR-merges with the pads above; not
+@@ -155,6 +165,7 @@ class Fable2App : public rex::ReXApp {
+     // and distinguishes:
+     //   (A) table valid then zeroed  -> "HEAD WENT NULL" after "FIRST VALID"
+     //   (B) never valid (consumer first) -> only "null" ever, no "FIRST VALID"
++#ifndef __ANDROID__
+     std::thread([]() {
+       using namespace fable2::allocwatch;
+       const uintptr_t base = kGuestBase;  // 0x100000000, stable
+@@ -247,6 +258,7 @@ class Fable2App : public rex::ReXApp {
+         std::this_thread::sleep_for(std::chrono::milliseconds(2));
+       }
+     }).detach();
++#endif  // !__ANDROID__
+ 
+     SetGuestFrameStats([]() {
+       rex::ui::FrameStats stats;
+@@ -434,9 +446,15 @@ class Fable2App : public rex::ReXApp {
+         // so say that and stop before the SDK's dialog can show.
+         // (Logging is not initialized yet at this hook, dialog only.)
+         const std::string msg = std::format(
++#ifdef __ANDROID__
++            "default.xex was not found in {}.\n\n"
++            "Copy default.xex, data/ and $SystemUpdate/ from your disc into "
++            "that folder (the APK builder can do this over USB).",
++#else
+             "default.xex was not found next to fable_2.exe ({}).\n\n"
+             "Stage the game content there (the build does this "
+             "automatically) or pass --game_data_root=<path>.",
++#endif
+             exe_dir.string());
+         rex::ShowSimpleMessageBox(rex::SimpleMessageBoxType::Error, msg);
+         std::exit(1);
+diff --git a/src/main.cpp b/src/main.cpp
+index 8ae8600..41362af 100644
+--- a/src/main.cpp
++++ b/src/main.cpp
+@@ -14,7 +14,9 @@
+ #include "fable2_heap_scan.h"
+ #include "fable2_text_append.h"
+ #include "fable2_state_probe.h"
++#ifdef _WIN32
+ #include "fable2_av_probe.h"  // self-installs a guest-PC AV logger (VEH)
++#endif
+ // #include "fable2_ui_render_probe.h"
+ #include "keyboard_gamepad.h"
+ 

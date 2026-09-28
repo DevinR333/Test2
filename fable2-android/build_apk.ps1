@@ -1,0 +1,336 @@
+<#
+.SYNOPSIS
+  Builds a native Android APK of Fable 2 from YOUR OWN disc image.
+
+.DESCRIPTION
+  Everything runs on this PC; the ISO and the game code generated from it
+  never leave it. Steps (each one is skipped when already done, so a failed
+  run can simply be started again):
+
+    1. Tools      - installs Git, Python, CMake, Ninja, LLVM and a JDK with
+                    winget if missing; downloads the Android SDK + NDK.
+    2. ISO        - checks the SHA-256 and extracts default.xex, data/,
+                    $SystemUpdate/ (tools/extract_xiso.py).
+    3. Sources    - clones Fable-2-Recomp and its ReXGlue SDK fork at pinned
+                    commits and applies the Android patches (patches/).
+    4. Codegen    - builds the rexglue tool for Windows and recompiles your
+                    default.xex into C++ (generated/default).
+    5. APK        - cross-compiles everything for arm64 Android with Gradle
+                    and writes Fable2.apk next to this script.
+    6. Phone      - if a phone is connected with USB debugging, installs the
+                    APK and copies the game files onto it.
+
+.PARAMETER Iso
+  Path to the Fable 2 disc image. Omit it to pick the file in a dialog.
+
+.PARAMETER WorkDir
+  Build folder (needs ~60 GB free). Keep it short: Windows path limits.
+
+.PARAMETER NoPhone
+  Skip step 6 even when a phone is connected.
+#>
+[CmdletBinding()]
+param(
+    [string]$Iso,
+    [string]$WorkDir = "$env:SystemDrive\f2build",
+    [switch]$NoPhone
+)
+
+$ErrorActionPreference = 'Stop'
+$ProgressPreference = 'SilentlyContinue'
+
+# ---------------------------------------------------------------------------
+# Pins (what this Android port was written against)
+# ---------------------------------------------------------------------------
+$FableRepo    = 'https://github.com/himdo/Fable-2-Recomp.git'
+$FableCommit  = '6a0d57b33b2d0f4ad1f1031c9f0082a98f8acd52'
+$SdkRepo      = 'https://github.com/himdo/rexglue-sdk.git'
+$SdkCommit    = '1338ec1011739c7f00f8df9b9473e34d3dd9f2df'
+$IsoSha256    = '685a0d3bea9718812f17bcd155907a5359a548b6d3d8342dd2a6c944f45e35ff'
+$NdkVersion   = '27.2.12479018'
+$CmdlineTools = 'https://dl.google.com/android/repository/commandlinetools-win-13114758_latest.zip'
+$PackageName  = 'com.fable2.recomp'
+
+$Here     = $PSScriptRoot
+$GameDir  = Join-Path $WorkDir 'game'
+$FableDir = Join-Path $WorkDir 'Fable-2-Recomp'
+$SdkDir   = Join-Path $WorkDir 'rexglue-sdk'
+$HostDir  = Join-Path $WorkDir 'build-host'
+$SdkRoot  = Join-Path $WorkDir 'android-sdk'
+
+function Step($text) { Write-Host "`n=== $text ===" -ForegroundColor Cyan }
+function Info($text) { Write-Host "    $text" }
+function Warn($text) { Write-Host "    $text" -ForegroundColor Yellow }
+function Fail($text) { Write-Host "`nERROR: $text" -ForegroundColor Red; exit 1 }
+
+# Run a native command and stop on a non-zero exit code.
+function Run {
+    param([string]$Exe, [string[]]$Arguments, [string]$Dir = $null)
+    if ($Dir) { Push-Location $Dir }
+    try {
+        & $Exe @Arguments
+        if ($LASTEXITCODE -ne 0) { Fail "'$Exe $($Arguments -join ' ')' failed (exit $LASTEXITCODE)" }
+    } finally {
+        if ($Dir) { Pop-Location }
+    }
+}
+
+function Refresh-Path {
+    $env:Path = [Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
+                [Environment]::GetEnvironmentVariable('Path', 'User')
+}
+
+# ---------------------------------------------------------------------------
+# 1. Tools
+# ---------------------------------------------------------------------------
+Step '1/6 Tools'
+
+New-Item -ItemType Directory -Force -Path $WorkDir | Out-Null
+$drive = (Get-Item $WorkDir).PSDrive
+if ($drive.Free -lt 60GB) {
+    Warn ("Only {0:N0} GB free on {1}: - the build needs about 60 GB." -f ($drive.Free / 1GB), $drive.Name)
+}
+
+$winget = Get-Command winget -ErrorAction SilentlyContinue
+function Ensure-Tool {
+    param([string]$Command, [string]$WingetId, [string[]]$ExtraPaths = @())
+    foreach ($p in $ExtraPaths) {
+        if ((Test-Path $p) -and -not ($env:Path -split ';' -contains $p)) { $env:Path = "$p;$env:Path" }
+    }
+    if (Get-Command $Command -ErrorAction SilentlyContinue) { return }
+    if (-not $winget) { Fail "$Command not found and winget is unavailable. Install $WingetId manually." }
+    Info "Installing $WingetId ..."
+    & winget install --id $WingetId -e --accept-source-agreements --accept-package-agreements --silent | Out-Host
+    Refresh-Path
+    foreach ($p in $ExtraPaths) { if (Test-Path $p) { $env:Path = "$p;$env:Path" } }
+    if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) {
+        Fail "$Command still not found after installing $WingetId. Open a new terminal and run again."
+    }
+}
+
+Ensure-Tool git     'Git.Git'
+Ensure-Tool python  'Python.Python.3.12'
+Ensure-Tool cmake   'Kitware.CMake'        @("$env:ProgramFiles\CMake\bin")
+Ensure-Tool ninja   'Ninja-build.Ninja'
+Ensure-Tool clang++ 'LLVM.LLVM'            @("$env:ProgramFiles\LLVM\bin")
+
+# clang on Windows compiles against the MSVC C++ library and Windows SDK
+# (needed for the rexglue code generator, which runs on this PC).
+$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+$hasVc = (Test-Path $vswhere) -and
+         (& $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
+if (-not $hasVc) {
+    if (-not $winget) { Fail 'Visual Studio Build Tools (C++ workload) not found. Install them and retry.' }
+    Info 'Installing Visual Studio 2022 Build Tools (C++), this takes a while ...'
+    & winget install --id Microsoft.VisualStudio.2022.BuildTools -e --accept-source-agreements `
+        --accept-package-agreements --override `
+        '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended' | Out-Host
+}
+
+# Python from the Microsoft Store stub does not run scripts.
+& python -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)" 2>$null
+if ($LASTEXITCODE -ne 0) { Fail 'python does not run (Windows Store stub?). Install Python 3 from python.org and retry.' }
+
+$cmakeVersion = ((& cmake --version | Select-Object -First 1) -replace '[^0-9.]', '')
+if ([version]$cmakeVersion -lt [version]'3.25') { Fail "CMake $cmakeVersion is too old (need 3.25+). Update CMake." }
+$clangMajor = [int](((& clang++ --version | Select-Object -First 1) -replace '.*version (\d+).*', '$1'))
+if ($clangMajor -lt 18) { Fail "clang $clangMajor is too old (need 18+). Update LLVM." }
+
+# JDK 17 for Gradle.
+$jdk = Get-ChildItem "$env:ProgramFiles\Microsoft" -Filter 'jdk-17*' -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
+if (-not $jdk) {
+    if (-not $winget) { Fail 'JDK 17 not found. Install Microsoft Build of OpenJDK 17.' }
+    Info 'Installing Microsoft.OpenJDK.17 ...'
+    & winget install --id Microsoft.OpenJDK.17 -e --accept-source-agreements --accept-package-agreements --silent | Out-Host
+    $jdk = Get-ChildItem "$env:ProgramFiles\Microsoft" -Filter 'jdk-17*' -Directory | Select-Object -First 1
+    if (-not $jdk) { Fail 'JDK 17 install failed.' }
+}
+$env:JAVA_HOME = $jdk.FullName
+$env:Path = "$($jdk.FullName)\bin;$env:Path"
+
+# Android SDK + NDK (portable, inside the work dir).
+$sdkmanager = Join-Path $SdkRoot 'cmdline-tools\latest\bin\sdkmanager.bat'
+if (-not (Test-Path $sdkmanager)) {
+    Info 'Downloading Android command-line tools ...'
+    $zip = Join-Path $WorkDir 'cmdline-tools.zip'
+    Invoke-WebRequest -Uri $CmdlineTools -OutFile $zip
+    $tmp = Join-Path $WorkDir 'cmdline-tools-tmp'
+    Expand-Archive -Path $zip -DestinationPath $tmp -Force
+    New-Item -ItemType Directory -Force -Path (Join-Path $SdkRoot 'cmdline-tools') | Out-Null
+    Move-Item (Join-Path $tmp 'cmdline-tools') (Join-Path $SdkRoot 'cmdline-tools\latest')
+    Remove-Item $tmp, $zip -Recurse -Force
+}
+$env:ANDROID_HOME = $SdkRoot
+if (-not (Test-Path (Join-Path $SdkRoot "ndk\$NdkVersion"))) {
+    Info 'Installing Android platform, build tools and NDK (a few GB) ...'
+    (1..30 | ForEach-Object { 'y' }) | & $sdkmanager --sdk_root=$SdkRoot --licenses | Out-Null
+    Run $sdkmanager @("--sdk_root=$SdkRoot", 'platform-tools', 'platforms;android-35',
+                      'build-tools;35.0.0', "ndk;$NdkVersion")
+}
+$adb = Join-Path $SdkRoot 'platform-tools\adb.exe'
+Info 'Tools ready.'
+
+# ---------------------------------------------------------------------------
+# 2. ISO
+# ---------------------------------------------------------------------------
+Step '2/6 Game files from your ISO'
+
+if (-not (Test-Path (Join-Path $GameDir 'default.xex'))) {
+    if (-not $Iso) {
+        Add-Type -AssemblyName System.Windows.Forms
+        $dlg = New-Object System.Windows.Forms.OpenFileDialog
+        $dlg.Title = 'Select your Fable 2 disc image'
+        $dlg.Filter = 'Xbox 360 disc image (*.iso)|*.iso|All files (*.*)|*.*'
+        if ($dlg.ShowDialog() -ne [System.Windows.Forms.DialogResult]::OK) { Fail 'No ISO selected.' }
+        $Iso = $dlg.FileName
+    }
+    if (-not (Test-Path $Iso)) { Fail "ISO not found: $Iso" }
+
+    Info "Checking $Iso (SHA-256, takes a minute) ..."
+    $hash = (Get-FileHash -Path $Iso -Algorithm SHA256).Hash.ToLower()
+    if ($hash -ne $IsoSha256) {
+        Warn "SHA-256 is $hash"
+        Warn "expected    $IsoSha256 (Fable 2 GOTY, USA/EU)."
+        Warn 'The recomp was built against that exact disc; a different one will probably not run.'
+        $answer = Read-Host '    Continue anyway? (y/N)'
+        if ($answer -notmatch '^[yY]') { Fail 'Stopped: ISO does not match.' }
+    } else {
+        Info 'ISO matches.'
+    }
+    Run python @((Join-Path $Here 'tools\extract_xiso.py'), $Iso, $GameDir)
+}
+foreach ($needed in 'default.xex', 'data') {
+    if (-not (Test-Path (Join-Path $GameDir $needed))) { Fail "$needed missing from $GameDir after extraction." }
+}
+Info "Game files in $GameDir"
+
+# ---------------------------------------------------------------------------
+# 3. Sources
+# ---------------------------------------------------------------------------
+Step '3/6 Sources'
+
+& git config --global core.longpaths true
+
+function Checkout-Pinned {
+    param([string]$Url, [string]$Commit, [string]$Dir)
+    if (-not (Test-Path (Join-Path $Dir '.git'))) {
+        Run git @('clone', '--filter=blob:none', $Url, $Dir)
+    }
+    Run git @('-C', $Dir, 'fetch', '--quiet', 'origin', $Commit)
+    # Start from a clean tree so patches apply the same way on every run.
+    Run git @('-C', $Dir, 'checkout', '--quiet', '--force', $Commit)
+    Run git @('-C', $Dir, 'clean', '-fdq', '-e', 'generated/', '-e', 'out/', '-e', 'default.xex')
+}
+
+Checkout-Pinned $FableRepo $FableCommit $FableDir
+Checkout-Pinned $SdkRepo $SdkCommit $SdkDir
+
+Info 'Fetching SDK dependencies (large; first run only) ...'
+Run git @('-C', $SdkDir, 'submodule', 'update', '--init', '--depth', '1', '--jobs', '4')
+# Pin every dependency to the exact commit the recomp was built with.
+$pins = Get-Content (Join-Path $FableDir 'thirdparty\rexglue-sdk-submodule-pins.txt') |
+        Where-Object { $_ -match '^thirdparty/' }
+foreach ($line in $pins) {
+    $path, $sha = $line -split '\s+'
+    $sub = Join-Path $SdkDir $path
+    $cur = (& git -C $sub rev-parse HEAD 2>$null)
+    if ($cur -ne $sha) {
+        Run git @('-C', $sub, 'fetch', '--quiet', '--depth', '1', 'origin', $sha)
+    }
+    Run git @('-C', $sub, 'checkout', '--quiet', '--force', $sha)
+}
+
+Info 'Applying patches ...'
+Run git @('-C', $SdkDir, 'apply', (Join-Path $FableDir 'thirdparty\sdk_mainmenu_crash_fix.patch'))
+Run git @('-C', $SdkDir, 'apply', (Join-Path $Here 'patches\rexglue-sdk-android.patch'))
+Run git @('-C', $FableDir, 'apply', (Join-Path $Here 'patches\fable2-android.patch'))
+
+# SDL's Java half of the Android backend, matching the pinned SDL.
+$sdlJava = Join-Path $SdkDir 'thirdparty\sdl3\android-project\app\src\main\java\org\libsdl\app'
+$appJava = Join-Path $Here 'android\app\src\main\java\org\libsdl\app'
+New-Item -ItemType Directory -Force -Path $appJava | Out-Null
+Copy-Item (Join-Path $sdlJava '*.java') $appJava -Force
+
+# ---------------------------------------------------------------------------
+# 4. Codegen (runs on this PC)
+# ---------------------------------------------------------------------------
+Step '4/6 Recompiling default.xex to C++'
+
+# Written only after codegen AND the recomp patches both succeeded.
+$stamp = Join-Path $FableDir 'generated\default\android_codegen.done'
+if (-not (Test-Path $stamp)) {
+    $rexglue = Join-Path $SdkDir 'out\win-amd64\rexglue.exe'
+    if (-not (Test-Path $rexglue)) {
+        Info 'Building the rexglue code generator for Windows ...'
+        Run cmake @('-S', $SdkDir, '-B', $HostDir, '-G', 'Ninja',
+                    '-DCMAKE_BUILD_TYPE=Release',
+                    '-DCMAKE_C_COMPILER=clang', '-DCMAKE_CXX_COMPILER=clang++',
+                    '-DREXGLUE_ENABLE_TRACY=OFF')
+        Run cmake @('--build', $HostDir, '--target', 'rexglue')
+    }
+    Copy-Item (Join-Path $GameDir 'default.xex') (Join-Path $FableDir 'default.xex') -Force
+    Info 'Running codegen (several minutes) ...'
+    Run $rexglue @('codegen', 'fable_2_manifest.toml') $FableDir
+    Run python @('tools\apply_recomp_patches.py', 'generated\default') $FableDir
+    Set-Content -Path $stamp -Value $FableCommit
+} else {
+    Info 'Already generated.'
+}
+
+# ---------------------------------------------------------------------------
+# 5. APK
+# ---------------------------------------------------------------------------
+Step '5/6 Building the APK (first build takes a long time - the game is huge)'
+
+$androidDir = Join-Path $Here 'android'
+$cmakeDir = Split-Path -Parent (Split-Path -Parent (Get-Command cmake).Source)
+$ninjaExe = (Get-Command ninja).Source
+$props = @(
+    "sdk.dir=$($SdkRoot -replace '\\', '\\')",
+    "cmake.dir=$($cmakeDir -replace '\\', '\\')"
+)
+Set-Content -Path (Join-Path $androidDir 'local.properties') -Value $props -Encoding ASCII
+
+Run (Join-Path $androidDir 'gradlew.bat') @(
+    'assembleRelease', '--no-daemon', '--console=plain',
+    "-Pfable2Dir=$($FableDir -replace '\\', '/')",
+    "-PrexsdkDir=$($SdkDir -replace '\\', '/')",
+    "-Pfable2CmakeVersion=$cmakeVersion",
+    "-Pfable2Ninja=$($ninjaExe -replace '\\', '/')",
+    "-Pfable2Staging=$((Join-Path $WorkDir 'cxx') -replace '\\', '/')"
+) $androidDir
+
+$apkOut = Join-Path $androidDir 'app\build\outputs\apk\release\app-release.apk'
+if (-not (Test-Path $apkOut)) { Fail "Gradle finished but $apkOut is missing." }
+$apk = Join-Path $Here 'Fable2.apk'
+Copy-Item $apkOut $apk -Force
+Info "APK: $apk"
+
+# ---------------------------------------------------------------------------
+# 6. Phone
+# ---------------------------------------------------------------------------
+Step '6/6 Phone'
+
+$device = $null
+if (-not $NoPhone) {
+    $device = (& $adb devices) | Select-String -Pattern '\tdevice$' | Select-Object -First 1
+}
+if (-not $device) {
+    Info 'No phone connected (or -NoPhone). To finish by hand:'
+    Info "  1. Install $apk on the phone."
+    Info "  2. Copy default.xex, data\ and `$SystemUpdate\ from $GameDir to"
+    Info "     Android/data/$PackageName/files/ on the phone (USB file transfer)."
+    Info '  3. Start "Fable II".'
+    exit 0
+}
+
+Info 'Installing ...'
+Run $adb @('install', '-r', $apk)
+$remote = "/sdcard/Android/data/$PackageName/files"
+Run $adb @('shell', 'mkdir', '-p', $remote)
+Info 'Copying game files to the phone (~7 GB, several minutes) ...'
+foreach ($item in 'default.xex', 'data', '$SystemUpdate') {
+    $src = Join-Path $GameDir $item
+    if (Test-Path $src) { Run $adb @('push', '--sync', $src, "$remote/") }
+}
+Write-Host "`nDone. Start 'Fable II' on your phone." -ForegroundColor Green

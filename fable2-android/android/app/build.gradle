@@ -1,0 +1,80 @@
+// Fable 2 (native Android build of the ReXGlue recompilation).
+//
+// Normally driven by ../../build_apk.ps1, which passes:
+//   -Pfable2Dir=<Fable-2-Recomp checkout with generated/ from codegen>
+//   -PrexsdkDir=<rexglue-sdk checkout with the Android patch applied>
+//   -Pfable2CmakeVersion=<version of the cmake set as cmake.dir>
+//   -Pfable2Ninja=<ninja executable>
+//   -Pfable2Staging=<short native build dir; Windows path limits>
+
+plugins {
+    id 'com.android.application'
+}
+
+def fable2Dir = project.findProperty('fable2Dir') ?: ''
+def rexsdkDir = project.findProperty('rexsdkDir') ?: ''
+def cmakeVer = project.findProperty('fable2CmakeVersion') ?: '3.31.6'
+def ninjaExe = project.findProperty('fable2Ninja') ?: ''
+def stagingDir = project.findProperty('fable2Staging') ?: '.cxx'
+
+android {
+    namespace 'com.fable2.recomp'
+    compileSdk 35
+    ndkVersion '27.2.12479018'
+
+    defaultConfig {
+        applicationId 'com.fable2.recomp'
+        // 29: Vulkan 1.1 and ASharedMemory everywhere.
+        minSdk 29
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+
+        ndk {
+            abiFilters 'arm64-v8a'
+        }
+        externalNativeBuild {
+            cmake {
+                targets 'main', 'rexgpu-xenos'
+                arguments '-DANDROID_STL=c++_shared',
+                          '-DANDROID_SUPPORT_FLEXIBLE_PAGE_SIZES=ON',
+                          "-DFABLE2_DIR=${fable2Dir}",
+                          "-DREXSDK_DIR=${rexsdkDir}"
+                if (ninjaExe) {
+                    arguments "-DCMAKE_MAKE_PROGRAM=${ninjaExe}"
+                }
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            // Sideload build: sign with the local debug key so it installs
+            // without any keystore setup.
+            signingConfig signingConfigs.debug
+            minifyEnabled false
+            debuggable false
+        }
+    }
+
+    externalNativeBuild {
+        cmake {
+            path 'src/main/cpp/CMakeLists.txt'
+            version cmakeVer
+            buildStagingDirectory file(stagingDir)
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+
+    packaging {
+        jniLibs {
+            // Keep libraries uncompressed and page-aligned in the APK so they
+            // load straight from it (the recompiled game library is large).
+            useLegacyPackaging false
+        }
+    }
+}

@@ -1,0 +1,11 @@
+# Produced by build_apk.ps1 / Gradle - never commit (Fable2.apk contains
+# code generated from your own disc).
+Fable2.apk
+android/local.properties
+android/.gradle/
+android/.cxx/
+android/build/
+android/app/build/
+android/app/.cxx/
+# Copied from the pinned SDL checkout at build time.
+android/app/src/main/java/org/libsdl/
