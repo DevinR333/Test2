@@ -157,6 +157,8 @@ namespace MiniGolfMobile
             foreach (var hit in hits)
             {
                 if (hit.collider.attachedRigidbody == rb) continue;
+                // The original courses name their play surfaces "...IPS" (in-play surface).
+                if (hit.collider.name.Contains("IPS")) return true;
                 foreach (var mb in hit.collider.GetComponentsInParent<MonoBehaviour>(true))
                     if (mb != null && PlaySurfaceTypes.Contains(mb.GetType().Name)) return true;
             }

@@ -177,6 +177,14 @@ namespace MiniGolfMobile.EditorTools
             foreach (var c in all.OfType<Camera>().Where(c => c.enabled)) { Undo.RecordObject(c, "Disable camera"); c.enabled = false; }
             foreach (var l in all.OfType<AudioListener>().Where(l => l.enabled)) { Undo.RecordObject(l, "Disable listener"); l.enabled = false; }
 
+            // The game's own ball object would sit on the course and get in the way.
+            foreach (var c in Named("Ball", "GolfBall"))
+            {
+                if (c.GetComponent<MiniGolfMobile.GolfBall>()) continue;
+                Undo.RecordObject(c.gameObject, "Disable original ball");
+                c.gameObject.SetActive(false);
+            }
+
             // Lost balls: attach our pickup to the game's own LostBall objects, in their original spots.
             int lostBalls = 0;
             foreach (var c in Named("LostBall"))
@@ -197,8 +205,11 @@ namespace MiniGolfMobile.EditorTools
                 gh.number = GuessNumber(h.gameObject.name, usedNumbers);
                 gh.par = 3;
 
-                var cupSource = h.GetComponentsInChildren<Component>(true)
-                    .FirstOrDefault(c => c && (c.GetType().Name == "Cup" || c.GetType().Name == "MightyCup"));
+                // The hole's own cup is its direct "CupPosition" child; pipe holes have their own CupPositions deeper down.
+                Transform cupSource = h.transform.Find("CupPosition");
+                if (!cupSource)
+                    cupSource = h.GetComponentsInChildren<Component>(true)
+                        .FirstOrDefault(c => c && (c.GetType().Name == "Cup" || c.GetType().Name == "MightyCup"))?.transform;
                 if (cupSource)
                 {
                     var cup = cupSource.GetComponent<GolfCup>();
@@ -429,10 +440,26 @@ namespace MiniGolfMobile.EditorTools
             foreach (var kv in counts.OrderByDescending(k => k.Value).Take(80))
                 sb.AppendLine($"{kv.Value,6}  {kv.Key}");
 
+            sb.AppendLine("== Hole layouts ==");
+            var holeRoots = AllComponents().Where(c => c.GetType().Name == "Hole").Select(c => c.transform).ToList();
+            foreach (var h in holeRoots.Where(h => Regex.IsMatch(h.name, "(^|\\D)(0?1|0?6|14|18)$")).Take(4))
+                DumpTree(sb, h, 0, h.position);
+
             string text = sb.ToString();
             EditorGUIUtility.systemCopyBuffer = text;
             File.WriteAllText("MiniGolfSceneReport.txt", text);
             Debug.Log("Mini Golf: scene report copied to the clipboard (also saved as MiniGolfSceneReport.txt in the project folder).");
+        }
+
+        static void DumpTree(StringBuilder sb, Transform t, int depth, Vector3 origin)
+        {
+            if (depth > 4) return;
+            var comps = t.GetComponents<Component>()
+                .Where(c => c && !(c is Transform))
+                .Select(c => c.GetType().Name);
+            Vector3 p = t.position, d = p - origin;
+            sb.AppendLine($"{new string(' ', depth * 2)}{t.name}  pos=({p.x:F2}, {p.y:F2}, {p.z:F2})  fromHole={d.magnitude:F1}m  [{string.Join(", ", comps)}]");
+            foreach (Transform child in t) DumpTree(sb, child, depth + 1, origin);
         }
 
         static string PathOf(Transform t)
