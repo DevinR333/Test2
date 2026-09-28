@@ -7,14 +7,14 @@
   never leave it. Steps (each one is skipped when already done, so a failed
   run can simply be started again):
 
-    1. Tools      - installs Git, Python, CMake, Ninja, LLVM and a JDK with
-                    winget if missing; downloads the Android SDK + NDK.
+    1. Tools      - installs Git, Python, CMake, Ninja and a JDK with winget
+                    if missing; downloads the Android SDK + NDK.
     2. ISO        - checks the SHA-256 and extracts default.xex, data/,
                     $SystemUpdate/ (tools/extract_xiso.py).
     3. Sources    - clones Fable-2-Recomp and its ReXGlue SDK fork at pinned
                     commits and applies the Android patches (patches/).
-    4. Codegen    - builds the rexglue tool for Windows and recompiles your
-                    default.xex into C++ (generated/default).
+    4. Codegen    - downloads the official ReXGlue 0.10.0 code generator and
+                    recompiles your default.xex into C++ (generated/default).
     5. APK        - cross-compiles everything for arm64 Android with Gradle
                     and writes Fable2.apk next to this script.
     6. Phone      - if a phone is connected with USB debugging, installs the
@@ -48,6 +48,7 @@ $SdkRepo      = 'https://github.com/himdo/rexglue-sdk.git'
 $SdkCommit    = '1338ec1011739c7f00f8df9b9473e34d3dd9f2df'
 $IsoSha256    = '685a0d3bea9718812f17bcd155907a5359a548b6d3d8342dd2a6c944f45e35ff'
 $NdkVersion   = '27.2.12479018'
+$RexglueZip   = 'https://github.com/rexglue/rexglue-sdk/releases/download/v0.10.0/rexglue-sdk-0.10.0-win-amd64.zip'
 $CmdlineTools = 'https://dl.google.com/android/repository/commandlinetools-win-13114758_latest.zip'
 $PackageName  = 'com.fable2.recomp'
 
@@ -55,7 +56,6 @@ $Here     = $PSScriptRoot
 $GameDir  = Join-Path $WorkDir 'game'
 $FableDir = Join-Path $WorkDir 'Fable-2-Recomp'
 $SdkDir   = Join-Path $WorkDir 'rexglue-sdk'
-$HostDir  = Join-Path $WorkDir 'build-host-sdk'
 $SdkRoot  = Join-Path $WorkDir 'android-sdk'
 
 function Step($text) { Write-Host "`n=== $text ===" -ForegroundColor Cyan }
@@ -145,41 +145,13 @@ function Ensure-Tool {
 Ensure-Tool git     'Git.Git'
 Ensure-Tool cmake   'Kitware.CMake'        @("$env:ProgramFiles\CMake\bin")
 Ensure-Tool ninja   'Ninja-build.Ninja'
-Ensure-Tool clang++ 'LLVM.LLVM'            @("$env:ProgramFiles\LLVM\bin")
 
-# clang on Windows compiles against the MSVC C++ library and Windows SDK
-# (needed for the rexglue code generator, which runs on this PC).
-$vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-function Has-VcTools {
-    if (-not (Test-Path $vswhere)) { return $false }
-    $path = Native { & $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath }
-    return [bool]$path
-}
-if (-not (Has-VcTools)) {
-    if (-not $winget) { Fail 'Visual Studio Build Tools (C++ workload) not found. Install them and retry.' }
-    # Error 1618 = another installer holds the Windows Installer lock (often
-    # the Visual Studio Installer updating itself, or Windows Update). Wait
-    # for it and retry instead of giving up on the first try.
-    $installerNames = 'vs_installer', 'vs_installershell', 'vs_installerservice', 'vs_setup_bootstrapper',
-                      'vs_bootstrapper', 'vs_buildtools', 'setup', 'wusa', 'TiWorker'
-    for ($attempt = 1; $attempt -le 8 -and -not (Has-VcTools); $attempt++) {
-        Info "Installing Visual Studio 2022 Build Tools (C++), attempt $attempt of 8 (takes a while) ..."
-        Winget-Install 'Microsoft.VisualStudio.2022.BuildTools' @('--override',
-            '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended')
-        if (Has-VcTools) { break }
-        $busy = @(Get-Process -Name $installerNames -ErrorAction SilentlyContinue |
-                  Select-Object -ExpandProperty ProcessName -Unique)
-        $msi = @(Get-Process -Name msiexec -ErrorAction SilentlyContinue).Count
-        if ($msi -gt 1) { $busy += "msiexec x$msi" }
-        if ($busy) { Warn "Still running: $($busy -join ', ')" }
-        if ($attempt -lt 8) { Warn 'Another installer is busy; waiting 60 seconds and retrying ...'; Start-Sleep 60 }
-    }
-    if (-not (Has-VcTools)) {
-        Fail ("Visual Studio Build Tools could not be installed (another installer kept Windows " +
-              "Installer busy). Restart the PC and run build_apk.cmd again. Or install them by hand: " +
-              "https://aka.ms/vs/17/release/vs_BuildTools.exe -> tick 'Desktop development with C++' " +
-              "-> Install, then run build_apk.cmd again.")
-    }
+# The prebuilt rexglue.exe (step 4) needs the Microsoft Visual C++ runtime.
+if (-not (Test-Path "$env:SystemRoot\System32\msvcp140.dll") -or
+    -not (Test-Path "$env:SystemRoot\System32\vcruntime140_1.dll")) {
+    if (-not $winget) { Fail 'Install the Microsoft Visual C++ Redistributable (x64) and retry.' }
+    Info 'Installing the Microsoft Visual C++ runtime ...'
+    Winget-Install 'Microsoft.VCRedist.2015+.x64' @('--silent')
 }
 
 # Python. "python" on a fresh Windows is often only the Microsoft Store alias
@@ -211,8 +183,6 @@ Info "Python: $Python"
 
 $cmakeVersion = ((Native { & cmake --version } | Select-Object -First 1) -replace '[^0-9.]', '')
 if ([version]$cmakeVersion -lt [version]'3.25') { Fail "CMake $cmakeVersion is too old (need 3.25+). Update CMake." }
-$clangMajor = [int](((Native { & clang++ --version } | Select-Object -First 1) -replace '.*version (\d+).*', '$1'))
-if ($clangMajor -lt 18) { Fail "clang $clangMajor is too old (need 18+). Update LLVM." }
 
 # JDK 17 for Gradle.
 $jdk = Get-ChildItem "$env:ProgramFiles\Microsoft" -Filter 'jdk-17*' -Directory -ErrorAction SilentlyContinue | Select-Object -First 1
@@ -384,25 +354,26 @@ Step '4/6 Recompiling default.xex to C++'
 # Written only after codegen AND the recomp patches both succeeded.
 $stamp = Join-Path $FableDir 'generated\default\android_codegen.done'
 if (-not (Test-Path $stamp)) {
-    $rexglue = Join-Path $SdkDir 'out\win-amd64\rexglue.exe'
-    if (-not (Test-Path $rexglue)) {
-        Info 'Building the rexglue code generator for Windows ...'
-        # Configured exactly like the recomp author's tools\build_sdk_vulkan.cmd:
-        # through their tools\vulkan_sdk wrapper (skips the SDK's broken
-        # top-level install step) with Vulkan + D3D12 on. On Windows the fork
-        # exports a fixed symbol list from rexruntime.dll (rexruntime.def)
-        # that includes Vulkan functions, so a D3D12-only build cannot link.
-        Run cmake @('-S', (Join-Path $FableDir 'tools\vulkan_sdk'), '-B', $HostDir, '-G', 'Ninja',
-                    '-DCMAKE_BUILD_TYPE=Release',
-                    '-DCMAKE_C_COMPILER=clang', '-DCMAKE_CXX_COMPILER=clang++',
-                    # Same flags as the SDK's windows preset: the runtime uses
-                    # SSSE3/SSE4 intrinsics, which clang rejects without them.
-                    '-DCMAKE_C_FLAGS=-march=x86-64-v2', '-DCMAKE_CXX_FLAGS=-march=x86-64-v2',
-                    '-DCMAKE_CXX_STANDARD=23',
-                    "-DREXGLUE_SDK_SOURCE=$($SdkDir -replace '\\', '/')",
-                    '-DREXGLUE_ENABLE_TRACY=OFF')
-        Run-Build cmake @('--build', $HostDir, '--target', 'rexglue', '--', '-k', '0') (Join-Path $WorkDir 'build-host.log')
+    # The official prebuilt ReXGlue 0.10.0 code generator - the same one the
+    # recomp author's build.cmd downloads and runs. Its codegen sources and
+    # templates are identical to the fork's, so its output matches the fork
+    # headers the Android build compiles against. (Building the fork's own
+    # rexglue.exe on Windows is not possible: its rexruntime.dll exports only
+    # what the game and GPU plugin use.)
+    $prebuiltDir = Join-Path $WorkDir 'rexglue-0.10.0'
+    $rexglue = Get-ChildItem -Path $prebuiltDir -Filter 'rexglue.exe' -Recurse -ErrorAction SilentlyContinue |
+               Select-Object -First 1 -ExpandProperty FullName
+    if (-not $rexglue) {
+        Info 'Downloading the ReXGlue 0.10.0 code generator ...'
+        $zip = Join-Path $WorkDir 'rexglue-sdk-0.10.0-win-amd64.zip'
+        Invoke-WebRequest -Uri $RexglueZip -OutFile $zip
+        Expand-Archive -Path $zip -DestinationPath $prebuiltDir -Force
+        Remove-Item $zip -Force
+        $rexglue = Get-ChildItem -Path $prebuiltDir -Filter 'rexglue.exe' -Recurse |
+                   Select-Object -First 1 -ExpandProperty FullName
+        if (-not $rexglue) { Fail "rexglue.exe not found in the downloaded SDK ($prebuiltDir)." }
     }
+    Info "Code generator: $rexglue"
     Copy-Item (Join-Path $GameDir 'default.xex') (Join-Path $FableDir 'default.xex') -Force
     Info 'Running codegen (several minutes) ...'
     Run $rexglue @('codegen', 'fable_2_manifest.toml') $FableDir

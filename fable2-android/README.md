@@ -28,14 +28,14 @@ contains code generated from the disc.
    You can also pass the path: `build_apk.cmd "D:\Games\Fable2.iso"`.
 3. Wait. The builder:
    1. installs anything missing with `winget`: Git, Python, CMake, Ninja,
-      LLVM, Visual Studio Build Tools (C++) and OpenJDK 17. It also downloads
-      the Android SDK and NDK into the work folder.
+      OpenJDK 17 and the Visual C++ runtime. It also downloads the Android
+      SDK and NDK into the work folder.
    2. checks the ISO hash and extracts `default.xex`, `data/` and
       `$SystemUpdate/` (`tools/extract_xiso.py`).
    3. clones Fable-2-Recomp and its ReXGlue SDK fork at pinned commits and
       applies `patches/`.
-   4. builds the `rexglue` code generator for Windows and recompiles your
-      `default.xex` to C++.
+   4. downloads the official ReXGlue 0.10.0 code generator (the same one
+      the recomp's own build uses) and recompiles your `default.xex` to C++.
    5. cross-compiles everything for Android and writes **`Fable2.apk`** here.
    6. if a phone is connected, installs the APK and copies the game files to
       it (~7 GB).
