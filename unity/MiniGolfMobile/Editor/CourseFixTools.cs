@@ -222,6 +222,80 @@ namespace MiniGolfMobile.EditorTools
             }
         }
 
+        // ---------- Lighting ----------
+
+        [MenuItem("Mini Golf/Fix Lighting (fog, sky, sun)", priority = 23)]
+        public static void FixLighting()
+        {
+            var report = new StringBuilder();
+
+            // The game's fog was tuned for its own shaders; with standard shaders it washes everything out white.
+            if (RenderSettings.fog) report.AppendLine("Fog turned off");
+            RenderSettings.fog = false;
+
+            // A normal sky, used for both the background and ambient light.
+            const string skyPath = "Assets/MiniGolfMobile/Generated/Sky.mat";
+            EnsureFolder("Assets/MiniGolfMobile/Generated");
+            var skyMat = AssetDatabase.LoadAssetAtPath<Material>(skyPath);
+            if (!skyMat && Shader.Find("Skybox/Procedural"))
+            {
+                skyMat = new Material(Shader.Find("Skybox/Procedural"));
+                skyMat.SetFloat("_Exposure", 1.1f);
+                skyMat.SetFloat("_AtmosphereThickness", 0.8f);
+                AssetDatabase.CreateAsset(skyMat, skyPath);
+            }
+            if (skyMat) RenderSettings.skybox = skyMat;
+            RenderSettings.ambientMode = AmbientMode.Skybox;
+            RenderSettings.ambientIntensity = 1f;
+            RenderSettings.reflectionIntensity = 0.6f;
+            report.AppendLine("Sky and ambient light reset");
+
+            // Baked-only lights do nothing without the (missing) lightmaps, so make the sun live and tame the rest.
+            var lights = Object.FindObjectsByType<Light>(FindObjectsInactive.Include, FindObjectsSortMode.None);
+            var sun = lights.Where(l => l.type == LightType.Directional).OrderByDescending(l => l.intensity).FirstOrDefault();
+            if (!sun)
+            {
+                sun = new GameObject("Sun").AddComponent<Light>();
+                sun.type = LightType.Directional;
+                sun.transform.rotation = Quaternion.Euler(50f, -30f, 0f);
+                Undo.RegisterCreatedObjectUndo(sun.gameObject, "Add sun");
+                report.AppendLine("Added a sun");
+            }
+            Undo.RecordObject(sun, "Fix sun");
+            sun.gameObject.SetActive(true);
+            sun.enabled = true;
+            sun.lightmapBakeType = LightmapBakeType.Realtime;
+            sun.intensity = Mathf.Clamp(sun.intensity, 0.8f, 1.3f);
+            sun.shadows = LightShadows.Soft;
+            RenderSettings.sun = sun;
+
+            int tamed = 0;
+            foreach (var l in lights)
+            {
+                if (l == sun) continue;
+                Undo.RecordObject(l, "Fix light");
+                if (l.type == LightType.Directional) { l.enabled = false; tamed++; continue; }
+                if (l.intensity > 2f) { l.intensity = 2f; tamed++; }
+                l.lightmapBakeType = LightmapBakeType.Realtime;
+                l.shadows = LightShadows.None;
+            }
+            report.AppendLine($"Sun: {sun.name}; other lights adjusted: {tamed}");
+
+            DynamicGI.UpdateEnvironment();
+            EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
+            report.AppendLine("Save the scene (Ctrl+S).");
+            Debug.Log("Mini Golf: " + report);
+            EditorUtility.DisplayDialog("Mini Golf", report.ToString(), "OK");
+        }
+
+        static void EnsureFolder(string path)
+        {
+            if (AssetDatabase.IsValidFolder(path)) return;
+            string parent = System.IO.Path.GetDirectoryName(path).Replace('\\', '/');
+            EnsureFolder(parent);
+            AssetDatabase.CreateFolder(parent, System.IO.Path.GetFileName(path));
+        }
+
         // ---------- Walking collision ----------
 
         [MenuItem("Mini Golf/Add Walking Collision To Open Scene", priority = 22)]
