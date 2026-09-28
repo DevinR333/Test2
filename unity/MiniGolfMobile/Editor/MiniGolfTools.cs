@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
@@ -11,95 +12,314 @@ namespace MiniGolfMobile.EditorTools
 {
     public static class MiniGolfTools
     {
-        const string TestFolder = "Assets/MiniGolfMobile/TestHole";
+        const string Folder = "Assets/MiniGolfMobile/Generated";
+        const string MenuScenePath = Folder + "/LevelSelect.unity";
 
-        // ---------- Test hole ----------
+        // ---------- Test course ----------
 
-        [MenuItem("Mini Golf/Create Test Hole")]
-        public static void CreateTestHole()
+        [MenuItem("Mini Golf/Create Test Course", priority = 1)]
+        public static void CreateTestCourse()
         {
             if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
-            EnsureFolder(TestFolder);
+            EnsureFolder(Folder);
             EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
+            foreach (var c in Object.FindObjectsByType<Camera>(FindObjectsSortMode.None)) Object.DestroyImmediate(c.gameObject);
 
-            var green = MakeMaterial("Green", new Color(0.18f, 0.55f, 0.22f));
+            var grass = MakeMaterial("Grass", new Color(0.35f, 0.6f, 0.3f));
+            var green = MakeMaterial("Green", new Color(0.15f, 0.5f, 0.2f));
             var wall = MakeMaterial("Wall", new Color(0.55f, 0.35f, 0.2f));
-            var white = MakeMaterial("Ball", Color.white);
             var dark = MakeMaterial("Cup", new Color(0.05f, 0.05f, 0.05f));
             var gold = MakeMaterial("LostBall", new Color(1f, 0.75f, 0.1f));
+            var rock = MakeMaterial("Rock", new Color(0.5f, 0.5f, 0.52f));
             var turf = MakePhysics("Turf", 0.4f, 0.1f, PhysicsMaterialCombine.Minimum);
             var bumper = MakePhysics("Bumper", 0.2f, 0.65f, PhysicsMaterialCombine.Maximum);
-            var ballPhys = MakePhysics("BallPhysics", 0.3f, 0.5f, PhysicsMaterialCombine.Average);
 
-            var root = new GameObject("TestHole");
-            Box("Green", root, new Vector3(0, -0.05f, 0), new Vector3(1.2f, 0.1f, 6f), green, turf)
-                .AddComponent<GolfPlaySurface>();
-            Box("Wall L", root, new Vector3(-0.625f, 0.04f, 0), new Vector3(0.05f, 0.08f, 6.1f), wall, bumper);
-            Box("Wall R", root, new Vector3(0.625f, 0.04f, 0), new Vector3(0.05f, 0.08f, 6.1f), wall, bumper);
-            Box("Wall Back", root, new Vector3(0, 0.04f, -3.025f), new Vector3(1.3f, 0.08f, 0.05f), wall, bumper);
-            Box("Wall Front", root, new Vector3(0, 0.04f, 3.025f), new Vector3(1.3f, 0.08f, 0.05f), wall, bumper);
+            var root = new GameObject("TestCourse");
+            Box("Ground", root, new Vector3(0, -0.1f, 4), new Vector3(20, 0.2f, 20), grass, turf);
 
-            var spinner = Box("Spinner", root, new Vector3(0, 0.03f, 0.4f), new Vector3(0.7f, 0.06f, 0.04f), wall, bumper);
+            var h1 = BuildHole(root, 1, 2, new Vector3(-3, 0, 2), 0f, 5f, green, wall, dark, turf, bumper);
+            var spinner = Box("Spinner", h1, new Vector3(-3, 0.03f, 2.6f), new Vector3(0.7f, 0.06f, 0.04f), wall, bumper);
             spinner.AddComponent<SpinObstacle>().degreesPerSecond = 50f;
 
-            var hole = new GameObject("Hole 1");
+            var h2 = BuildHole(root, 2, 3, new Vector3(3, 0, 5), 30f, 6f, green, wall, dark, turf, bumper);
+            var gate = Box("Slider", h2, h2.transform.TransformPoint(new Vector3(-0.3f, 0.03f, 0)), new Vector3(0.4f, 0.06f, 0.05f), wall, bumper);
+            gate.transform.rotation = h2.transform.rotation;
+            gate.AddComponent<PingPongMover>().offset = h2.transform.right * 0.6f;
+
+            // A lost ball tucked behind a rock, off the greens.
+            Box("Rock", root, new Vector3(7, 0.4f, 11), new Vector3(1.4f, 0.8f, 1f), rock, null);
+            var lost = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            lost.name = "LostBall";
+            Object.DestroyImmediate(lost.GetComponent<Collider>());
+            lost.transform.SetParent(root.transform);
+            lost.transform.position = new Vector3(7.2f, 0.03f, 11.8f);
+            lost.transform.localScale = Vector3.one * 0.05f;
+            lost.GetComponent<Renderer>().sharedMaterial = gold;
+            lost.AddComponent<LostBallPickup>();
+
+            CreatePlayerRig(new Vector3(0, 0, -3), 0f);
+            string path = $"{Folder}/TestCourse.unity";
+            EditorSceneManager.SaveScene(SceneManager.GetActiveScene(), path);
+            AddToBuild(path);
+            Debug.Log($"Mini Golf: test course saved to {path}. Press Play. Walk with WASD, hold right mouse to look, click to grab.");
+        }
+
+        static GameObject BuildHole(GameObject root, int number, int par, Vector3 teePos, float yaw, float length,
+            Material green, Material wall, Material dark, PhysicsMaterial turf, PhysicsMaterial bumper)
+        {
+            var hole = new GameObject($"Hole {number}");
             hole.transform.SetParent(root.transform);
+            hole.transform.SetPositionAndRotation(teePos, Quaternion.Euler(0, yaw, 0));
             var gh = hole.AddComponent<GolfHole>();
-            gh.number = 1;
-            gh.par = 2;
+            gh.number = number;
+            gh.par = par;
+
+            Vector3 L(float x, float y, float z) => hole.transform.TransformPoint(new Vector3(x, y, z));
+            Quaternion rot = hole.transform.rotation;
+            void Part(string n, Vector3 local, Vector3 size, Material m, PhysicsMaterial p, bool play)
+            {
+                var b = Box(n, hole, L(local.x, local.y, local.z), size, m, p);
+                b.transform.rotation = rot;
+                if (play) b.AddComponent<GolfPlaySurface>();
+            }
+            float mid = length / 2 - 0.4f;
+            Part("Green", new Vector3(0, -0.049f, mid), new Vector3(1.2f, 0.1f, length), green, turf, true);
+            Part("Wall L", new Vector3(-0.625f, 0.04f, mid), new Vector3(0.05f, 0.08f, length + 0.1f), wall, bumper, false);
+            Part("Wall R", new Vector3(0.625f, 0.04f, mid), new Vector3(0.05f, 0.08f, length + 0.1f), wall, bumper, false);
+            Part("Wall Back", new Vector3(0, 0.04f, mid - length / 2 - 0.025f), new Vector3(1.3f, 0.08f, 0.05f), wall, bumper, false);
+            Part("Wall Front", new Vector3(0, 0.04f, mid + length / 2 + 0.025f), new Vector3(1.3f, 0.08f, 0.05f), wall, bumper, false);
+
             var tee = new GameObject("Tee");
-            tee.transform.SetParent(hole.transform);
-            tee.transform.position = new Vector3(0, 0, -2.6f);
+            tee.transform.SetParent(hole.transform, false);
             gh.tee = tee.transform;
 
             var cupGo = new GameObject("Cup");
-            cupGo.transform.SetParent(hole.transform);
-            cupGo.transform.position = new Vector3(0.2f, 0, 2.3f);
+            cupGo.transform.SetParent(hole.transform, false);
+            cupGo.transform.localPosition = new Vector3(0.2f, 0.001f, length - 1.1f);
             var cup = cupGo.AddComponent<GolfCup>();
             cup.hole = gh;
             gh.cup = cup;
             var disc = GameObject.CreatePrimitive(PrimitiveType.Cylinder);
             disc.name = "CupMarker";
             Object.DestroyImmediate(disc.GetComponent<Collider>());
-            disc.transform.SetParent(cupGo.transform);
-            disc.transform.localPosition = new Vector3(0, 0.001f, 0);
+            disc.transform.SetParent(cupGo.transform, false);
             disc.transform.localScale = new Vector3(0.11f, 0.001f, 0.11f);
             disc.GetComponent<Renderer>().sharedMaterial = dark;
-
-            var lost = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            lost.name = "LostBall";
-            Object.DestroyImmediate(lost.GetComponent<Collider>());
-            lost.transform.SetParent(root.transform);
-            lost.transform.position = new Vector3(-0.5f, 0.025f, 1.2f);
-            lost.transform.localScale = Vector3.one * 0.05f;
-            lost.GetComponent<Renderer>().sharedMaterial = gold;
-            lost.AddComponent<LostBallPickup>();
-
-            var ball = CreateBall(white, ballPhys);
-            ball.transform.position = gh.TeePosition;
-
-            AddPlayerRig(ball);
-
-            string path = $"{TestFolder}/TestHole.unity";
-            EditorSceneManager.SaveScene(SceneManager.GetActiveScene(), path);
-            Debug.Log($"Mini Golf: test hole saved to {path}. Press Play and drag back from the ball to putt.");
+            return hole;
         }
 
-        // ---------- Add to an existing (e.g. exported) course scene ----------
+        // ---------- Level select ----------
 
-        [MenuItem("Mini Golf/Add Player To Open Scene")]
-        public static void AddPlayerToOpenScene()
+        [MenuItem("Mini Golf/Create Level Select Menu", priority = 2)]
+        public static void CreateLevelSelect()
         {
-            EnsureFolder(TestFolder);
+            if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo()) return;
+            EnsureFolder(Folder);
+            EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
+            var cam = Camera.main;
+            if (cam)
+            {
+                cam.clearFlags = CameraClearFlags.SolidColor;
+                cam.backgroundColor = new Color(0.1f, 0.25f, 0.35f);
+            }
+            new GameObject("LevelSelectMenu").AddComponent<LevelSelectMenu>();
+            EditorSceneManager.SaveScene(SceneManager.GetActiveScene(), MenuScenePath);
+            AddToBuild(MenuScenePath, first: true);
+            Debug.Log("Mini Golf: level select menu created and set as the first scene in the build.");
+        }
+
+        [MenuItem("Mini Golf/Add Set-Up Courses To Build", priority = 3)]
+        public static void AddCoursesToBuild()
+        {
+            int added = 0;
+            foreach (string guid in AssetDatabase.FindAssets("t:Scene"))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (path == MenuScenePath || !path.StartsWith("Assets/")) continue;
+                // Only scenes that have been set up to play (they contain a CourseManager).
+                string text = File.ReadAllText(path);
+                if (!text.Contains(MonoScriptGuid<CourseManager>())) continue;
+                if (AddToBuild(path)) added++;
+            }
+            if (File.Exists(MenuScenePath)) AddToBuild(MenuScenePath, first: true);
+            Debug.Log($"Mini Golf: added {added} course scene(s) to the build.");
+        }
+
+        static string MonoScriptGuid<T>() where T : MonoBehaviour
+        {
+            var go = new GameObject("tmp") { hideFlags = HideFlags.HideAndDontSave };
+            var script = MonoScript.FromMonoBehaviour(go.AddComponent<T>());
+            Object.DestroyImmediate(go);
+            return AssetDatabase.AssetPathToGUID(AssetDatabase.GetAssetPath(script));
+        }
+
+        static bool AddToBuild(string path, bool first = false)
+        {
+            var list = EditorBuildSettings.scenes.ToList();
+            list.RemoveAll(s => s.path == path);
+            var entry = new EditorBuildSettingsScene(path, true);
+            if (first) list.Insert(0, entry); else list.Add(entry);
+            bool isNew = EditorBuildSettings.scenes.All(s => s.path != path);
+            EditorBuildSettings.scenes = list.ToArray();
+            return isNew;
+        }
+
+        // ---------- Set up an exported course scene ----------
+
+        [MenuItem("Mini Golf/Set Up Open Course Scene", priority = 20)]
+        public static void SetUpOpenCourse()
+        {
+            var report = new StringBuilder();
+            var all = AllComponents().ToList();
+            List<Component> Named(params string[] names) => all.Where(c => names.Contains(c.GetType().Name)).ToList();
+
+            // Old VR cameras and listeners would fight with ours.
+            foreach (var c in all.OfType<Camera>().Where(c => c.enabled)) { Undo.RecordObject(c, "Disable camera"); c.enabled = false; }
+            foreach (var l in all.OfType<AudioListener>().Where(l => l.enabled)) { Undo.RecordObject(l, "Disable listener"); l.enabled = false; }
+
+            // Lost balls: attach our pickup to the game's own LostBall objects, in their original spots.
+            int lostBalls = 0;
+            foreach (var c in Named("LostBall"))
+            {
+                if (c.GetComponent<LostBallPickup>()) continue;
+                Undo.AddComponent<LostBallPickup>(c.gameObject);
+                lostBalls++;
+            }
+            report.AppendLine($"Lost balls set up: {lostBalls}");
+
+            // Holes: one GolfHole per original Hole component, with its cup and tee.
+            int holesMade = 0;
+            var usedNumbers = new HashSet<int>();
+            foreach (var h in Named("Hole"))
+            {
+                if (h.GetComponent<GolfHole>()) continue;
+                var gh = Undo.AddComponent<GolfHole>(h.gameObject);
+                gh.number = GuessNumber(h.gameObject.name, usedNumbers);
+                gh.par = 3;
+
+                var cupSource = h.GetComponentsInChildren<Component>(true)
+                    .FirstOrDefault(c => c && (c.GetType().Name == "Cup" || c.GetType().Name == "MightyCup"));
+                if (cupSource)
+                {
+                    var cup = cupSource.GetComponent<GolfCup>();
+                    if (!cup) cup = Undo.AddComponent<GolfCup>(cupSource.gameObject);
+                    cup.hole = gh;
+                    gh.cup = cup;
+                }
+                else report.AppendLine($"  No cup found under {h.name}");
+
+                var tee = h.GetComponentsInChildren<Transform>(true)
+                    .FirstOrDefault(t => Regex.IsMatch(t.name, "tee|start|ballspawn", RegexOptions.IgnoreCase));
+                if (tee) gh.tee = tee;
+                else report.AppendLine($"  No tee found under {h.name} (the ball will start at the Hole object)");
+                holesMade++;
+            }
+            report.AppendLine($"Holes set up: {holesMade} (par defaults to 3; set each hole's par in the Inspector)");
+
+            // Greens: the game marks them with InPlaySurface, which our ball already understands.
+            report.AppendLine($"Green surfaces found: {Named("InPlaySurface").Count}");
+
+            // Player: spawn near the first tee.
+            var first = Object.FindObjectsByType<GolfHole>(FindObjectsSortMode.None).OrderBy(g => g.number).FirstOrDefault();
+            Vector3 spawn = first ? first.TeePosition - (first.tee ? first.tee.forward : Vector3.forward) * 2f : Vector3.zero;
+            if (!Object.FindFirstObjectByType<PlayerModeController>())
+                CreatePlayerRig(spawn, first && first.tee ? first.tee.eulerAngles.y : 0f);
+
+            EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
+            string text = report.ToString();
+            EditorGUIUtility.systemCopyBuffer = text;
+            Debug.Log("Mini Golf: course set up (report copied to clipboard)\n" + text);
+            EditorUtility.DisplayDialog("Mini Golf", "Course set up. Save the scene (Ctrl+S), then press Play.\n\n" + text, "OK");
+        }
+
+        static int GuessNumber(string name, HashSet<int> used)
+        {
+            var m = Regex.Match(name, @"(\d+)");
+            int n = m.Success ? int.Parse(m.Groups[1].Value) : 1;
+            while (used.Contains(n)) n++;
+            used.Add(n);
+            return n;
+        }
+
+        // ---------- Player rig ----------
+
+        static void CreatePlayerRig(Vector3 spawn, float yaw)
+        {
+            EnsureFolder(Folder);
             var white = MakeMaterial("Ball", Color.white);
             var ballPhys = MakePhysics("BallPhysics", 0.3f, 0.5f, PhysicsMaterialCombine.Average);
-            var ball = CreateBall(white, ballPhys);
-            var view = SceneView.lastActiveSceneView;
-            ball.transform.position = view ? view.pivot : Vector3.zero;
-            AddPlayerRig(ball);
-            EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
-            Selection.activeGameObject = ball;
-            Debug.Log("Mini Golf: added ball, camera and CourseManager. Add GolfHole objects (with a Tee and a GolfCup) for each hole.");
+
+            var rig = new GameObject("MiniGolfPlayer");
+            Undo.RegisterCreatedObjectUndo(rig, "Add mini golf player");
+
+            var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+            ball.name = "GolfBall";
+            ball.transform.SetParent(rig.transform);
+            ball.transform.position = spawn + Vector3.up * 0.03f;
+            ball.transform.localScale = Vector3.one * 0.043f;
+            ball.GetComponent<Renderer>().sharedMaterial = white;
+            ball.GetComponent<Collider>().sharedMaterial = ballPhys;
+            ball.AddComponent<Rigidbody>().mass = 0.046f;
+            var gb = ball.AddComponent<GolfBall>();
+
+            var walkerGo = new GameObject("Walker");
+            walkerGo.transform.SetParent(rig.transform);
+            walkerGo.transform.SetPositionAndRotation(spawn + Vector3.up * 0.05f, Quaternion.Euler(0, yaw, 0));
+            var cc = walkerGo.AddComponent<CharacterController>();
+            cc.height = 1.7f;
+            cc.radius = 0.25f;
+            cc.center = new Vector3(0, 0.85f, 0);
+            cc.stepOffset = 0.3f;
+            var head = new GameObject("Head");
+            head.transform.SetParent(walkerGo.transform, false);
+            head.transform.localPosition = new Vector3(0, 1.6f, 0);
+            var headCam = head.AddComponent<Camera>();
+            headCam.nearClipPlane = 0.02f;
+            headCam.farClipPlane = 1000f;
+            head.tag = "MainCamera";
+            head.AddComponent<AudioListener>();
+            var walker = walkerGo.AddComponent<FirstPersonWalker>();
+            walker.head = headCam;
+
+            var puttGo = new GameObject("PuttCamera");
+            puttGo.transform.SetParent(rig.transform);
+            var puttCam = puttGo.AddComponent<Camera>();
+            puttCam.nearClipPlane = 0.02f;
+            puttCam.farClipPlane = 1000f;
+            puttGo.AddComponent<AudioListener>();
+            var gc = puttGo.AddComponent<GolfCamera>();
+            var putter = puttGo.AddComponent<TouchPutter>();
+            gc.ball = gb;
+            gc.putter = putter;
+            putter.ball = gb;
+            putter.cam = puttCam;
+            puttGo.SetActive(false);
+
+            var cm = rig.AddComponent<CourseManager>();
+            cm.ball = gb;
+            putter.course = cm;
+
+            var mode = rig.AddComponent<PlayerModeController>();
+            mode.walker = walker;
+            mode.puttRig = puttGo;
+            mode.golfCamera = gc;
+            mode.course = cm;
+            mode.ball = gb;
+            mode.menuScene = Path.GetFileNameWithoutExtension(MenuScenePath);
+        }
+
+        // ---------- Helpers ----------
+
+        static IEnumerable<Component> AllComponents()
+        {
+            for (int s = 0; s < SceneManager.sceneCount; s++)
+            {
+                var scene = SceneManager.GetSceneAt(s);
+                if (!scene.isLoaded) continue;
+                foreach (var root in scene.GetRootGameObjects())
+                foreach (var c in root.GetComponentsInChildren<Component>(true))
+                    if (c) yield return c;
+            }
         }
 
         static void EnsureFolder(string path)
@@ -110,47 +330,6 @@ namespace MiniGolfMobile.EditorTools
             AssetDatabase.CreateFolder(parent, Path.GetFileName(path));
         }
 
-        static GameObject CreateBall(Material mat, PhysicsMaterial phys)
-        {
-            var ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            ball.name = "GolfBall";
-            ball.transform.localScale = Vector3.one * 0.043f;
-            ball.GetComponent<Renderer>().sharedMaterial = mat;
-            ball.GetComponent<Collider>().sharedMaterial = phys;
-            var rb = ball.AddComponent<Rigidbody>();
-            rb.mass = 0.046f;
-            ball.AddComponent<GolfBall>();
-            return ball;
-        }
-
-        static void AddPlayerRig(GameObject ball)
-        {
-            var cam = Camera.main;
-            if (!cam)
-            {
-                var camGo = new GameObject("Main Camera") { tag = "MainCamera" };
-                cam = camGo.AddComponent<Camera>();
-                camGo.AddComponent<AudioListener>();
-            }
-            cam.nearClipPlane = 0.02f;
-            cam.farClipPlane = 500f;
-            var gc = cam.GetComponent<GolfCamera>();
-            if (!gc) gc = cam.gameObject.AddComponent<GolfCamera>();
-            var putter = cam.GetComponent<TouchPutter>();
-            if (!putter) putter = cam.gameObject.AddComponent<TouchPutter>();
-            var gb = ball.GetComponent<GolfBall>();
-            gc.ball = gb;
-            gc.putter = putter;
-            putter.ball = gb;
-            putter.cam = cam;
-
-            var cm = Object.FindFirstObjectByType<CourseManager>();
-            if (!cm) cm = new GameObject("CourseManager").AddComponent<CourseManager>();
-            cm.ball = gb;
-            cm.golfCamera = gc;
-            putter.course = cm;
-        }
-
         static GameObject Box(string name, GameObject parent, Vector3 pos, Vector3 size, Material mat, PhysicsMaterial phys)
         {
             var go = GameObject.CreatePrimitive(PrimitiveType.Cube);
@@ -159,13 +338,13 @@ namespace MiniGolfMobile.EditorTools
             go.transform.position = pos;
             go.transform.localScale = size;
             go.GetComponent<Renderer>().sharedMaterial = mat;
-            go.GetComponent<Collider>().sharedMaterial = phys;
+            if (phys) go.GetComponent<Collider>().sharedMaterial = phys;
             return go;
         }
 
         static Material MakeMaterial(string name, Color color)
         {
-            string path = $"{TestFolder}/{name}.mat";
+            string path = $"{Folder}/{name}.mat";
             var existing = AssetDatabase.LoadAssetAtPath<Material>(path);
             if (existing) return existing;
             var shader = Shader.Find("Universal Render Pipeline/Lit");
@@ -179,7 +358,7 @@ namespace MiniGolfMobile.EditorTools
 
         static PhysicsMaterial MakePhysics(string name, float friction, float bounce, PhysicsMaterialCombine bounceCombine)
         {
-            string path = $"{TestFolder}/{name}.asset";
+            string path = $"{Folder}/{name}.asset";
             var existing = AssetDatabase.LoadAssetAtPath<PhysicsMaterial>(path);
             if (existing) return existing;
             var pm = new PhysicsMaterial(name)
@@ -196,7 +375,6 @@ namespace MiniGolfMobile.EditorTools
 
         // ---------- Scene report ----------
 
-        // Component names from the original game that we care about when setting up a course.
         static readonly string[] Interesting =
         {
             "Hole", "Cup", "MightyCup", "Flag", "HoleComplete", "Course", "InPlaySurface", "BallCatcher",
@@ -206,51 +384,39 @@ namespace MiniGolfMobile.EditorTools
             "Teleporter", "Surface", "GolfBall", "Ball", "Waypoint", "HoleSelector", "DoNotEndPuttTrigger"
         };
 
-        [MenuItem("Mini Golf/Copy Scene Report")]
+        [MenuItem("Mini Golf/Copy Scene Report", priority = 40)]
         public static void CopySceneReport()
         {
             var counts = new Dictionary<string, int>();
             var found = new Dictionary<string, List<string>>();
-            int missing = 0;
-
-            for (int s = 0; s < SceneManager.sceneCount; s++)
+            foreach (var c in AllComponents())
             {
-                var scene = SceneManager.GetSceneAt(s);
-                if (!scene.isLoaded) continue;
-                foreach (var root in scene.GetRootGameObjects())
-                foreach (var t in root.GetComponentsInChildren<Transform>(true))
-                foreach (var c in t.GetComponents<Component>())
-                {
-                    if (c == null) { missing++; continue; }
-                    string n = c.GetType().Name;
-                    counts[n] = counts.TryGetValue(n, out int k) ? k + 1 : 1;
-                    if (!Interesting.Contains(n)) continue;
-                    if (!found.TryGetValue(n, out var list)) found[n] = list = new List<string>();
-                    if (list.Count < 40)
-                    {
-                        Vector3 p = t.position;
-                        list.Add($"  {PathOf(t)}  pos=({p.x:F2}, {p.y:F2}, {p.z:F2})  colliders={t.GetComponents<Collider>().Length}  active={t.gameObject.activeInHierarchy}");
-                    }
-                }
+                string n = c.GetType().Name;
+                counts[n] = counts.TryGetValue(n, out int k) ? k + 1 : 1;
+                if (!Interesting.Contains(n)) continue;
+                if (!found.TryGetValue(n, out var list)) found[n] = list = new List<string>();
+                if (list.Count >= 40) continue;
+                Transform t = c.transform;
+                Vector3 p = t.position;
+                list.Add($"  {PathOf(t)}  pos=({p.x:F2}, {p.y:F2}, {p.z:F2})  children={t.childCount}  colliders={t.GetComponents<Collider>().Length}");
             }
 
             var sb = new StringBuilder();
-            sb.AppendLine($"Scenes: {string.Join(", ", Enumerable.Range(0, SceneManager.sceneCount).Select(i => SceneManager.GetSceneAt(i).name))}");
-            sb.AppendLine($"Missing scripts: {missing}");
-            sb.AppendLine("\n== Golf-related objects ==");
+            sb.AppendLine($"Scene: {SceneManager.GetActiveScene().path}");
+            sb.AppendLine("== Golf-related objects ==");
             foreach (var kv in found.OrderBy(k => k.Key))
             {
                 sb.AppendLine($"{kv.Key} ({counts[kv.Key]}):");
                 foreach (var line in kv.Value) sb.AppendLine(line);
             }
-            sb.AppendLine("\n== All component types ==");
-            foreach (var kv in counts.OrderByDescending(k => k.Value))
+            sb.AppendLine("== All component types ==");
+            foreach (var kv in counts.OrderByDescending(k => k.Value).Take(80))
                 sb.AppendLine($"{kv.Value,6}  {kv.Key}");
 
             string text = sb.ToString();
             EditorGUIUtility.systemCopyBuffer = text;
             File.WriteAllText("MiniGolfSceneReport.txt", text);
-            Debug.Log("Mini Golf: scene report copied to the clipboard and saved as MiniGolfSceneReport.txt in the project folder.");
+            Debug.Log("Mini Golf: scene report copied to the clipboard (also saved as MiniGolfSceneReport.txt in the project folder).");
         }
 
         static string PathOf(Transform t)

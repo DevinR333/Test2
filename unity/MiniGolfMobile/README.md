@@ -1,38 +1,44 @@
 # MiniGolfMobile (Unity)
 
-Touch-screen mini golf gameplay for Unity 6 (6000.3), written from scratch. It's meant to be dropped
-onto course scenes you've exported yourself. This folder contains **only new code**, no game assets.
-Don't commit exported game files to this repository.
+First-person mini golf for phones, for Unity 6 (6000.3), written from scratch. You walk around a
+course, walk up to any hole's tee to play it, putt with touch controls, and grab hidden lost balls.
+It's meant to be added to course scenes you've exported yourself. This folder contains **only new code**,
+no game assets. Don't commit exported game files to this repository.
 
-## What's included
+## Controls
+
+| Where | Phone | Editor |
+| --- | --- | --- |
+| Walking | Left thumb: move stick. Right side: drag to look, tap to grab a lost ball | WASD, hold right mouse to look, left click to grab |
+| At a tee | **Play hole N** button | same |
+| Putting | Drag back from the ball and let go. Drag elsewhere to look, pinch to zoom | click-drag from the ball, scroll to zoom |
+| Buttons | **Walk**, **Putt**, **Go to ball**, **Quit hole**, **Card**, **Menu** | same |
+
+## Scripts
 
 | Script | What it does |
 | --- | --- |
-| `GolfBall` | Shots, stop detection, reset when out of bounds |
-| `TouchPutter` | Drag back from the ball and let go to putt, with an aim line |
-| `GolfCamera` | Follows the ball; one-finger drag to look around, pinch to zoom, tap to collect lost balls |
-| `GolfHole`, `GolfCup` | Tee position, par, cup detection (works with or without a real cup mesh) |
-| `CourseManager` | Strokes, stroke limit, next hole, HUD and scorecard |
-| `LostBallPickup` | Collectible lost balls, saved on the device |
-| `SpinObstacle`, `PingPongMover` | Simple moving obstacles |
-| `GolfPlaySurface`, `OutOfBoundsZone` | Mark the green / out-of-bounds areas |
+| `FirstPersonWalker` | Walking and looking in first person |
+| `PlayerModeController` | Switches between walking and putting; tee / ball / lost ball interactions |
+| `GolfBall`, `TouchPutter`, `GolfCamera` | The ball, drag-to-putt, putting camera |
+| `GolfHole`, `GolfCup` | Tee, par, cup detection |
+| `CourseManager` | Strokes, stroke limit, scores in any hole order, HUD and scorecard |
+| `LostBallPickup` | Lost balls: stay where the course put them, saved when found |
+| `LevelSelectMenu` | Course list, with lost balls found per course |
+| `SpinObstacle`, `PingPongMover`, `GolfPlaySurface`, `OutOfBoundsZone` | Obstacles and course markers |
 
-Menu **Mini Golf** (editor):
-- **Create Test Hole** builds and saves a small test hole so you can try the controls.
-- **Add Player To Open Scene** adds the ball, camera and CourseManager to a course scene.
-- **Copy Scene Report** lists the golf-related objects in the open scene and copies the list to the clipboard.
+## Editor menu: Mini Golf
 
-## Try it in a clean project first
-
-1. Unity Hub → **New project** → **Universal 3D** template, Unity **6000.3.9f1**.
-2. Copy this `MiniGolfMobile` folder into the project's `Assets` folder.
-3. Menu **Mini Golf → Create Test Hole**, then press **Play**.
-   In the editor, click and drag back from the ball to putt, drag elsewhere to look around, and use the scroll wheel to zoom.
-4. On a phone: **File → Build Profiles → Android → Switch Platform**, plug in the phone, then **Build And Run**.
+- **Create Test Course**: a small two-hole course to try the controls.
+- **Create Level Select Menu**: the course menu, set as the first scene.
+- **Set Up Open Course Scene**: turns an exported course scene into a playable one (lost balls, holes, cups, tees, player).
+- **Add Set-Up Courses To Build**: adds every set-up course to the build so it shows in the menu.
+- **Copy Scene Report**: lists golf-related objects in the open scene and copies the list to the clipboard.
 
 ## Tuning
 
-Everything that affects feel is exposed in the Inspector:
 - Shot strength: `TouchPutter.maxShotSpeed`, `powerCurve`
 - Roll and stop: `GolfBall.linearDamping`, `stopSpeed`
 - Cup: `GolfCup.radius`, `maxSinkSpeed`
+- Walking: `FirstPersonWalker.walkSpeed`, `lookSpeed`
+- Par for each hole: `GolfHole.par`

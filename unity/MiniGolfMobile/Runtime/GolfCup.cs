@@ -21,14 +21,14 @@ namespace MiniGolfMobile
         void Start()
         {
             if (!hole) hole = GetComponentInParent<GolfHole>();
-            ball = FindFirstObjectByType<GolfBall>();
+            ball = FindFirstObjectByType<GolfBall>(FindObjectsInactive.Include);
             if (ball) ballBody = ball.GetComponent<Rigidbody>();
             course = FindFirstObjectByType<CourseManager>();
         }
 
         void FixedUpdate()
         {
-            if (!ball || ball.InCup) return;
+            if (!ball || !ball.gameObject.activeInHierarchy || ball.InCup) return;
             Vector3 d = ball.transform.position - transform.position;
             if (d.y > 0.06f || d.y < -depth) return;
             if (new Vector2(d.x, d.z).magnitude > radius) return;

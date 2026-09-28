@@ -25,8 +25,6 @@ namespace MiniGolfMobile
         public float followSharpness = 8f;
         [Tooltip("A press that moves less than this (screen points) counts as a tap.")]
         public float tapMaxMove = 12f;
-        [Tooltip("How far away a lost ball can be tapped from.")]
-        public float tapReach = 25f;
 
         public event Action<Vector2> Tapped;
 
@@ -86,10 +84,7 @@ namespace MiniGolfMobile
             {
                 Vector2 p = PointerInput.Position;
                 if (orbiting && (p - pressPos).magnitude / PointerInput.DpiScale < tapMaxMove)
-                {
-                    LostBallPickup.TryCollectAt(cam, p, tapReach);
                     Tapped?.Invoke(p);
-                }
                 orbiting = false;
             }
         }

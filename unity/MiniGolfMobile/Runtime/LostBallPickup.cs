@@ -5,13 +5,15 @@ using UnityEngine.SceneManagement;
 
 namespace MiniGolfMobile
 {
-    // A hidden collectible ball. Collect it by rolling your ball into it or by tapping it.
+    // A hidden collectible ball, left where the course placed it. Walk up to it and tap it to grab it.
     // Found balls are remembered on the device between sessions.
     public class LostBallPickup : MonoBehaviour
     {
         [Tooltip("Unique name for saving. Filled in automatically from the object's name and position if empty.")]
         public string id;
-        [Tooltip("Your ball collects it when this close (metres).")]
+        [Tooltip("Also collect it when your golf ball rolls into it.")]
+        public bool collectWithGolfBall;
+        [Tooltip("Golf ball distance (metres) that counts as touching.")]
         public float touchRadius = 0.1f;
         [Tooltip("Size of the tap target added when the object has no collider.")]
         public float tapRadius = 0.08f;
@@ -43,11 +45,11 @@ namespace MiniGolfMobile
             }
         }
 
-        void Start() => ball = FindFirstObjectByType<GolfBall>();
+        void Start() => ball = FindFirstObjectByType<GolfBall>(FindObjectsInactive.Include);
 
         void Update()
         {
-            if (!collected && ball && Vector3.Distance(ball.transform.position, transform.position) < touchRadius)
+            if (collectWithGolfBall && !collected && ball && ball.gameObject.activeInHierarchy && Vector3.Distance(ball.transform.position, transform.position) < touchRadius)
                 Collect();
         }
 
@@ -56,6 +58,8 @@ namespace MiniGolfMobile
             if (collected) return;
             collected = true;
             PlayerPrefs.SetInt(Key, 1);
+            string scene = SceneManager.GetActiveScene().name;
+            PlayerPrefs.SetInt(FoundKey(scene), PlayerPrefs.GetInt(FoundKey(scene), 0) + 1);
             PlayerPrefs.Save();
             Collected?.Invoke(this);
             StartCoroutine(ShrinkAway());
@@ -73,22 +77,28 @@ namespace MiniGolfMobile
             gameObject.SetActive(false);
         }
 
-        public static void TryCollectAt(Camera cam, Vector2 screenPos, float reach)
+        // Grabs the nearest lost ball along a tap, if it is within arm's reach.
+        public static bool TryCollectAt(Camera cam, Vector2 screenPos, float reach)
         {
             Ray ray = cam.ScreenPointToRay(screenPos);
-            foreach (var hit in Physics.RaycastAll(ray, reach, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Collide))
+            var hits = Physics.RaycastAll(ray, reach, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Collide);
+            System.Array.Sort(hits, (a, b) => a.distance.CompareTo(b.distance));
+            foreach (var hit in hits)
             {
                 var pickup = hit.collider.GetComponentInParent<LostBallPickup>();
-                if (pickup) { pickup.Collect(); return; }
+                if (pickup) { pickup.Collect(); return true; }
             }
+            return false;
         }
 
-        public static int CountFound(string sceneName, string[] ids)
+        public static string FoundKey(string scene) => $"lostballfound/{scene}";
+        public static string TotalKey(string scene) => $"lostballtotal/{scene}";
+
+        // Remembers how many lost balls this course has, for the level menu.
+        public static void RecordTotalForActiveScene()
         {
-            int n = 0;
-            foreach (var i in ids)
-                if (PlayerPrefs.GetInt($"lostball/{sceneName}/{i}", 0) == 1) n++;
-            return n;
+            int total = FindObjectsByType<LostBallPickup>(FindObjectsInactive.Include, FindObjectsSortMode.None).Length;
+            PlayerPrefs.SetInt(TotalKey(SceneManager.GetActiveScene().name), total);
         }
     }
 }

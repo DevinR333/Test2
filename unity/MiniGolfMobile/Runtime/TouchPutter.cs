@@ -62,7 +62,7 @@ namespace MiniGolfMobile
             line.enabled = false;
         }
 
-        bool CanShoot => ball && !ball.IsMoving && !ball.InCup && (!course || course.AcceptingShots);
+        bool CanShoot => ball && ball.gameObject.activeInHierarchy && !ball.IsMoving && !ball.InCup && (!course || course.AcceptingShots);
 
         void Update()
         {
