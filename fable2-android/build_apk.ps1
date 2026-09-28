@@ -294,14 +294,39 @@ Info 'Fetching SDK dependencies (large; first run only) ...'
 # (rexglue-sdk-submodule-pins.txt). Plain `git submodule update` cannot be
 # used: the SDK fork records at least one commit (libmspack) that its
 # upstream no longer serves, so it aborts.
+# Git on Windows cannot create symbolic links without Developer Mode, so it
+# checks each one out as a small text file holding the target path (which
+# then fails to compile, e.g. libmspack's cabextract/mspack/*.c). Replace
+# every such placeholder with a copy of what it points to.
+function Resolve-Symlinks([string]$Repo) {
+    $links = @(Native { & git -C $Repo ls-files -s } | Where-Object { $_ -match '^120000 ' } |
+               ForEach-Object { ($_ -split "`t", 2)[1] })
+    # Links can point at other links; a few passes settle chains.
+    for ($pass = 0; $pass -lt 4; $pass++) {
+        foreach ($rel in $links) {
+            $path = Join-Path $Repo $rel
+            $item = Get-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue
+            if (-not $item -or $item.PSIsContainer -or $item.LinkType -or $item.Length -gt 1024) { continue }
+            $target = (Get-Content -LiteralPath $path -Raw).Trim()
+            if (-not $target -or $target.Contains("`n")) { continue }
+            $source = Join-Path (Split-Path -Parent $path) $target
+            if (Test-Path -LiteralPath $source -PathType Leaf) {
+                Copy-Item -LiteralPath $source -Destination $path -Force
+            } elseif (Test-Path -LiteralPath $source -PathType Container) {
+                Remove-Item -LiteralPath $path -Force
+                Copy-Item -LiteralPath $source -Destination $path -Recurse -Force
+            }
+        }
+    }
+}
+
 $pins = Get-Content (Join-Path $FableDir 'thirdparty\rexglue-sdk-submodule-pins.txt') |
         Where-Object { $_ -match '^thirdparty/' }
 foreach ($line in $pins) {
     $path, $sha = $line -split '\s+'
     $sub = Join-Path $SdkDir $path
     $cur = Native { & git -C $sub rev-parse HEAD 2>$null }
-    $clean = Native { & git -C $sub status --porcelain 2>$null }
-    if ((Test-Path (Join-Path $sub '.git')) -and $cur -eq $sha -and -not $clean) { continue }
+    if ((Test-Path (Join-Path $sub '.git')) -and $cur -eq $sha) { Resolve-Symlinks $sub; continue }
 
     $url = Native { & git -C $SdkDir config -f .gitmodules --get "submodule.$path.url" }
     if (-not $url) { Fail "No URL for $path in the SDK's .gitmodules." }
@@ -315,6 +340,7 @@ foreach ($line in $pins) {
     Run git @('-C', $sub, 'remote', 'add', 'origin', $url)
     Run git @('-C', $sub, 'fetch', '--quiet', '--depth', '1', 'origin', $sha)
     Run git @('-C', $sub, 'checkout', '--quiet', '--force', $sha)
+    Resolve-Symlinks $sub
 }
 
 Info 'Applying patches ...'
