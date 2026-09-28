@@ -63,9 +63,12 @@ function Info($text) { Write-Host "    $text" }
 function Warn($text) { Write-Host "    $text" -ForegroundColor Yellow }
 function Fail($text) { Write-Host "`nERROR: $text" -ForegroundColor Red; exit 1 }
 
-# Run a native command and stop on a non-zero exit code.
+# Run a native command and stop on a non-zero exit code. Native tools (git,
+# sdkmanager, ...) print progress to stderr; with 'Stop' in effect Windows
+# PowerShell 5.1 would treat that as a failure, so only the exit code counts.
 function Run {
     param([string]$Exe, [string[]]$Arguments, [string]$Dir = $null)
+    $ErrorActionPreference = 'Continue'
     if ($Dir) { Push-Location $Dir }
     try {
         & $Exe @Arguments
@@ -73,6 +76,12 @@ function Run {
     } finally {
         if ($Dir) { Pop-Location }
     }
+}
+
+# Same stderr rule for native calls whose output or exit code is inspected.
+function Native([scriptblock]$Block) {
+    $ErrorActionPreference = 'Continue'
+    & $Block
 }
 
 function Refresh-Path {
@@ -92,6 +101,9 @@ if ($drive.Free -lt 60GB) {
 }
 
 $winget = Get-Command winget -ErrorAction SilentlyContinue
+function Winget-Install([string]$Id, [string[]]$Extra = @()) {
+    Native { & winget install --id $Id -e --accept-source-agreements --accept-package-agreements @Extra | Out-Host }
+}
 function Ensure-Tool {
     param([string]$Command, [string]$WingetId, [string[]]$ExtraPaths = @())
     foreach ($p in $ExtraPaths) {
@@ -100,7 +112,7 @@ function Ensure-Tool {
     if (Get-Command $Command -ErrorAction SilentlyContinue) { return }
     if (-not $winget) { Fail "$Command not found and winget is unavailable. Install $WingetId manually." }
     Info "Installing $WingetId ..."
-    & winget install --id $WingetId -e --accept-source-agreements --accept-package-agreements --silent | Out-Host
+    Winget-Install $WingetId @('--silent')
     Refresh-Path
     foreach ($p in $ExtraPaths) { if (Test-Path $p) { $env:Path = "$p;$env:Path" } }
     if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) {
@@ -109,7 +121,6 @@ function Ensure-Tool {
 }
 
 Ensure-Tool git     'Git.Git'
-Ensure-Tool python  'Python.Python.3.12'
 Ensure-Tool cmake   'Kitware.CMake'        @("$env:ProgramFiles\CMake\bin")
 Ensure-Tool ninja   'Ninja-build.Ninja'
 Ensure-Tool clang++ 'LLVM.LLVM'            @("$env:ProgramFiles\LLVM\bin")
@@ -117,23 +128,53 @@ Ensure-Tool clang++ 'LLVM.LLVM'            @("$env:ProgramFiles\LLVM\bin")
 # clang on Windows compiles against the MSVC C++ library and Windows SDK
 # (needed for the rexglue code generator, which runs on this PC).
 $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
-$hasVc = (Test-Path $vswhere) -and
-         (& $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath)
-if (-not $hasVc) {
+function Has-VcTools {
+    if (-not (Test-Path $vswhere)) { return $false }
+    $path = Native { & $vswhere -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath }
+    return [bool]$path
+}
+if (-not (Has-VcTools)) {
     if (-not $winget) { Fail 'Visual Studio Build Tools (C++ workload) not found. Install them and retry.' }
     Info 'Installing Visual Studio 2022 Build Tools (C++), this takes a while ...'
-    & winget install --id Microsoft.VisualStudio.2022.BuildTools -e --accept-source-agreements `
-        --accept-package-agreements --override `
-        '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended' | Out-Host
+    Winget-Install 'Microsoft.VisualStudio.2022.BuildTools' @('--override',
+        '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended')
+    if (-not (Has-VcTools)) {
+        Fail ("Visual Studio Build Tools did not install. If it said 'Another installation is already " +
+              "in progress' (1618), another installer (Windows Update, Visual Studio Installer, a game " +
+              "launcher) is busy: wait for it to finish or restart the PC, then run build_apk.cmd again.")
+    }
 }
 
-# Python from the Microsoft Store stub does not run scripts.
-& python -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)" 2>$null
-if ($LASTEXITCODE -ne 0) { Fail 'python does not run (Windows Store stub?). Install Python 3 from python.org and retry.' }
+# Python. "python" on a fresh Windows is often only the Microsoft Store alias
+# (WindowsApps\python.exe), which opens the Store instead of running scripts.
+function Find-Python {
+    $candidates = @()
+    $candidates += Get-Command python.exe -All -ErrorAction SilentlyContinue |
+                   Where-Object { $_.Source -notlike '*\WindowsApps\*' } | ForEach-Object { $_.Source }
+    $candidates += Get-ChildItem "$env:LOCALAPPDATA\Programs\Python\Python3*\python.exe",
+                                 "$env:ProgramFiles\Python3*\python.exe" -ErrorAction SilentlyContinue |
+                   Sort-Object FullName -Descending | ForEach-Object { $_.FullName }
+    foreach ($exe in $candidates) {
+        Native { & $exe -c "import sys; sys.exit(0 if sys.version_info >= (3, 8) else 1)" } | Out-Null
+        if ($LASTEXITCODE -eq 0) { return $exe }
+    }
+    return $null
+}
+$Python = Find-Python
+if (-not $Python) {
+    if (-not $winget) { Fail 'Python 3 not found. Install it from python.org and retry.' }
+    Info 'Installing Python.Python.3.12 ...'
+    Winget-Install 'Python.Python.3.12' @('--silent')
+    $Python = Find-Python
+    if (-not $Python) { Fail 'Python 3.12 install failed. Install it from python.org and retry.' }
+}
+# First on PATH, ahead of the Store alias, for CMake and the build scripts.
+$env:Path = "$(Split-Path -Parent $Python);$env:Path"
+Info "Python: $Python"
 
-$cmakeVersion = ((& cmake --version | Select-Object -First 1) -replace '[^0-9.]', '')
+$cmakeVersion = ((Native { & cmake --version } | Select-Object -First 1) -replace '[^0-9.]', '')
 if ([version]$cmakeVersion -lt [version]'3.25') { Fail "CMake $cmakeVersion is too old (need 3.25+). Update CMake." }
-$clangMajor = [int](((& clang++ --version | Select-Object -First 1) -replace '.*version (\d+).*', '$1'))
+$clangMajor = [int](((Native { & clang++ --version } | Select-Object -First 1) -replace '.*version (\d+).*', '$1'))
 if ($clangMajor -lt 18) { Fail "clang $clangMajor is too old (need 18+). Update LLVM." }
 
 # JDK 17 for Gradle.
@@ -141,7 +182,7 @@ $jdk = Get-ChildItem "$env:ProgramFiles\Microsoft" -Filter 'jdk-17*' -Directory 
 if (-not $jdk) {
     if (-not $winget) { Fail 'JDK 17 not found. Install Microsoft Build of OpenJDK 17.' }
     Info 'Installing Microsoft.OpenJDK.17 ...'
-    & winget install --id Microsoft.OpenJDK.17 -e --accept-source-agreements --accept-package-agreements --silent | Out-Host
+    Winget-Install 'Microsoft.OpenJDK.17' @('--silent')
     $jdk = Get-ChildItem "$env:ProgramFiles\Microsoft" -Filter 'jdk-17*' -Directory | Select-Object -First 1
     if (-not $jdk) { Fail 'JDK 17 install failed.' }
 }
@@ -163,7 +204,7 @@ if (-not (Test-Path $sdkmanager)) {
 $env:ANDROID_HOME = $SdkRoot
 if (-not (Test-Path (Join-Path $SdkRoot "ndk\$NdkVersion"))) {
     Info 'Installing Android platform, build tools and NDK (a few GB) ...'
-    (1..30 | ForEach-Object { 'y' }) | & $sdkmanager --sdk_root=$SdkRoot --licenses | Out-Null
+    Native { (1..30 | ForEach-Object { 'y' }) | & $sdkmanager --sdk_root=$SdkRoot --licenses | Out-Null }
     Run $sdkmanager @("--sdk_root=$SdkRoot", 'platform-tools', 'platforms;android-35',
                       'build-tools;35.0.0', "ndk;$NdkVersion")
 }
@@ -197,7 +238,7 @@ if (-not (Test-Path (Join-Path $GameDir 'default.xex'))) {
     } else {
         Info 'ISO matches.'
     }
-    Run python @((Join-Path $Here 'tools\extract_xiso.py'), $Iso, $GameDir)
+    Run $Python @((Join-Path $Here 'tools\extract_xiso.py'), $Iso, $GameDir)
 }
 foreach ($needed in 'default.xex', 'data') {
     if (-not (Test-Path (Join-Path $GameDir $needed))) { Fail "$needed missing from $GameDir after extraction." }
@@ -209,7 +250,7 @@ Info "Game files in $GameDir"
 # ---------------------------------------------------------------------------
 Step '3/6 Sources'
 
-& git config --global core.longpaths true
+Run git @('config', '--global', 'core.longpaths', 'true')
 
 function Checkout-Pinned {
     param([string]$Url, [string]$Commit, [string]$Dir)
@@ -233,7 +274,7 @@ $pins = Get-Content (Join-Path $FableDir 'thirdparty\rexglue-sdk-submodule-pins.
 foreach ($line in $pins) {
     $path, $sha = $line -split '\s+'
     $sub = Join-Path $SdkDir $path
-    $cur = (& git -C $sub rev-parse HEAD 2>$null)
+    $cur = Native { & git -C $sub rev-parse HEAD 2>$null }
     if ($cur -ne $sha) {
         Run git @('-C', $sub, 'fetch', '--quiet', '--depth', '1', 'origin', $sha)
     }
@@ -271,7 +312,7 @@ if (-not (Test-Path $stamp)) {
     Copy-Item (Join-Path $GameDir 'default.xex') (Join-Path $FableDir 'default.xex') -Force
     Info 'Running codegen (several minutes) ...'
     Run $rexglue @('codegen', 'fable_2_manifest.toml') $FableDir
-    Run python @('tools\apply_recomp_patches.py', 'generated\default') $FableDir
+    Run $Python @('tools\apply_recomp_patches.py', 'generated\default') $FableDir
     Set-Content -Path $stamp -Value $FableCommit
 } else {
     Info 'Already generated.'
@@ -313,7 +354,7 @@ Step '6/6 Phone'
 
 $device = $null
 if (-not $NoPhone) {
-    $device = (& $adb devices) | Select-String -Pattern '\tdevice$' | Select-Object -First 1
+    $device = (Native { & $adb devices }) | Select-String -Pattern '\tdevice$' | Select-Object -First 1
 }
 if (-not $device) {
     Info 'No phone connected (or -NoPhone). To finish by hand:'
