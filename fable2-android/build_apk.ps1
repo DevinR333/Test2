@@ -390,6 +390,10 @@ if (-not (Test-Path $stamp)) {
         Run cmake @('-S', $SdkDir, '-B', $HostDir, '-G', 'Ninja',
                     '-DCMAKE_BUILD_TYPE=Release',
                     '-DCMAKE_C_COMPILER=clang', '-DCMAKE_CXX_COMPILER=clang++',
+                    # Same as the SDK's own windows preset: the runtime uses
+                    # SSSE3/SSE4 intrinsics, which clang rejects without it.
+                    '-DCMAKE_C_FLAGS=-march=x86-64-v2', '-DCMAKE_CXX_FLAGS=-march=x86-64-v2',
+                    '-DCMAKE_CXX_STANDARD=23',
                     '-DREXGLUE_ENABLE_TRACY=OFF')
         Run-Build cmake @('--build', $HostDir, '--target', 'rexglue', '--', '-k', '0') (Join-Path $WorkDir 'build-host.log')
     }
