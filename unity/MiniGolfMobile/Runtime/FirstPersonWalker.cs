@@ -16,6 +16,10 @@ namespace MiniGolfMobile
         [Tooltip("Thumb distance (screen points) for full walking speed.")]
         public float stickRadius = 60f;
         public float gravity = 15f;
+        [Tooltip("How quickly walking speeds up and slows down. Higher = snappier.")]
+        public float acceleration = 10f;
+        [Tooltip("Smooths turning. 0 = raw input, higher = smoother.")]
+        [Range(0f, 0.2f)] public float lookSmoothing = 0.05f;
         public float tapMaxMove = 12f;
         public float tapMaxTime = 0.35f;
         [Tooltip("The player's feet never go below this height (lets you wade in the sea). Set automatically from the water level.")]
@@ -29,6 +33,8 @@ namespace MiniGolfMobile
 
         CharacterController controller;
         float yaw, pitch, fallSpeed;
+        float smoothYaw, smoothPitch;
+        Vector3 planarVelocity;
         int moveId = -1, lookId = -1;
         Vector2 moveOrigin, moveNow, lookLast, lookStart;
         float lookStartTime;
@@ -38,7 +44,7 @@ namespace MiniGolfMobile
         {
             controller = GetComponent<CharacterController>();
             if (!head) head = GetComponentInChildren<Camera>();
-            yaw = transform.eulerAngles.y;
+            yaw = smoothYaw = transform.eulerAngles.y;
         }
 
         void OnEnable()
@@ -87,11 +93,16 @@ namespace MiniGolfMobile
 
             yaw += look.x * lookSpeed;
             pitch = Mathf.Clamp(pitch - look.y * lookSpeed, -80f, 80f);
-            transform.rotation = Quaternion.Euler(0f, yaw, 0f);
-            if (head) head.transform.localRotation = Quaternion.Euler(pitch, 0f, 0f);
+            float k = lookSmoothing <= 0f ? 1f : 1f - Mathf.Exp(-Time.deltaTime / lookSmoothing);
+            smoothYaw = Mathf.LerpAngle(smoothYaw, yaw, k);
+            smoothPitch = Mathf.Lerp(smoothPitch, pitch, k);
+            transform.rotation = Quaternion.Euler(0f, smoothYaw, 0f);
+            if (head) head.transform.localRotation = Quaternion.Euler(smoothPitch, 0f, 0f);
 
             move = Vector2.ClampMagnitude(move, 1f);
-            Vector3 velocity = (transform.right * move.x + transform.forward * move.y) * walkSpeed;
+            Vector3 target = (transform.right * move.x + transform.forward * move.y) * walkSpeed;
+            planarVelocity = Vector3.Lerp(planarVelocity, target, 1f - Mathf.Exp(-acceleration * Time.deltaTime));
+            Vector3 velocity = planarVelocity;
             fallSpeed = controller.isGrounded ? -1f : fallSpeed - gravity * Time.deltaTime;
             velocity.y = fallSpeed;
             controller.Move(velocity * Time.deltaTime);
@@ -115,9 +126,10 @@ namespace MiniGolfMobile
             transform.position = feetPosition;
             controller.enabled = true;
             Vector3 d = lookAt - feetPosition;
-            if (new Vector2(d.x, d.z).sqrMagnitude > 1e-4f) yaw = Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg;
-            pitch = 25f;
+            if (new Vector2(d.x, d.z).sqrMagnitude > 1e-4f) yaw = smoothYaw = Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg;
+            pitch = smoothPitch = 25f;
             fallSpeed = 0f;
+            planarVelocity = Vector3.zero;
         }
 
         void OnGUI()

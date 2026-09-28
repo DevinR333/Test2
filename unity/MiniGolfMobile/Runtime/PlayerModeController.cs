@@ -45,6 +45,15 @@ namespace MiniGolfMobile
 
         GUIStyle button;
 
+        [Tooltip("Frame rate to aim for on phones (they default to 30).")]
+        public int targetFrameRate = 60;
+
+        void Awake()
+        {
+            QualitySettings.vSyncCount = 0;
+            Application.targetFrameRate = targetFrameRate;
+        }
+
         void Start()
         {
             if (!walker) walker = FindFirstObjectByType<FirstPersonWalker>(FindObjectsInactive.Include);

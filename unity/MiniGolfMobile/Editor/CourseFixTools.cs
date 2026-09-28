@@ -493,6 +493,59 @@ namespace MiniGolfMobile.EditorTools
             EditorUtility.DisplayDialog("Mini Golf", "Material info copied to the clipboard.", "OK");
         }
 
+        // ---------- Performance ----------
+
+        [MenuItem("Mini Golf/Optimize For Phone", priority = 25)]
+        public static void OptimizeForPhone()
+        {
+            var report = new StringBuilder();
+
+            // The Quest version's floating VR menus are still in the world; our HUD doesn't use them.
+            int canvases = 0;
+            foreach (var c in Object.FindObjectsByType<Canvas>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                if (!c.isRootCanvas) continue;
+                Undo.RecordObject(c.gameObject, "Hide VR menu");
+                c.gameObject.SetActive(false);
+                canvases++;
+            }
+            report.AppendLine($"VR menus hidden: {canvases}");
+
+            // Hundreds of small lights were baked in the original; live, they're the biggest cost. Keep only the sun.
+            int lightsOff = 0;
+            foreach (var l in Object.FindObjectsByType<Light>(FindObjectsInactive.Exclude, FindObjectsSortMode.None))
+            {
+                if (l == RenderSettings.sun || l.type == LightType.Directional && l.enabled && !RenderSettings.sun) continue;
+                if (!l.enabled) continue;
+                Undo.RecordObject(l, "Disable light");
+                l.enabled = false;
+                lightsOff++;
+            }
+            report.AppendLine($"Small lights turned off: {lightsOff}");
+
+            // Cheaper shadows: nearby only, one cascade.
+            QualitySettings.shadowDistance = 35f;
+            QualitySettings.shadowCascades = 1;
+            QualitySettings.shadowResolution = ShadowResolution.Medium;
+            QualitySettings.pixelLightCount = 1;
+            QualitySettings.antiAliasing = 2;
+            report.AppendLine("Shadows: 35 m, 1 cascade, medium resolution");
+
+            // Don't draw things far past the course.
+            foreach (var cam in Object.FindObjectsByType<Camera>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                if (!cam.GetComponentInParent<PlayerModeController>(true) && !cam.GetComponentInParent<FirstPersonWalker>(true) && !cam.GetComponent<GolfCamera>()) continue;
+                Undo.RecordObject(cam, "Camera range");
+                cam.farClipPlane = 250f;
+                cam.useOcclusionCulling = true;
+            }
+
+            EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
+            report.AppendLine("Save the scene (Ctrl+S).");
+            Debug.Log("Mini Golf: " + report);
+            EditorUtility.DisplayDialog("Mini Golf", report.ToString(), "OK");
+        }
+
         // ---------- Walking collision ----------
 
         [MenuItem("Mini Golf/Add Walking Collision To Open Scene", priority = 22)]
