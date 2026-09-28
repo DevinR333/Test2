@@ -389,6 +389,20 @@ namespace MiniGolfMobile.EditorTools
         {
             var counts = new Dictionary<string, int>();
             var found = new Dictionary<string, List<string>>();
+            int missing = 0;
+            var missingOn = new List<string>();
+            for (int s = 0; s < SceneManager.sceneCount; s++)
+            {
+                var scene = SceneManager.GetSceneAt(s);
+                if (!scene.isLoaded) continue;
+                foreach (var root in scene.GetRootGameObjects())
+                foreach (var t in root.GetComponentsInChildren<Transform>(true))
+                {
+                    int n = GameObjectUtility.GetMonoBehavioursWithMissingScriptCount(t.gameObject);
+                    missing += n;
+                    if (n > 0 && missingOn.Count < 25) missingOn.Add($"  {PathOf(t)}  ({n})");
+                }
+            }
             foreach (var c in AllComponents())
             {
                 string n = c.GetType().Name;
@@ -403,6 +417,8 @@ namespace MiniGolfMobile.EditorTools
 
             var sb = new StringBuilder();
             sb.AppendLine($"Scene: {SceneManager.GetActiveScene().path}");
+            sb.AppendLine($"Missing scripts: {missing}");
+            foreach (var line in missingOn) sb.AppendLine(line);
             sb.AppendLine("== Golf-related objects ==");
             foreach (var kv in found.OrderBy(k => k.Key))
             {
