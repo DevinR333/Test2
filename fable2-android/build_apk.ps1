@@ -282,17 +282,29 @@ Checkout-Pinned $FableRepo $FableCommit $FableDir
 Checkout-Pinned $SdkRepo $SdkCommit $SdkDir
 
 Info 'Fetching SDK dependencies (large; first run only) ...'
-Run git @('-C', $SdkDir, 'submodule', 'update', '--init', '--depth', '1', '--jobs', '4')
-# Pin every dependency to the exact commit the recomp was built with.
+# Fetch every dependency straight at the commit the recomp was built with
+# (rexglue-sdk-submodule-pins.txt). Plain `git submodule update` cannot be
+# used: the SDK fork records at least one commit (libmspack) that its
+# upstream no longer serves, so it aborts.
 $pins = Get-Content (Join-Path $FableDir 'thirdparty\rexglue-sdk-submodule-pins.txt') |
         Where-Object { $_ -match '^thirdparty/' }
 foreach ($line in $pins) {
     $path, $sha = $line -split '\s+'
     $sub = Join-Path $SdkDir $path
     $cur = Native { & git -C $sub rev-parse HEAD 2>$null }
-    if ($cur -ne $sha) {
-        Run git @('-C', $sub, 'fetch', '--quiet', '--depth', '1', 'origin', $sha)
+    $clean = Native { & git -C $sub status --porcelain 2>$null }
+    if ((Test-Path (Join-Path $sub '.git')) -and $cur -eq $sha -and -not $clean) { continue }
+
+    $url = Native { & git -C $SdkDir config -f .gitmodules --get "submodule.$path.url" }
+    if (-not $url) { Fail "No URL for $path in the SDK's .gitmodules." }
+    Info "  $path"
+    if (-not (Test-Path (Join-Path $sub '.git'))) {
+        New-Item -ItemType Directory -Force -Path $sub | Out-Null
+        Run git @('-C', $sub, 'init', '--quiet')
     }
+    Native { & git -C $sub remote remove origin 2>$null } | Out-Null
+    Run git @('-C', $sub, 'remote', 'add', 'origin', $url)
+    Run git @('-C', $sub, 'fetch', '--quiet', '--depth', '1', 'origin', $sha)
     Run git @('-C', $sub, 'checkout', '--quiet', '--force', $sha)
 }
 
