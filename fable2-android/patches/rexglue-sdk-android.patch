@@ -30,7 +30,7 @@ index 9b3cdf5..9b46285 100644
  # Add tests subdirectory if tests are enabled
  if(REXGLUE_BUILD_TESTS)
 diff --git a/include/rex/chrono/chrono.h b/include/rex/chrono/chrono.h
-index d876846..a64fd99 100644
+index d876846..ab6102a 100644
 --- a/include/rex/chrono/chrono.h
 +++ b/include/rex/chrono/chrono.h
 @@ -116,8 +116,9 @@ using XSystemClock = detail::NtSystemClock<detail::Domain::Guest>;
@@ -39,8 +39,8 @@ index d876846..a64fd99 100644
  
 -#ifdef __APPLE__
 -// Apple libc++ does not expose clock_time_conversion or clock_cast.
-+#if defined(__APPLE__) || defined(__ANDROID__)
-+// Apple's and the Android NDK's libc++ do not expose clock_time_conversion
++#if defined(__APPLE__) || defined(_LIBCPP_VERSION)
++// libc++ (Apple's, the Android NDK's) does not expose clock_time_conversion
 +// or clock_cast.
  template <class, class>
  struct clock_time_conversion {};
@@ -82,24 +82,30 @@ index 0000000..09aa143
 +
 +#endif  // REX_PLATFORM_ANDROID
 diff --git a/include/rex/string/numeric.h b/include/rex/string/numeric.h
-index 85994c7..2f26992 100644
+index 85994c7..e5e3f07 100644
 --- a/include/rex/string/numeric.h
 +++ b/include/rex/string/numeric.h
-@@ -26,7 +26,7 @@
+@@ -22,11 +22,13 @@
+ #include <fmt/format.h>
+ 
+ #include <rex/assert.h>
++#include <version>
++
+ #include <rex/platform.h>
  #include <rex/string/utf8.h>
  #include <rex/vec128.h>
  
 -#if REX_PLATFORM_MAC
-+#if REX_PLATFORM_MAC || REX_PLATFORM_ANDROID
++#if REX_PLATFORM_MAC || defined(_LIBCPP_VERSION)
  #include <locale.h>
  #endif
  
-@@ -114,14 +114,14 @@ inline T ifs(const std::string_view value, bool force_hex) {
+@@ -114,14 +116,14 @@ inline T ifs(const std::string_view value, bool force_hex) {
    return result;
  }
  
 -#if REX_PLATFORM_MAC
-+#if REX_PLATFORM_MAC || REX_PLATFORM_ANDROID
++#if REX_PLATFORM_MAC || defined(_LIBCPP_VERSION)
  template <typename T>
  inline std::from_chars_result portable_float_from_chars(const char* first, const char* last,
                                                          T& value) {
@@ -107,26 +113,26 @@ index 85994c7..2f26992 100644
  
 -  // AppleClang's libc++ does not provide floating-point std::from_chars on all
 -  // supported SDK versions. Match from_chars semantics with a C-locale parser:
-+  // AppleClang's libc++ (and the Android NDK's) does not provide
++  // libc++ (AppleClang's, the Android NDK's) does not provide
 +  // floating-point std::from_chars on all supported versions. Match from_chars semantics with a C-locale parser:
    // no leading whitespace or '+', no global locale dependency, and distinct
    // invalid-input and range errors.
    if (first == last || *first == '+' || *first == ' ' || *first == '\f' || *first == '\n' ||
-@@ -189,7 +189,7 @@ inline T fpfs(const std::string_view value, bool force_hex) {
+@@ -189,7 +191,7 @@ inline T fpfs(const std::string_view value, bool force_hex) {
      }
      std::memcpy(&result, &pun, sizeof(PUN));
    } else {
 -#if REX_PLATFORM_MAC
-+#if REX_PLATFORM_MAC || REX_PLATFORM_ANDROID
++#if REX_PLATFORM_MAC || defined(_LIBCPP_VERSION)
      auto [p, error] = portable_float_from_chars(range.data(), range.data() + range.size(), result);
  #else
      auto [p, error] = std::from_chars(range.data(), range.data() + range.size(), result,
-@@ -316,7 +316,7 @@ inline vec128_t from_string<vec128_t>(const std::string_view value, bool force_h
+@@ -316,7 +318,7 @@ inline vec128_t from_string<vec128_t>(const std::string_view value, bool force_h
          assert_always();
          return vec128_t();
        }
 -#if REX_PLATFORM_MAC
-+#if REX_PLATFORM_MAC || REX_PLATFORM_ANDROID
++#if REX_PLATFORM_MAC || defined(_LIBCPP_VERSION)
        auto result = detail::portable_float_from_chars(p, end, v.f32[i]);
  #else
        auto result = std::from_chars(p, end, v.f32[i], std::chars_format::general);
@@ -186,9 +192,22 @@ index 50638d6..384699a 100644
  namespace rex {
  namespace ui {
 diff --git a/src/core/CMakeLists.txt b/src/core/CMakeLists.txt
-index 1ddafd0..b62d0a8 100644
+index 1ddafd0..c6e746f 100644
 --- a/src/core/CMakeLists.txt
 +++ b/src/core/CMakeLists.txt
+@@ -24,9 +24,9 @@ add_library(rexcore OBJECT
+ )
+ add_library(rex::core ALIAS rexcore)
+ 
+-if(APPLE)
+-    # Apple's libc++ still gates std::jthread/std::stop_token behind the
+-    # experimental-library feature flag. Only timer_queue.cpp uses them, and
++if(APPLE OR ANDROID)
++    # Apple's libc++ (and the Android NDK's) still gates std::jthread/
++    # std::stop_token behind the experimental-library feature flag. Only timer_queue.cpp uses them, and
+     # neither type crosses a header boundary.
+     set_source_files_properties(timer_queue.cpp PROPERTIES
+         COMPILE_OPTIONS "-fexperimental-library")
 @@ -74,6 +74,9 @@ elseif(UNIX)
          system_posix.cpp
          threading_posix.cpp
