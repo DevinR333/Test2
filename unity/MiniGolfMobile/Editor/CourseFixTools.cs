@@ -31,7 +31,9 @@ namespace MiniGolfMobile.EditorTools
             EnsureRenderPipeline(report);
 
             bool urp = GraphicsSettings.defaultRenderPipeline != null;
-            Shader lit = urp ? Shader.Find("Universal Render Pipeline/Lit") : Shader.Find("Standard");
+            Shader lit = urp ? Shader.Find("Universal Render Pipeline/Lit") : Shader.Find("MiniGolf/Lit Vertex Color");
+            if (!lit) lit = Shader.Find("Standard");
+            var vertexColored = MaterialsOnVertexColoredMeshes();
             Shader unlit = urp ? Shader.Find("Universal Render Pipeline/Unlit") : Shader.Find("Unlit/Texture");
             Shader sky = Shader.Find("Skybox/Procedural");
             if (!lit)
@@ -68,6 +70,8 @@ namespace MiniGolfMobile.EditorTools
                         bool particle = Regex.IsMatch(oldShader + mat.name, "particle|vfx|fx_|glow|additive", RegexOptions.IgnoreCase);
                         mat.shader = particle && unlit ? unlit : lit;
                         Apply(mat, saved, urp);
+                        if (mat.HasProperty("_UseVertexColor"))
+                            mat.SetFloat("_UseVertexColor", vertexColored.Contains(mat) ? 1f : 0f);
                     }
                     EditorUtility.SetDirty(mat);
                     converted++;
@@ -88,6 +92,7 @@ namespace MiniGolfMobile.EditorTools
         {
             var s = mat.shader;
             if (!s || s.name == "Hidden/InternalErrorShader" || !s.isSupported) return true;
+            if (s.name == "Standard" || s.name == "MiniGolf/Lit Vertex Color") return true;
             return AssetDatabase.GetAssetPath(s).StartsWith("Assets/");
         }
 
@@ -132,7 +137,7 @@ namespace MiniGolfMobile.EditorTools
             string colorProp = urp ? "_BaseColor" : "_Color";
 
             var main = Pick(saved.textures, MainTexNames, n => Regex.IsMatch(n, "albedo|base|main|diff|col", RegexOptions.IgnoreCase)
-                                                             && !Regex.IsMatch(n, "normal|bump|mask|emis|light|detail|noise", RegexOptions.IgnoreCase));
+                                                             && !Regex.IsMatch(n, "normal|bump|mask|emis|light|detail|noise", RegexOptions.IgnoreCase), anyAsLastResort: true);
             if (main.HasValue)
             {
                 mat.SetTexture(mainProp, main.Value.tex);
@@ -184,13 +189,31 @@ namespace MiniGolfMobile.EditorTools
         }
 
         static (Texture tex, Vector2 scale, Vector2 offset)? Pick(Dictionary<string, (Texture, Vector2, Vector2)> textures,
-            string[] preferred, System.Func<string, bool> fallback)
+            string[] preferred, System.Func<string, bool> fallback, bool anyAsLastResort = false)
         {
             foreach (var n in preferred)
                 if (textures.TryGetValue(n, out var t)) return t;
             foreach (var kv in textures)
                 if (fallback(kv.Key)) return kv.Value;
+            if (anyAsLastResort)
+                foreach (var kv in textures.OrderBy(k => k.Key))
+                    if (!Regex.IsMatch(kv.Key, "normal|bump|mask|emis|light|detail|noise|height|occlu|rough|metal|spec|flow|dist|cube|refl|matcap", RegexOptions.IgnoreCase)
+                        && !Regex.IsMatch(kv.Value.Item1.name, "normal|_n$|_nrm|mask|noise", RegexOptions.IgnoreCase))
+                        return kv.Value;
             return null;
+        }
+
+        // Materials used by meshes that carry vertex colours in the open scene.
+        static HashSet<Material> MaterialsOnVertexColoredMeshes()
+        {
+            var set = new HashSet<Material>();
+            foreach (var mr in Object.FindObjectsByType<MeshRenderer>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                var mf = mr.GetComponent<MeshFilter>();
+                if (!mf || !mf.sharedMesh || !mf.sharedMesh.HasVertexAttribute(VertexAttribute.Color)) continue;
+                foreach (var m in mr.sharedMaterials) if (m) set.Add(m);
+            }
+            return set;
         }
 
         // Standard shaders only draw when the project has a render pipeline asset assigned.
@@ -294,6 +317,57 @@ namespace MiniGolfMobile.EditorTools
             string parent = System.IO.Path.GetDirectoryName(path).Replace('\\', '/');
             EnsureFolder(parent);
             AssetDatabase.CreateFolder(parent, System.IO.Path.GetFileName(path));
+        }
+
+        // ---------- Helper objects ----------
+
+        // Trigger zones, aim-pin markers and hole covers have renderers that the game's shaders kept invisible.
+        [MenuItem("Mini Golf/Hide Helper Boxes", priority = 24)]
+        public static void HideHelperBoxes()
+        {
+            int hidden = 0;
+            foreach (var r in Object.FindObjectsByType<MeshRenderer>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+            {
+                var go = r.gameObject;
+                bool trigger = go.GetComponents<Collider>().Any(c => c.isTrigger);
+                bool helperName = Regex.IsMatch(go.name, "trigger|keepalive|holecover|trapperkeeper|^collider|bounds|blocker|invisible", RegexOptions.IgnoreCase);
+                bool pinMarker = go.GetComponentsInParent<MonoBehaviour>(true).Any(m => m && (m.GetType().Name == "Pin" || m.GetType().Name == "CustomPin"));
+                if (!(trigger || helperName || pinMarker) || !r.enabled) continue;
+                if (Regex.IsMatch(go.name, "water", RegexOptions.IgnoreCase) && !trigger) continue;
+                Undo.RecordObject(r, "Hide helper");
+                r.enabled = false;
+                hidden++;
+            }
+            EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
+            string msg = $"Hid {hidden} helper objects. Save the scene (Ctrl+S).";
+            Debug.Log("Mini Golf: " + msg);
+            EditorUtility.DisplayDialog("Mini Golf", msg, "OK");
+        }
+
+        [MenuItem("Mini Golf/Copy Selected Object's Material Info", priority = 41)]
+        public static void CopyMaterialInfo()
+        {
+            var go = Selection.activeGameObject;
+            if (!go) { EditorUtility.DisplayDialog("Mini Golf", "Click an object in the Scene view first.", "OK"); return; }
+            var sb = new StringBuilder();
+            sb.AppendLine($"Object: {go.name}");
+            var mf = go.GetComponent<MeshFilter>();
+            if (mf && mf.sharedMesh)
+                sb.AppendLine($"Mesh: {mf.sharedMesh.name}  vertexColors={mf.sharedMesh.HasVertexAttribute(VertexAttribute.Color)}  uv2={mf.sharedMesh.HasVertexAttribute(VertexAttribute.TexCoord1)}");
+            var r = go.GetComponent<Renderer>();
+            if (r)
+                foreach (var m in r.sharedMaterials)
+                {
+                    if (!m) continue;
+                    sb.AppendLine($"Material: {m.name}  shader={(m.shader ? m.shader.name : "none")}  path={AssetDatabase.GetAssetPath(m)}");
+                    var saved = ReadSavedProperties(m);
+                    foreach (var kv in saved.textures) sb.AppendLine($"  tex {kv.Key} = {kv.Value.tex.name}");
+                    foreach (var kv in saved.colors) sb.AppendLine($"  color {kv.Key} = {kv.Value}");
+                    foreach (var kv in saved.floats.Take(30)) sb.AppendLine($"  float {kv.Key} = {kv.Value}");
+                }
+            EditorGUIUtility.systemCopyBuffer = sb.ToString();
+            Debug.Log(sb.ToString());
+            EditorUtility.DisplayDialog("Mini Golf", "Material info copied to the clipboard.", "OK");
         }
 
         // ---------- Walking collision ----------
