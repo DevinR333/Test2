@@ -135,13 +135,28 @@ function Has-VcTools {
 }
 if (-not (Has-VcTools)) {
     if (-not $winget) { Fail 'Visual Studio Build Tools (C++ workload) not found. Install them and retry.' }
-    Info 'Installing Visual Studio 2022 Build Tools (C++), this takes a while ...'
-    Winget-Install 'Microsoft.VisualStudio.2022.BuildTools' @('--override',
-        '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended')
+    # Error 1618 = another installer holds the Windows Installer lock (often
+    # the Visual Studio Installer updating itself, or Windows Update). Wait
+    # for it and retry instead of giving up on the first try.
+    $installerNames = 'vs_installer', 'vs_installershell', 'vs_installerservice', 'vs_setup_bootstrapper',
+                      'vs_bootstrapper', 'vs_buildtools', 'setup', 'wusa', 'TiWorker'
+    for ($attempt = 1; $attempt -le 8 -and -not (Has-VcTools); $attempt++) {
+        Info "Installing Visual Studio 2022 Build Tools (C++), attempt $attempt of 8 (takes a while) ..."
+        Winget-Install 'Microsoft.VisualStudio.2022.BuildTools' @('--override',
+            '--quiet --wait --norestart --add Microsoft.VisualStudio.Workload.VCTools --includeRecommended')
+        if (Has-VcTools) { break }
+        $busy = @(Get-Process -Name $installerNames -ErrorAction SilentlyContinue |
+                  Select-Object -ExpandProperty ProcessName -Unique)
+        $msi = @(Get-Process -Name msiexec -ErrorAction SilentlyContinue).Count
+        if ($msi -gt 1) { $busy += "msiexec x$msi" }
+        if ($busy) { Warn "Still running: $($busy -join ', ')" }
+        if ($attempt -lt 8) { Warn 'Another installer is busy; waiting 60 seconds and retrying ...'; Start-Sleep 60 }
+    }
     if (-not (Has-VcTools)) {
-        Fail ("Visual Studio Build Tools did not install. If it said 'Another installation is already " +
-              "in progress' (1618), another installer (Windows Update, Visual Studio Installer, a game " +
-              "launcher) is busy: wait for it to finish or restart the PC, then run build_apk.cmd again.")
+        Fail ("Visual Studio Build Tools could not be installed (another installer kept Windows " +
+              "Installer busy). Restart the PC and run build_apk.cmd again. Or install them by hand: " +
+              "https://aka.ms/vs/17/release/vs_BuildTools.exe -> tick 'Desktop development with C++' " +
+              "-> Install, then run build_apk.cmd again.")
     }
 }
 
