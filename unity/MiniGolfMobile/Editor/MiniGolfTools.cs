@@ -128,6 +128,31 @@ namespace MiniGolfMobile.EditorTools
             Debug.Log("Mini Golf: level select menu created and set as the first scene in the build.");
         }
 
+        public static void CreateLevelSelectSilently(string path)
+        {
+            EnsureFolder(Path.GetDirectoryName(path).Replace('\\', '/'));
+            EditorSceneManager.NewScene(NewSceneSetup.DefaultGameObjects, NewSceneMode.Single);
+            var cam = Camera.main;
+            if (cam)
+            {
+                cam.clearFlags = CameraClearFlags.SolidColor;
+                cam.backgroundColor = new Color(0.1f, 0.25f, 0.35f);
+            }
+            new GameObject("LevelSelectMenu").AddComponent<LevelSelectMenu>();
+            EditorSceneManager.SaveScene(SceneManager.GetActiveScene(), path);
+        }
+
+        public static void AddCoursesToBuildSilently()
+        {
+            foreach (string guid in AssetDatabase.FindAssets("t:Scene"))
+            {
+                string path = AssetDatabase.GUIDToAssetPath(guid);
+                if (path == MenuScenePath || !path.StartsWith("Assets/")) continue;
+                if (File.ReadAllText(path).Contains(MonoScriptGuid<CourseManager>())) AddToBuild(path);
+            }
+            if (File.Exists(MenuScenePath)) AddToBuild(MenuScenePath, first: true);
+        }
+
         [MenuItem("Mini Golf/Add Set-Up Courses To Build", priority = 3)]
         public static void AddCoursesToBuild()
         {
@@ -170,6 +195,18 @@ namespace MiniGolfMobile.EditorTools
         public static void SetUpOpenCourse()
         {
             var report = new StringBuilder();
+
+            // Clean up earlier attempts: old player rigs and components whose script no longer exists.
+            int removedRigs = 0, removedMissing = 0;
+            foreach (var root in SceneManager.GetActiveScene().GetRootGameObjects())
+            {
+                if (root.name == "MiniGolfPlayer") { Undo.DestroyObjectImmediate(root); removedRigs++; continue; }
+                foreach (var t in root.GetComponentsInChildren<Transform>(true))
+                    removedMissing += GameObjectUtility.RemoveMonoBehavioursWithMissingScript(t.gameObject);
+            }
+            if (removedRigs + removedMissing > 0)
+                report.AppendLine($"Cleaned up {removedRigs} old player(s) and {removedMissing} broken components");
+
             var all = AllComponents().ToList();
             List<Component> Named(params string[] names) => all.Where(c => names.Contains(c.GetType().Name)).ToList();
 
@@ -252,7 +289,8 @@ namespace MiniGolfMobile.EditorTools
             string text = report.ToString();
             EditorGUIUtility.systemCopyBuffer = text;
             Debug.Log("Mini Golf: course set up (report copied to clipboard)\n" + text);
-            EditorUtility.DisplayDialog("Mini Golf", "Course set up. Save the scene (Ctrl+S), then press Play.\n\n" + text, "OK");
+            if (!Application.isBatchMode && !CourseFixTools.Quiet)
+                EditorUtility.DisplayDialog("Mini Golf", "Course set up. Save the scene (Ctrl+S), then press Play.\n\n" + text, "OK");
         }
 
         static int GuessNumber(string name, HashSet<int> used)

@@ -20,6 +20,7 @@ namespace MiniGolfMobile.EditorTools
         static readonly string[] EmissionNames = { "_EmissionMap", "_Emission", "_EmissiveMap" };
 
         static bool quiet;
+        public static bool Quiet => quiet;
 
         [MenuItem("Mini Golf/Fix Everything (materials, lighting, helpers, speed)", priority = 20)]
         public static void FixEverything()
@@ -27,8 +28,7 @@ namespace MiniGolfMobile.EditorTools
             quiet = true;
             try
             {
-                if (!Object.FindFirstObjectByType<PlayerModeController>(FindObjectsInactive.Include))
-                    MiniGolfTools.SetUpOpenCourse();
+                MiniGolfTools.SetUpOpenCourse();
                 FixMaterials();
                 FixLighting();
                 HideHelperBoxes();
