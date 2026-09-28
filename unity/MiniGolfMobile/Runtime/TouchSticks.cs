@@ -19,9 +19,36 @@ namespace MiniGolfMobile
     {
         static readonly List<FingerState> fingers = new List<FingerState>();
 
+        public const int MouseFingerId = 9999;
+
+        public static bool HasTouchscreen
+        {
+            get
+            {
+#if ENABLE_INPUT_SYSTEM
+                return Touchscreen.current != null;
+#else
+                return Input.touchSupported;
+#endif
+            }
+        }
+
         public static List<FingerState> ReadFingers()
         {
             fingers.Clear();
+            // No touchscreen (editor, remote desktop): the left mouse button behaves like one finger,
+            // so the on-screen stick and drag-to-look can be used with a mouse.
+            if (!HasTouchscreen && (PointerInput.IsPressed || PointerInput.ReleasedThisFrame))
+            {
+                fingers.Add(new FingerState
+                {
+                    id = MouseFingerId,
+                    position = PointerInput.Position,
+                    began = PointerInput.PressedThisFrame,
+                    ended = PointerInput.ReleasedThisFrame
+                });
+                return fingers;
+            }
 #if ENABLE_INPUT_SYSTEM
             var ts = Touchscreen.current;
             if (ts == null) return fingers;

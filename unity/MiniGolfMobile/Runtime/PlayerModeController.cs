@@ -74,7 +74,81 @@ namespace MiniGolfMobile
             course.HoleStarted += OnHoleStarted;
             course.HoleFinished += _ => EnterWalk();
             LostBallPickup.RecordTotalForActiveScene();
+            HideBrokenRenderers();
+            SetUpCameras();
+            MakeDaylightSky();
             EnterWalk();
+        }
+
+        // Anything whose material or shader didn't survive the export draws as bright pink; hide it.
+        void HideBrokenRenderers()
+        {
+            int hidden = 0;
+            foreach (var r in FindObjectsByType<Renderer>(FindObjectsSortMode.None))
+            {
+                if (r.GetComponentInParent<PlayerModeController>()) continue;
+                bool broken = false;
+                foreach (var m in r.sharedMaterials)
+                {
+                    if (!m || !m.shader || !m.shader.isSupported || m.shader.name == "Hidden/InternalErrorShader") { broken = true; break; }
+                    foreach (var prop in new[] { "_Color", "_BaseColor", "_TintColor" })
+                    {
+                        if (!m.HasProperty(prop)) continue;
+                        Color c = m.GetColor(prop);
+                        if (c.r > 0.6f && c.b > 0.6f && c.g < 0.35f) { broken = true; break; }
+                    }
+                    if (broken) break;
+                }
+                if (broken) { r.enabled = false; hidden++; }
+            }
+            if (hidden > 0) Debug.Log($"Mini Golf: hid {hidden} objects with missing materials.");
+        }
+
+        // The course's baked visibility data doesn't match anymore and makes things flicker.
+        void SetUpCameras()
+        {
+            foreach (var cam in new[] { walker.head, golfCamera ? golfCamera.GetComponent<Camera>() : null })
+            {
+                if (!cam) continue;
+                cam.useOcclusionCulling = false;
+                cam.clearFlags = CameraClearFlags.Skybox;
+                cam.farClipPlane = Mathf.Max(cam.farClipPlane, 400f);
+            }
+        }
+
+        void MakeDaylightSky()
+        {
+            var sun = RenderSettings.sun;
+            if (!sun)
+                foreach (var l in FindObjectsByType<Light>(FindObjectsSortMode.None))
+                    if (l.type == LightType.Directional && l.enabled) { sun = l; break; }
+            if (sun)
+            {
+                // A sun pointing sideways or upward gives a dusk/night sky; tilt it to mid-afternoon.
+                if (sun.transform.forward.y > -0.5f)
+                    sun.transform.rotation = Quaternion.Euler(50f, sun.transform.eulerAngles.y, 0f);
+                sun.intensity = Mathf.Max(sun.intensity, 1f);
+                sun.color = new Color(1f, 0.96f, 0.88f);
+                RenderSettings.sun = sun;
+            }
+            var sky = RenderSettings.skybox;
+            if (!sky || !sky.shader || sky.shader.name != "Skybox/Procedural")
+            {
+                var shader = Shader.Find("Skybox/Procedural");
+                if (shader) sky = RenderSettings.skybox = new Material(shader);
+            }
+            if (sky && sky.shader && sky.shader.name == "Skybox/Procedural")
+            {
+                sky.SetColor("_SkyTint", new Color(0.42f, 0.62f, 1f));
+                sky.SetColor("_GroundColor", new Color(0.55f, 0.6f, 0.65f));
+                sky.SetFloat("_Exposure", 1.6f);
+                sky.SetFloat("_AtmosphereThickness", 0.9f);
+                sky.SetFloat("_SunSize", 0.035f);
+            }
+            RenderSettings.fog = false;
+            RenderSettings.ambientMode = UnityEngine.Rendering.AmbientMode.Skybox;
+            RenderSettings.ambientIntensity = 1.1f;
+            DynamicGI.UpdateEnvironment();
         }
 
         // Height of the sea: the top of the largest water surface in the scene.
@@ -87,6 +161,7 @@ namespace MiniGolfMobile
                 if (!System.Text.RegularExpressions.Regex.IsMatch(n, "water|ocean|sea", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) continue;
                 if (r.TryGetComponent<Collider>(out var col) && col.isTrigger) continue;
                 var b = r.bounds;
+                if (b.size.y > 3f) continue;   // backdrops and waterfalls, not a flat sea
                 float area = b.size.x * b.size.z;
                 if (area > biggest) { biggest = area; level = b.max.y; }
             }

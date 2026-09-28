@@ -5,7 +5,8 @@ namespace MiniGolfMobile
 {
     // First-person walking. Left half of the screen is a movement stick (it appears where your
     // thumb lands); drag on the right half to look around. A quick tap is reported for grabbing things.
-    // In the editor: WASD to move, hold the right mouse button to look, left click to tap.
+    // With a mouse: drag with the left button on the left half to walk, on the right half to look, click to tap.
+    // WASD and holding the right mouse button also work.
     [RequireComponent(typeof(CharacterController))]
     public class FirstPersonWalker : MonoBehaviour
     {
@@ -89,7 +90,6 @@ namespace MiniGolfMobile
             Vector2 mouse = TouchSticks.MousePosition;
             if (TouchSticks.MouseLookHeld) look += (mouse - lastMouse) / dpi;
             lastMouse = mouse;
-            if (TouchSticks.MouseClickedThisFrame && Input_NoTouches()) Tapped?.Invoke(mouse);
 
             yaw += look.x * lookSpeed;
             pitch = Mathf.Clamp(pitch - look.y * lookSpeed, -80f, 80f);
@@ -116,8 +116,6 @@ namespace MiniGolfMobile
                 fallSpeed = 0f;
             }
         }
-
-        static bool Input_NoTouches() => TouchSticks.ReadFingers().Count == 0;
 
         // Moves the player to a spot, facing a target.
         public void TeleportTo(Vector3 feetPosition, Vector3 lookAt)

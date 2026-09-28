@@ -19,10 +19,37 @@ namespace MiniGolfMobile.EditorTools
         static readonly string[] NormalNames = { "_BumpMap", "_NormalMap", "_Normal", "_NormalTex" };
         static readonly string[] EmissionNames = { "_EmissionMap", "_Emission", "_EmissiveMap" };
 
+        static bool quiet;
+
+        [MenuItem("Mini Golf/Fix Everything (materials, lighting, helpers, speed)", priority = 20)]
+        public static void FixEverything()
+        {
+            quiet = true;
+            try
+            {
+                if (!Object.FindFirstObjectByType<PlayerModeController>(FindObjectsInactive.Include))
+                    MiniGolfTools.SetUpOpenCourse();
+                FixMaterials();
+                FixLighting();
+                HideHelperBoxes();
+                AddWalkingCollision();
+                OptimizeForPhone();
+            }
+            finally { quiet = false; }
+            EditorSceneManager.SaveScene(SceneManager.GetActiveScene());
+            EditorUtility.DisplayDialog("Mini Golf", "Done. The scene is saved. Press Play.", "OK");
+        }
+
+        static void Done(string message)
+        {
+            Debug.Log("Mini Golf: " + message);
+            if (!quiet) EditorUtility.DisplayDialog("Mini Golf", message, "OK");
+        }
+
         [MenuItem("Mini Golf/Fix Materials (switch to standard shader)", priority = 21)]
         public static void FixMaterials()
         {
-            if (!EditorUtility.DisplayDialog("Mini Golf",
+            if (!quiet && !EditorUtility.DisplayDialog("Mini Golf",
                 "This switches every material that uses one of the game's own shaders to Unity's standard lit shader, " +
                 "keeping its textures and colours. It changes the material files in this project.\n\nContinue?", "Fix materials", "Cancel"))
                 return;
@@ -88,8 +115,7 @@ namespace MiniGolfMobile.EditorTools
             AssetDatabase.SaveAssets();
             report.AppendLine($"Materials switched: {converted}  (left alone: {skipped})");
             report.AppendLine($"Pink materials in this scene fixed: {sceneFixed}");
-            Debug.Log("Mini Golf: " + report);
-            EditorUtility.DisplayDialog("Mini Golf", report.ToString(), "OK");
+            Done(report.ToString());
         }
 
         static bool IsBroken(Material m) => m && (!m.shader || m.shader.name == "Hidden/InternalErrorShader" || !m.shader.isSupported);
@@ -416,8 +442,7 @@ namespace MiniGolfMobile.EditorTools
             DynamicGI.UpdateEnvironment();
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
             report.AppendLine("Save the scene (Ctrl+S).");
-            Debug.Log("Mini Golf: " + report);
-            EditorUtility.DisplayDialog("Mini Golf", report.ToString(), "OK");
+            Done(report.ToString());
         }
 
         static void EnsureFolder(string path)
@@ -452,8 +477,7 @@ namespace MiniGolfMobile.EditorTools
             }
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
             string msg = $"Hid {hidden} helper objects. Save the scene (Ctrl+S).";
-            Debug.Log("Mini Golf: " + msg);
-            EditorUtility.DisplayDialog("Mini Golf", msg, "OK");
+            Done(msg);
         }
 
         static bool IsDebugMagenta(Material m)
@@ -538,13 +562,12 @@ namespace MiniGolfMobile.EditorTools
                 if (!cam.GetComponentInParent<PlayerModeController>(true) && !cam.GetComponentInParent<FirstPersonWalker>(true) && !cam.GetComponent<GolfCamera>()) continue;
                 Undo.RecordObject(cam, "Camera range");
                 cam.farClipPlane = 250f;
-                cam.useOcclusionCulling = true;
+                cam.useOcclusionCulling = false;
             }
 
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
             report.AppendLine("Save the scene (Ctrl+S).");
-            Debug.Log("Mini Golf: " + report);
-            EditorUtility.DisplayDialog("Mini Golf", report.ToString(), "OK");
+            Done(report.ToString());
         }
 
         // ---------- Walking collision ----------
@@ -572,8 +595,7 @@ namespace MiniGolfMobile.EditorTools
             }
             EditorSceneManager.MarkSceneDirty(scene);
             string msg = $"Added collision to {added} objects. Save the scene (Ctrl+S).";
-            Debug.Log("Mini Golf: " + msg);
-            EditorUtility.DisplayDialog("Mini Golf", msg, "OK");
+            Done(msg);
         }
     }
 }
