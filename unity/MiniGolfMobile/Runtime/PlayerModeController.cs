@@ -26,6 +26,22 @@ namespace MiniGolfMobile
 
         public bool Putting { get; private set; }
 
+        [Tooltip("Respawn the player if they fall this far below where they started.")]
+        public float fallRespawnDepth = 15f;
+
+        Vector3 spawnPosition;
+        Quaternion spawnRotation;
+
+        void Update()
+        {
+            if (!Putting && walker && walker.transform.position.y < spawnPosition.y - fallRespawnDepth)
+            {
+                Vector3 target = course.ActiveHole && ball.gameObject.activeInHierarchy ? ball.transform.position : spawnPosition;
+                walker.TeleportTo(target + Vector3.up * 0.1f, target + spawnRotation * Vector3.forward * 3f);
+                course.ShowBanner("Oops, fell off!", 1.5f);
+            }
+        }
+
         GUIStyle button;
 
         void Start()
@@ -36,6 +52,13 @@ namespace MiniGolfMobile
             if (!course) course = FindFirstObjectByType<CourseManager>(FindObjectsInactive.Include);
             if (!ball) ball = FindFirstObjectByType<GolfBall>(FindObjectsInactive.Include);
 
+            // Exported courses may switch off collisions between some layers; the player and ball need them all.
+            foreach (int layer in new[] { walker.gameObject.layer, ball.gameObject.layer })
+                for (int other = 0; other < 32; other++)
+                    Physics.IgnoreLayerCollision(layer, other, false);
+
+            spawnPosition = walker.transform.position;
+            spawnRotation = walker.transform.rotation;
             walker.Tapped += OnWalkerTap;
             course.HoleStarted += OnHoleStarted;
             course.HoleFinished += _ => EnterWalk();
