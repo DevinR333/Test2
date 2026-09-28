@@ -56,8 +56,11 @@ namespace MiniGolfMobile
         {
             StopAllCoroutines();
             finishing = false;
+            if (ActiveHole) ActiveHole.SetCupOpen(false);
             ActiveHole = hole;
             strokes[hole] = 0;
+            hole.SetCupOpen(true);
+            ball.floorHeight = Mathf.Min(hole.TeePosition.y, hole.cup ? hole.cup.transform.position.y : hole.TeePosition.y);
             ball.gameObject.SetActive(true);
             ball.PlaceAt(hole.TeePosition);
             ShowBanner($"Hole {hole.number}   Par {hole.par}", 2f);
@@ -93,6 +96,7 @@ namespace MiniGolfMobile
             if (!scores.TryGetValue(hole, out int best) || score < best) scores[hole] = score;
             yield return new WaitForSeconds(finishDelay);
             ball.gameObject.SetActive(false);
+            hole.SetCupOpen(false);
             ActiveHole = null;
             finishing = false;
             HoleFinished?.Invoke(hole);
@@ -107,6 +111,7 @@ namespace MiniGolfMobile
         {
             StopAllCoroutines();
             finishing = false;
+            if (ActiveHole) ActiveHole.SetCupOpen(false);
             ActiveHole = null;
             if (ball) ball.gameObject.SetActive(false);
         }

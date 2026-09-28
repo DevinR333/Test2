@@ -219,8 +219,11 @@ namespace MiniGolfMobile.EditorTools
                 }
                 else report.AppendLine($"  No cup found under {h.name}");
 
-                var tee = h.GetComponentsInChildren<Transform>(true)
-                    .FirstOrDefault(t => Regex.IsMatch(t.name, "tee|start|ballspawn", RegexOptions.IgnoreCase));
+                // Courses mark each tee with a "StartingPosition" object.
+                var tee = h.transform.Find("StartingPosition");
+                if (!tee)
+                    tee = h.GetComponentsInChildren<Transform>(true)
+                        .FirstOrDefault(t => t != h.transform && Regex.IsMatch(t.name, "^(tee|startingposition|ballstart)", RegexOptions.IgnoreCase));
                 if (tee) gh.tee = tee;
                 else report.AppendLine($"  No tee found under {h.name} (the ball will start at the Hole object)");
                 holesMade++;
@@ -233,8 +236,17 @@ namespace MiniGolfMobile.EditorTools
             // Player: spawn near the first tee.
             var first = Object.FindObjectsByType<GolfHole>(FindObjectsSortMode.None).OrderBy(g => g.number).FirstOrDefault();
             Vector3 spawn = first ? first.TeePosition - (first.tee ? first.tee.forward : Vector3.forward) * 2f : Vector3.zero;
+            float yaw = 0f;
+            // Hole 1 has a "PlayerStartPosition" where the player stands when the course loads.
+            var playerStart = first ? first.transform.Find("PlayerStartPosition") : null;
+            if (playerStart)
+            {
+                spawn = playerStart.position;
+                Vector3 d = first.TeePosition - spawn;
+                yaw = Mathf.Atan2(d.x, d.z) * Mathf.Rad2Deg;
+            }
             if (!Object.FindFirstObjectByType<PlayerModeController>())
-                CreatePlayerRig(spawn, first && first.tee ? first.tee.eulerAngles.y : 0f);
+                CreatePlayerRig(spawn, yaw);
 
             EditorSceneManager.MarkSceneDirty(SceneManager.GetActiveScene());
             string text = report.ToString();

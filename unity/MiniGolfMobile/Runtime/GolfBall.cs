@@ -21,8 +21,9 @@ namespace MiniGolfMobile
         public float angularDamping = 1.2f;
 
         [Header("Out of bounds")]
-        [Tooltip("Reset if the ball drops this far below where it was hit from.")]
+        [Tooltip("Reset if the ball drops this far below both where it was hit from and the current hole's lowest point.")]
         public float fallResetDepth = 3f;
+        [HideInInspector] public float floorHeight = float.PositiveInfinity;
         [Tooltip("When the scene marks greens with InPlaySurface, a ball that stops anywhere else is reset.")]
         public bool requirePlaySurface = true;
 
@@ -118,7 +119,7 @@ namespace MiniGolfMobile
         {
             if (!IsMoving || InCup) return;
 
-            if (transform.position.y < LastRestPosition.y - fallResetDepth)
+            if (transform.position.y < Mathf.Min(LastRestPosition.y, floorHeight) - fallResetDepth)
             {
                 ResetToLastRest();
                 return;
@@ -150,8 +151,19 @@ namespace MiniGolfMobile
             Stopped?.Invoke();
         }
 
+        static bool HasComponentNamed(Component c, string typeName)
+        {
+            foreach (var mb in c.GetComponents<MonoBehaviour>())
+                if (mb != null && mb.GetType().Name == typeName) return true;
+            return false;
+        }
+
         bool IsOnPlaySurface()
         {
+            // Areas the course marks as still in play (e.g. drops between levels).
+            foreach (var c in Physics.OverlapSphere(transform.position, 0.05f, Physics.DefaultRaycastLayers, QueryTriggerInteraction.Collide))
+                if (HasComponentNamed(c, "KeepAliveTrigger")) return true;
+
             var hits = Physics.RaycastAll(transform.position + Vector3.up * 0.05f, Vector3.down, 0.3f,
                 Physics.DefaultRaycastLayers, QueryTriggerInteraction.Ignore);
             foreach (var hit in hits)
@@ -167,8 +179,34 @@ namespace MiniGolfMobile
 
         void OnTriggerEnter(Collider other)
         {
-            if (!InCup && other.GetComponentInParent<OutOfBoundsZone>() != null)
+            if (InCup || !IsMoving) return;
+            if (other.GetComponentInParent<OutOfBoundsZone>() != null || IsWater(other))
+            {
                 ResetToLastRest();
+                return;
+            }
+            if (HasComponentNamed(other, "BallInPipe")) DropThroughPipe(other.transform);
+        }
+
+        void OnCollisionEnter(Collision collision)
+        {
+            if (!InCup && IsMoving && IsWater(collision.collider)) ResetToLastRest();
+        }
+
+        // Water on the original courses is a "WaterTrigger" object; ones with a current (BallConstantForce) aren't hazards.
+        static bool IsWater(Collider c) => c.name.StartsWith("WaterTrigger") && !HasComponentNamed(c, "BallConstantForce");
+
+        // Pipe holes: the ball drops in and comes out at the pipe's exit ("PipePosition").
+        void DropThroughPipe(Transform trigger)
+        {
+            Transform pipe = trigger;
+            while (pipe && !pipe.name.StartsWith("HolePipe")) pipe = pipe.parent;
+            Transform exit = pipe ? pipe.Find("PipePosition") : null;
+            if (!exit) return;
+            float speed = Mathf.Max(0.8f, rb.linearVelocity.magnitude);
+            rb.position = exit.position + Vector3.up * 0.03f;
+            transform.position = rb.position;
+            rb.linearVelocity = Vector3.ProjectOnPlane(exit.forward, Vector3.up).normalized * speed;
         }
     }
 }

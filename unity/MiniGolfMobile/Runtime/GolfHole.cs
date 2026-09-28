@@ -1,3 +1,4 @@
+using System.Linq;
 using UnityEngine;
 
 namespace MiniGolfMobile
@@ -12,6 +13,24 @@ namespace MiniGolfMobile
         public GolfCup cup;
 
         public Vector3 TeePosition => (tee ? tee.position : transform.position) + Vector3.up * 0.025f;
+
+        // Courses keep every cup closed with an invisible "HoleCover" collider
+        // and only open the one being played, so balls can't drop into other holes.
+        Collider[] covers;
+
+        void Awake()
+        {
+            var root = cup ? cup.transform : transform;
+            covers = root.GetComponentsInChildren<Collider>(true).Where(c => c.name == "HoleCover").ToArray();
+            SetCupOpen(false);
+        }
+
+        public void SetCupOpen(bool open)
+        {
+            if (covers == null) return;
+            foreach (var c in covers)
+                if (c) c.enabled = !open;
+        }
 
         void Reset()
         {
