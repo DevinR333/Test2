@@ -76,7 +76,7 @@ namespace MiniGolfMobile
             {
                 string n = r.name + " " + (r.sharedMaterial ? r.sharedMaterial.name : "");
                 if (!System.Text.RegularExpressions.Regex.IsMatch(n, "water|ocean|sea", System.Text.RegularExpressions.RegexOptions.IgnoreCase)) continue;
-                if (r.GetComponent<Collider>() is Collider col && col.isTrigger) continue;
+                if (r.TryGetComponent<Collider>(out var col) && col.isTrigger) continue;
                 var b = r.bounds;
                 float area = b.size.x * b.size.z;
                 if (area > biggest) { biggest = area; level = b.max.y; }
