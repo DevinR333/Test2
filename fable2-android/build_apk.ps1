@@ -423,10 +423,11 @@ if (-not $NoPhone) {
 }
 if (-not $device) {
     Info 'No phone connected (or -NoPhone). To finish by hand:'
-    Info "  1. Install $apk on the phone."
-    Info "  2. Copy default.xex, data\ and `$SystemUpdate\ from $GameDir to"
-    Info "     Android/data/$PackageName/files/ on the phone (USB file transfer)."
-    Info '  3. Start "Fable II".'
+    Info "  1. Copy $apk to the phone and install it."
+    Info "  2. Connect the phone to this PC (USB, 'File transfer' mode) and copy the"
+    Info "     CONTENTS of $GameDir (default.xex, data, `$SystemUpdate)"
+    Info "     into a new folder named Fable2 on the phone's internal storage."
+    Info '  3. Open "Fable II", tap "Allow file access" and switch it on.'
     exit 0
 }
 
