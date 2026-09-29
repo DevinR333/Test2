@@ -46,11 +46,13 @@ run the builder again. The work folder defaults to `C:\f2build`
 
 ## Install by hand (no USB debugging)
 
-1. Copy `Fable2.apk` to the phone and install it.
-2. Connect the phone to the PC with USB in **File transfer** mode. In File
-   Explorer, create a folder named `Fable2` in the phone's internal storage.
-3. Copy the *contents* of `C:\f2build\game\` (`default.xex`, `data`,
-   `$SystemUpdate`) into that `Fable2` folder (about 7 GB).
+The builder puts everything for the phone in one folder, `C:\f2build\Fable2`:
+the game files plus `Fable2.apk`.
+
+1. Connect the phone to the PC with USB in **File transfer** mode.
+2. Drag `C:\f2build\Fable2` onto the phone's internal storage (about 7 GB).
+3. On the phone, open **My Files → Internal storage → Fable2** and tap
+   `Fable2.apk` to install it.
 4. Open **Fable II**, tap **Allow file access** and switch it on (the game
    needs it to read that folder), then go back to the app.
 

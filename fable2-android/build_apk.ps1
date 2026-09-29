@@ -53,7 +53,9 @@ $CmdlineTools = 'https://dl.google.com/android/repository/commandlinetools-win-1
 $PackageName  = 'com.fable2.recomp'
 
 $Here     = $PSScriptRoot
-$GameDir  = Join-Path $WorkDir 'game'
+# Named Fable2 so the whole folder (game files + Fable2.apk) can be dragged
+# onto the phone as-is: the app looks for Internal storage/Fable2.
+$GameDir  = Join-Path $WorkDir 'Fable2'
 $FableDir = Join-Path $WorkDir 'Fable-2-Recomp'
 $SdkDir   = Join-Path $WorkDir 'rexglue-sdk'
 $SdkRoot  = Join-Path $WorkDir 'android-sdk'
@@ -222,6 +224,12 @@ Info 'Tools ready.'
 # 2. ISO
 # ---------------------------------------------------------------------------
 Step '2/6 Game files from your ISO'
+
+# Earlier versions extracted to C:\f2build\game; reuse it instead of re-extracting.
+$oldGameDir = Join-Path $WorkDir 'game'
+if (-not (Test-Path $GameDir) -and (Test-Path (Join-Path $oldGameDir 'default.xex'))) {
+    Rename-Item -Path $oldGameDir -NewName (Split-Path -Leaf $GameDir)
+}
 
 if (-not (Test-Path (Join-Path $GameDir 'default.xex'))) {
     if (-not $Iso) {
@@ -410,6 +418,8 @@ $apkOut = Join-Path $androidDir 'app\build\outputs\apk\release\app-release.apk'
 if (-not (Test-Path $apkOut)) { Fail "Gradle finished but $apkOut is missing." }
 $apk = Join-Path $Here 'Fable2.apk'
 Copy-Item $apkOut $apk -Force
+# Also next to the game files, so one folder holds everything for the phone.
+Copy-Item $apkOut (Join-Path $GameDir 'Fable2.apk') -Force
 Info "APK: $apk"
 
 # ---------------------------------------------------------------------------
@@ -422,12 +432,16 @@ if (-not $NoPhone) {
     $device = (Native { & $adb devices }) | Select-String -Pattern '\tdevice$' | Select-Object -First 1
 }
 if (-not $device) {
-    Info 'No phone connected (or -NoPhone). To finish by hand:'
-    Info "  1. Copy $apk to the phone and install it."
-    Info "  2. Connect the phone to this PC (USB, 'File transfer' mode) and copy the"
-    Info "     CONTENTS of $GameDir (default.xex, data, `$SystemUpdate)"
-    Info "     into a new folder named Fable2 on the phone's internal storage."
-    Info '  3. Open "Fable II", tap "Allow file access" and switch it on.'
+    Write-Host "`nEverything for the phone is in ONE folder: $GameDir" -ForegroundColor Green
+    Info '(the game files plus Fable2.apk, about 7 GB)'
+    Info ''
+    Info '  1. Plug the phone in (choose "File transfer" on the phone).'
+    Info "  2. Drag the $GameDir folder onto the phone's Internal storage."
+    Info '  3. On the phone, open My Files > Internal storage > Fable2 and tap'
+    Info '     Fable2.apk to install it.'
+    Info '  4. Open "Fable II", tap "Allow file access", switch it on, go back.'
+    # Show the folder in File Explorer, ready to drag.
+    Start-Process explorer.exe -ArgumentList ('/select,"' + $GameDir + '"')
     exit 0
 }
 
