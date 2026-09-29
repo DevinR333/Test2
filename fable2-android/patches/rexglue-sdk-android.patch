@@ -410,10 +410,10 @@ index ef5bdf4..8055029 100644
      return std::filesystem::path(*xdg);
 diff --git a/src/core/main_android.cpp b/src/core/main_android.cpp
 new file mode 100644
-index 0000000..d2cc001
+index 0000000..2afbed0
 --- /dev/null
 +++ b/src/core/main_android.cpp
-@@ -0,0 +1,25 @@
+@@ -0,0 +1,47 @@
 +/**
 + * @file        core/main_android.cpp
 + * @brief       Android process-level initialization.
@@ -423,6 +423,9 @@ index 0000000..d2cc001
 +
 +#include <rex/main_android.h>
 +
++#include <cerrno>
++
++#include <rex/filesystem.h>
 +#include <rex/memory/utils.h>
 +#include <rex/thread.h>
 +
@@ -439,6 +442,25 @@ index 0000000..d2cc001
 +}
 +
 +}  // namespace rex
++
++namespace rex::filesystem {
++
++// Declared for Xenia's Storage Access Framework (content://) support, which
++// needs a JNI bridge to ContentResolver. This port reads game files through
++// plain paths in the app's files directory, so content URIs are reported as
++// unsupported instead.
++bool IsAndroidContentUri(const std::string_view source) {
++  return source.starts_with("content://");
++}
++
++int OpenAndroidContentFileDescriptor(const std::string_view uri, const char* mode) {
++  (void)uri;
++  (void)mode;
++  errno = ENOTSUP;
++  return -1;
++}
++
++}  // namespace rex::filesystem
 diff --git a/src/core/memory_posix.cpp b/src/core/memory_posix.cpp
 index b52bf39..2cdcd55 100644
 --- a/src/core/memory_posix.cpp
@@ -682,7 +704,7 @@ index 77bb1dc..3925fcf 100644
    rex::cvar::ApplyEnvironment();
    rex::InitLoggingEarly();
 diff --git a/thirdparty/CMakeLists.txt b/thirdparty/CMakeLists.txt
-index f102b56..1675647 100644
+index f102b56..255c178 100644
 --- a/thirdparty/CMakeLists.txt
 +++ b/thirdparty/CMakeLists.txt
 @@ -245,8 +245,15 @@ target_compile_options(imgui PRIVATE -w)
@@ -717,3 +739,11 @@ index f102b56..1675647 100644
      set(SDL_X11               ON  CACHE BOOL "" FORCE)
      set(SDL_WAYLAND           ON  CACHE BOOL "" FORCE)
      set(SDL_ALSA              ON  CACHE BOOL "" FORCE)
+@@ -665,6 +677,7 @@ endif()
+ if(IS_ARM64)
+     target_sources(libavcodec PRIVATE
+         ${FFMPEG_DIR}/libavcodec/aarch64/fft_init_aarch64.c
++        ${FFMPEG_DIR}/libavcodec/aarch64/idctdsp_init_aarch64.c
+         ${FFMPEG_DIR}/libavcodec/aarch64/fft_neon.S
+         ${FFMPEG_DIR}/libavcodec/aarch64/mdct_neon.S
+         ${FFMPEG_DIR}/libavcodec/aarch64/simple_idct_neon.S
