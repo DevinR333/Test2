@@ -15,19 +15,19 @@ final class Screenshotter {
     static void attach(MapleGame game, String[] args) {
         String out = "screenshot.png";
         int frames = 180;
-        int map = -1;
+        boolean play = false;
         String hold = "";
         String script = "";
         for (String a : args) {
             if (a.startsWith("--screenshot=")) out = a.substring(13);
             else if (a.startsWith("--frames=")) frames = Integer.parseInt(a.substring(9));
-            else if (a.startsWith("--map=")) map = Integer.parseInt(a.substring(6));
+            else if (a.equals("--play")) play = true;
             else if (a.startsWith("--hold=")) hold = a.substring(7);
             else if (a.startsWith("--script=")) script = a.substring(9);
         }
         final String file = out;
         final int total = frames;
-        final int mapId = map;
+        final boolean autoPlay = play;
         final boolean edit = java.util.Arrays.asList(args).contains("--edit");
         final Controls input = new Controls();
         input.left = hold.contains("left");
@@ -41,11 +41,23 @@ final class Screenshotter {
         if (!script.isEmpty()) for (String s : script.split(",")) steps.add(s.split(":"));
         game.afterFrame = new Runnable() {
             int n;
+            boolean created;
 
             @Override
             public void run() {
                 n++;
-                if (n == 1 && mapId >= 0) game.warp(mapId, null);
+                // --play: create a character if there is none, then enter the game with the first one
+                if (autoPlay && game.client() != null && game.client().state == maple.net.GameClient.State.CHARACTER_SELECT) {
+                    if (game.client().characters.isEmpty()) {
+                        if (!created) {
+                            created = true;
+                            game.charSelect().setName("Mapler");
+                            game.charSelect().create();
+                        }
+                    } else {
+                        game.client().selectCharacter(game.client().characters.get(0).stats.id);
+                    }
+                }
                 if (n == 5 && edit) game.controls().editing = true;
                 if (!steps.isEmpty()) {
                     int f = n, idx = 0;

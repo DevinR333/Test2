@@ -5,6 +5,7 @@ plugins {
 // Your MapleStory folder. The .wz files in it get packed into the APK (they never go into git).
 def wzFolder = file(wzDir.toString())
 def wzAssets = layout.buildDirectory.dir('generated/wzAssets')
+def scriptAssets = layout.buildDirectory.dir('generated/scriptAssets')
 def wzNames = ['Base', 'Character', 'Effect', 'Etc', 'Item', 'Map', 'Mob', 'Morph', 'Npc',
                'Quest', 'Reactor', 'Skill', 'Sound', 'String', 'TamingMob', 'UI']
 
@@ -14,7 +15,7 @@ android {
 
     defaultConfig {
         applicationId 'com.mapleoffline.v83'
-        minSdk 24
+        minSdk 26
         targetSdk 35
         versionCode 1
         versionName '0.1.0'
@@ -26,7 +27,7 @@ android {
             manifest.srcFile 'AndroidManifest.xml'
             java.srcDirs = ['src/main/java']
             res.srcDirs = ['res']
-            assets.srcDirs = [wzAssets]
+            assets.srcDirs = [wzAssets, scriptAssets]
             jniLibs.srcDirs = ['libs']
         }
     }
@@ -37,8 +38,17 @@ android {
     }
 
     compileOptions {
-        sourceCompatibility JavaVersion.VERSION_11
-        targetCompatibility JavaVersion.VERSION_11
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
+    }
+
+    packaging {
+        jniLibs { useLegacyPackaging true }
+        resources {
+            excludes += ['META-INF/versions/**', 'META-INF/*.kotlin_module', 'META-INF/INDEX.LIST',
+                         'META-INF/io.netty.versions.properties', 'META-INF/DEPENDENCIES', 'META-INF/LICENSE*', 'META-INF/NOTICE*']
+        }
     }
 
     buildTypes {
@@ -52,9 +62,7 @@ android {
         }
     }
 
-    packaging {
-        jniLibs { useLegacyPackaging true }
-    }
+
 }
 
 configurations { natives }
@@ -62,6 +70,7 @@ configurations { natives }
 dependencies {
     implementation project(':core')
     implementation "com.badlogicgames.gdx:gdx-backend-android:$gdxVersion"
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
     natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-arm64-v8a"
     natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-x86_64"
 }
@@ -102,11 +111,18 @@ tasks.register('copyWzFiles', Sync) {
     }
 }
 
+// The server's NPC/quest/portal/event scripts go into the APK too.
+tasks.register('copyScripts', Sync) {
+    from(rootProject.file('server/scripts'))
+    into scriptAssets.map { it.dir('scripts') }
+}
+
 tasks.matching { it.name.startsWith('merge') && it.name.endsWith('Assets') }.configureEach {
-    dependsOn 'copyWzFiles'
+    dependsOn 'copyWzFiles', 'copyScripts'
 }
 tasks.matching { it.name.contains('merge') && it.name.contains('JniLib') }.configureEach {
     dependsOn 'copyAndroidNatives'
 }
 preBuild.dependsOn 'copyAndroidNatives'
 preBuild.dependsOn 'copyWzFiles'
+preBuild.dependsOn 'copyScripts'

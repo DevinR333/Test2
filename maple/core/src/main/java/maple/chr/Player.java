@@ -218,4 +218,18 @@ public final class Player {
     }
 
     public int layer() { return phys.fhlayer; }
+
+    /** v83 movement stance byte: walk 2, stand 4, jump 6, prone 10, ladder 14, rope 16; +1 when facing left. */
+    public int stanceByte() {
+        int s;
+        switch (state) {
+            case WALK: s = 2; break;
+            case FALL: s = 6; break;
+            case PRONE: s = 10; break;
+            case LADDER: s = 14; break;
+            case ROPE: s = 16; break;
+            default: s = 4; break;
+        }
+        return s + (facingRight ? 0 : 1);
+    }
 }

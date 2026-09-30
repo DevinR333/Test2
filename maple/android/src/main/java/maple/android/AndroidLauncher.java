@@ -17,6 +17,7 @@ public class AndroidLauncher extends AndroidApplication {
         cfg.useCompass = false;
         cfg.useGyroscope = false;
         cfg.numSamples = 0;
-        initialize(new MapleGame(new AssetWzSource(getAssets())), cfg);
+        java.io.File save = new java.io.File(getFilesDir(), "save");
+        initialize(new MapleGame(new AssetWzSource(getAssets()), save, new AssetScriptLoader(getAssets())), cfg);
     }
 }

@@ -36,6 +36,7 @@ public final class SyntheticData {
         Dir mapDir = root.dir("Map").dir("Map1");
         buildMap(mapDir.img("100000000.img"), MAP2, "right00");
         buildMap(mapDir.img("100000001.img"), MAP, "left00");
+        buildMap(root.dir("Map").dir("Map0").img("000010000.img"), MAP, "left00");
         Prop link = mapDir.img("100000002.img");
         link.sub("info").set("link", MAP);
 

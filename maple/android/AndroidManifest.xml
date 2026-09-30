@@ -2,6 +2,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-feature android:glEsVersion="0x00020000" android:required="true" />
+    <!-- The game server runs inside the app and the game connects to it on 127.0.0.1 (never the internet). -->
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:allowBackup="false"

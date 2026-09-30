@@ -3,6 +3,7 @@ package maple.map;
 /** A portal: spawn point, visible door, invisible press-up spot or touch trigger. */
 public final class Portal {
     public final String name;
+    public int id;
     public final int type, x, y, targetMap;
     public final String targetName, script;
 

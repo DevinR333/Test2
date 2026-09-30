@@ -54,7 +54,7 @@ public class NoteDao {
                     note = rs.next() ? Optional.of(NoteRowMapper.map(rs)) : Optional.empty();
                 }
             }
-            if (note.isEmpty()) {
+            if (!note.isPresent()) {
                 return Optional.empty();
             }
             try (PreparedStatement ps = c.prepareStatement("UPDATE notes SET `deleted` = 1 WHERE `id` = ?")) {

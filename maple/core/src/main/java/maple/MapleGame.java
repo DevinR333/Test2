@@ -16,13 +16,19 @@ import maple.chr.Player;
 import maple.map.Field;
 import maple.map.Portal;
 import maple.ui.Controls;
-import maple.ui.MapMenu;
+import maple.ui.CharSelectScreen;
+import maple.net.GameClient;
+import maple.net.PacketWriter;
+import net.opcodes.RecvOpcode;
+import offline.OfflineServer;
+import scripting.AbstractScriptManager;
+import java.io.File;
 import maple.wz.Wz;
 import maple.wz.WzNode;
 
 /** The game: loads maps from the WZ files, runs the 125 Hz physics and draws everything. */
 public class MapleGame extends ApplicationAdapter {
-    public static final int START_MAP = 100000000; // Henesys
+    private enum Mode { BOOT, CHAR_SELECT, PLAYING }
     private static final float TICK_MS = 8f;
     private static final float BASE_VIEW_HEIGHT = 600f;
 
@@ -40,7 +46,17 @@ public class MapleGame extends ApplicationAdapter {
     private final Player player = new Player();
     private Avatar avatar;
     private final Controls controls = new Controls();
-    private final MapMenu menu = new MapMenu();
+    private Mode mode = Mode.BOOT;
+    private GameClient client;
+    private CharSelectScreen charSelect;
+    private final File saveDir;
+    private final AbstractScriptManager.ScriptLoader scripts;
+    private int pendingSpawnId;
+    private int pendingX = Integer.MIN_VALUE, pendingY;
+    private long lastMoveSent;
+    private double lastSentX, lastSentY;
+    private int lastSentStance = -1;
+    private boolean avatarFromServer;
     private final Bgm bgm = new Bgm();
     private Preferences prefs;
 
@@ -56,16 +72,20 @@ public class MapleGame extends ApplicationAdapter {
     private long toastUntil;
     private boolean debug;
     private int touchPortalCooldown;
-    private boolean menuNamesLoaded;
 
     /** Optional hook for automated screenshots/tests: runs after each frame. */
     public Runnable afterFrame;
     /** Test hook: fixed input instead of the touch screen. */
     public Controls scriptedInput;
 
-    public MapleGame(Wz.Source source) {
+    public MapleGame(Wz.Source source, File saveDir, AbstractScriptManager.ScriptLoader scripts) {
         this.source = source;
+        this.saveDir = saveDir;
+        this.scripts = scripts;
     }
+
+    public GameClient client() { return client; }
+    public CharSelectScreen charSelect() { return charSelect; }
 
     public Player player() { return player; }
     public Controls controls() { return controls; }
@@ -96,23 +116,42 @@ public class MapleGame extends ApplicationAdapter {
         }
         maple.map.Physics.load(wz.get("Map/Physics.img"));
         Log.info(maple.map.Physics.describe());
-        try {
-            avatar = new Avatar(wz, 0, 20000, 30000, new int[]{1040002, 1060002, 1072001, 1302000});
-            if (!avatar.problems.isEmpty()) showToast("Character: " + avatar.problems);
-            player.setAvatar(avatar);
-        } catch (RuntimeException e) {
-            Log.error("avatar", e);
-            showToast("Character could not load: " + Log.brief(e));
-        }
-        int start = prefs.getInteger("map", START_MAP);
-        pendingMap = start;
-        pendingPortal = null;
+        // The game server runs inside the app, on this device only.
+        OfflineServer.start(wz, saveDir, scripts);
+        mode = Mode.BOOT;
     }
 
-    public void warp(int mapId, String portal) {
-        pendingMap = mapId;
-        pendingPortal = portal;
+    /** The server moved us to a map (login or portal). */
+    private void serverWarp(int[] w) {
+        pendingMap = w[0];
+        pendingSpawnId = w[1];
+        pendingX = w[2];
+        pendingY = w[3];
+        pendingPortal = null;
         loadingDrawn = false;
+        if (!avatarFromServer && client.player != null) {
+            avatarFromServer = true;
+            java.util.List<Integer> ids = new java.util.ArrayList<>();
+            for (maple.net.model.Item it : client.player.inventory(-1).values()) {
+                if (it.position > -100 || it.position == -111) ids.add(it.itemId);
+            }
+            int[] eq = new int[ids.size()];
+            for (int i = 0; i < eq.length; i++) eq[i] = ids.get(i);
+            try {
+                avatar = new Avatar(wz, client.player.stats.skin, client.player.stats.face, client.player.stats.hair, eq);
+                player.setAvatar(avatar);
+            } catch (RuntimeException e) {
+                Log.error("avatar", e);
+            }
+            player.name = client.player.stats.name;
+        }
+    }
+
+    private void startClient() {
+        client = new GameClient();
+        client.warpHandler = this::serverWarp;
+        client.start();
+        charSelect = new CharSelectScreen(wz, client);
     }
 
     private void loadPending() {
@@ -129,11 +168,6 @@ public class MapleGame extends ApplicationAdapter {
         } catch (RuntimeException e) {
             Log.error("load map " + id, e);
             if (field == null) {
-                if (id != START_MAP) {
-                    showToast("Map " + id + " failed, going to Henesys");
-                    warp(START_MAP, null);
-                    return;
-                }
                 fatal = "Could not load map " + id + "\n\n" + Log.brief(e);
             } else {
                 showToast("Map " + id + " could not load: " + Log.brief(e));
@@ -142,17 +176,20 @@ public class MapleGame extends ApplicationAdapter {
         }
         if (field != null) field.dispose();
         field = next;
-        Portal sp = field.spawnPortal(portal);
+        Portal sp = portal != null ? field.spawnPortal(portal) : field.portalById(pendingSpawnId);
         double sx = sp != null ? sp.x : (field.left + field.right) / 2.0;
         double sy = sp != null ? sp.y - 10 : field.top;
+        if (pendingX != Integer.MIN_VALUE) {
+            sx = pendingX;
+            sy = pendingY - 10;
+        }
+        mode = Mode.PLAYING;
         player.spawn(sx, sy);
         setupView();
         camX = sx;
         camY = sy - 50;
         clampCamera();
         bgm.play(wz, field.bgm);
-        prefs.putInteger("map", id);
-        prefs.flush();
         String title = field.streetName.isEmpty() ? field.mapName : field.streetName + " : " + field.mapName;
         showToast(title.isEmpty() ? "Map " + id : title);
         touchPortalCooldown = 60;
@@ -180,7 +217,6 @@ public class MapleGame extends ApplicationAdapter {
         uiCam.setToOrtho(true, sw / uiScale, sh / uiScale);
         uiCam.update();
         controls.layout(sw, sh, uiScale);
-        menu.layout(sw / uiScale, sh / uiScale);
     }
 
     @Override
@@ -200,6 +236,27 @@ public class MapleGame extends ApplicationAdapter {
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         if (fatal != null) {
             drawMessage(fatal);
+            after();
+            return;
+        }
+        if (client != null) client.update();
+        if (mode == Mode.BOOT) {
+            if (OfflineServer.failure() != null) {
+                fatal = "The game server could not start:\n\n" + Log.brief(OfflineServer.failure());
+            } else if (client == null && OfflineServer.isOnline()) {
+                startClient();
+            } else if (client != null && client.state == GameClient.State.FAILED) {
+                fatal = client.error;
+            } else if (client != null && client.state == GameClient.State.CHARACTER_SELECT) {
+                mode = Mode.CHAR_SELECT;
+            }
+            drawMessage(client == null ? "Starting MapleStory..." : "Logging in...");
+            after();
+            return;
+        }
+        if (mode == Mode.CHAR_SELECT && pendingMap < 0) {
+            if (client.state == GameClient.State.FAILED) fatal = client.error;
+            charSelect.render(batch, textBatch, shapes, uiFont, uiCam.combined, uiCam.viewportWidth, uiCam.viewportHeight, uiScale, Gdx.graphics.getDeltaTime());
             after();
             return;
         }
@@ -233,7 +290,7 @@ public class MapleGame extends ApplicationAdapter {
         while (accumulator >= TICK_MS) {
             accumulator -= TICK_MS;
             timeMs += (long) TICK_MS;
-            if (!menu.open && !controls.editing) {
+            if (!controls.editing) {
                 tick(in);
                 if (first) {
                     in.consumeEdges();
@@ -253,27 +310,6 @@ public class MapleGame extends ApplicationAdapter {
 
     private void handleButtons() {
         if (controls.debugToggle) debug = !debug;
-        if (controls.travelToggle) {
-            menu.open = !menu.open;
-            if (menu.open && !menuNamesLoaded) {
-                menuNamesLoaded = true;
-                WzNode strings = wz.get("String/Map.img");
-                for (int i = 0; i < MapMenu.IDS.length; i++) {
-                    for (WzNode region : strings.children()) {
-                        WzNode m = region.resolve().get(Integer.toString(MapMenu.IDS[i]));
-                        if (m.exists()) {
-                            String n = m.getString("mapName", "");
-                            String st = m.getString("streetName", "");
-                            if (!n.isEmpty()) menu.names[i] = st.isEmpty() || n.contains(st) ? n : st + " : " + n;
-                            break;
-                        }
-                    }
-                }
-            }
-            return;
-        }
-        int chosen = menu.poll(uiScale);
-        if (chosen >= 0) warp(chosen, null);
     }
 
     private void tick(Controls in) {
@@ -285,16 +321,17 @@ public class MapleGame extends ApplicationAdapter {
         if (p != null) {
             boolean use = (in.upPressed && !p.isTouch()) || (p.isTouch() && touchPortalCooldown == 0);
             if (use) {
-                if (p.hasTarget()) {
-                    touchPortalCooldown = 60;
-                    if (p.targetMap == field.id) {
-                        Portal dest = field.spawnPortal(p.targetName);
-                        if (dest != null) player.spawn(dest.x, dest.y - 10);
-                    } else {
-                        warp(p.targetMap, p.targetName);
-                    }
-                } else if (in.upPressed && !p.script.isEmpty()) {
-                    showToast("This portal needs a script (not supported yet): " + p.script);
+                touchPortalCooldown = 60;
+                if (!p.script.isEmpty()) {
+                    sendMovement(true);
+                    client.send(new PacketWriter(RecvOpcode.CHANGE_MAP_SPECIAL.getValue()).writeByte(0).writeString(p.name).writeShort(0));
+                } else if (p.hasTarget() && p.targetMap == field.id) {
+                    Portal dest = field.spawnPortal(p.targetName);
+                    if (dest != null) player.spawn(dest.x, dest.y - 10);
+                } else if (p.hasTarget()) {
+                    sendMovement(true);
+                    client.send(new PacketWriter(RecvOpcode.CHANGE_MAP.getValue())
+                            .writeByte(0).writeInt(-1).writeString(p.name).writeByte(0).writeByte(0).writeByte(0));
                 }
             }
         }
@@ -302,7 +339,33 @@ public class MapleGame extends ApplicationAdapter {
             Portal sp = field.spawnPortal(null);
             if (sp != null) player.spawn(sp.x, sp.y - 10);
         }
+        sendMovement(false);
         updateCamera();
+    }
+
+    /** Tells the server where we are (like the client's movement packets), at most every 200 ms. */
+    private void sendMovement(boolean force) {
+        if (client == null) return;
+        int stance = player.stanceByte();
+        boolean moved = Math.abs(player.phys.x - lastSentX) >= 1 || Math.abs(player.phys.y - lastSentY) >= 1 || stance != lastSentStance;
+        if (!moved || (!force && timeMs - lastMoveSent < 200)) return;
+        int duration = (int) Math.min(1000, Math.max(8, timeMs - lastMoveSent));
+        lastMoveSent = timeMs;
+        lastSentX = player.phys.x;
+        lastSentY = player.phys.y;
+        lastSentStance = stance;
+        PacketWriter w = new PacketWriter(RecvOpcode.MOVE_PLAYER.getValue());
+        w.writeBytes(new byte[9]);
+        w.writeByte(1); // one movement fragment: absolute move
+        w.writeByte(0);
+        w.writeShort((int) Math.round(player.phys.x));
+        w.writeShort((int) Math.round(player.phys.y));
+        w.writeShort((int) Math.round(player.phys.hspeed * 125));
+        w.writeShort((int) Math.round(player.phys.vspeed * 125));
+        w.writeShort(player.phys.fhid);
+        w.writeByte(stance);
+        w.writeShort(duration);
+        client.send(w);
     }
 
     private void updateCamera() {
@@ -390,7 +453,6 @@ public class MapleGame extends ApplicationAdapter {
             uiFont.draw(textBatch, toast, (uiCam.viewportWidth - layout.width) / 2, 60);
         }
         textBatch.end();
-        menu.draw(shapes, textBatch, uiFont);
     }
 
     private void drawMessage(String msg) {
@@ -408,10 +470,6 @@ public class MapleGame extends ApplicationAdapter {
     @Override
     public void pause() {
         bgm.pause();
-        if (prefs != null && field != null) {
-            prefs.putInteger("map", field.id);
-            prefs.flush();
-        }
     }
 
     @Override
@@ -422,6 +480,9 @@ public class MapleGame extends ApplicationAdapter {
     @Override
     public void dispose() {
         bgm.stop();
+        if (client != null) client.close();
+        if (charSelect != null) charSelect.dispose();
+        OfflineServer.stop();
         if (field != null) field.dispose();
         if (avatar != null) avatar.dispose();
         batch.dispose();

@@ -24,6 +24,7 @@ dependencies {
 test {
     workingDir = project(':server').projectDir // server scripts live there
     maxHeapSize = '2g'
+    systemProperty 'maple.synthetic', "${projectDir}/build/synthetic-wz"
     environment 'MAPLE_XML_WZ', System.getenv('MAPLE_XML_WZ') ?: ''
     testLogging { events 'failed'; exceptionFormat 'full' }
 }

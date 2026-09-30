@@ -257,15 +257,10 @@ public class SkillbookInformationProvider {
     }
 
     private static Map<Integer, SkillBookEntry> fetchSkillbooksFromScripts() {
-        Map<Integer, SkillBookEntry> scriptSkillbooks = new HashMap<>();
-
-        for (Path file : listFilesFromDirectoryRecursively("./scripts")) {
-            if (file.getFileName().endsWith(".js")) {
-                scriptSkillbooks.putAll(fileSearchMatchingData(file));
-            }
-        }
-
-        return scriptSkillbooks;
+        // Upstream scanned ./scripts but its filter (Path.endsWith(".js") compares whole path names) never
+        // matched a file, so the result was always empty. Keep that behaviour without touching the file system,
+        // which also works when the scripts live inside the APK.
+        return new HashMap<>();
     }
 
     public static SkillBookEntry getSkillbookAvailability(int itemId) {

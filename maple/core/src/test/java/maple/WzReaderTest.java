@@ -17,7 +17,7 @@ import java.io.File;
 import static org.junit.Assert.*;
 
 public class WzReaderTest {
-    static File dir = new File("build/synthetic-wz");
+    static File dir = new File(System.getProperty("maple.synthetic", "build/synthetic-wz"));
     static Wz wz;
 
     @BeforeClass

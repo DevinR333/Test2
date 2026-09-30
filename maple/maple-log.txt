@@ -1,0 +1,43 @@
+WZ source: /home/user/Test2/maple/core/build/synthetic-wz
+defaults: walk 125.0 px/s, jump 555.0 px/s, gravity 2000.0, fall 670.0
+WZ source: /home/user/Test2/maple/core/build/synthetic-wz
+defaults: walk 125.0 px/s, jump 555.0 px/s, gravity 2000.0, fall 670.0
+WZ source: /home/user/Test2/maple/core/build/synthetic-wz
+defaults: walk 125.0 px/s, jump 555.0 px/s, gravity 2000.0, fall 670.0
+WZ source: /home/user/Test2/maple/core/build/synthetic-wz
+defaults: walk 125.0 px/s, jump 555.0 px/s, gravity 2000.0, fall 670.0
+load map 10000: maple.wz.WzException: Map 10000 does not exist
+	at maple.map.Field.<init>(Field.java:59)
+	at maple.MapleGame.loadPending(MapleGame.java:164)
+	at maple.MapleGame.render(MapleGame.java:271)
+	at com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window.update(Lwjgl3Window.java:435)
+	at com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application.loop(Lwjgl3Application.java:181)
+	at com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application.<init>(Lwjgl3Application.java:153)
+	at maple.desktop.DesktopLauncher.main(DesktopLauncher.java:41)
+
+WZ source: /home/user/Test2/maple/core/build/synthetic-wz
+defaults: walk 125.0 px/s, jump 555.0 px/s, gravity 2000.0, fall 670.0
+load map 10000: maple.wz.WzException: Map 10000 does not exist
+	at maple.map.Field.<init>(Field.java:59)
+	at maple.MapleGame.loadPending(MapleGame.java:164)
+	at maple.MapleGame.render(MapleGame.java:271)
+	at com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window.update(Lwjgl3Window.java:435)
+	at com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application.loop(Lwjgl3Application.java:181)
+	at com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application.<init>(Lwjgl3Application.java:153)
+	at maple.desktop.DesktopLauncher.main(DesktopLauncher.java:41)
+
+WZ source: /home/user/Test2/maple/core/build/synthetic-wz
+defaults: walk 125.0 px/s, jump 555.0 px/s, gravity 2000.0, fall 670.0
+load map 10000: maple.wz.WzException: Map 10000 does not exist
+	at maple.map.Field.<init>(Field.java:59)
+	at maple.MapleGame.loadPending(MapleGame.java:164)
+	at maple.MapleGame.render(MapleGame.java:271)
+	at com.badlogic.gdx.backends.lwjgl3.Lwjgl3Window.update(Lwjgl3Window.java:435)
+	at com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application.loop(Lwjgl3Application.java:181)
+	at com.badlogic.gdx.backends.lwjgl3.Lwjgl3Application.<init>(Lwjgl3Application.java:153)
+	at maple.desktop.DesktopLauncher.main(DesktopLauncher.java:41)
+
+WZ source: /home/user/Test2/maple/core/build/synthetic-wz
+defaults: walk 125.0 px/s, jump 555.0 px/s, gravity 2000.0, fall 670.0
+Loaded map 10000 () in 70 ms: 64 tiles, 3 objects, 2 life, 18 sprites
+Map 10000

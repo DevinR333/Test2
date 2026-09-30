@@ -140,9 +140,15 @@ public final class Field {
         }
 
         for (WzNode p : src.get("portal").children()) {
-            p = p.resolve();
-            portals.add(new Portal(p.getString("pn", ""), p.getInt("pt", 0), p.getInt("x", 0), p.getInt("y", 0),
-                    p.getInt("tm", 999999999), p.getString("tn", ""), p.getString("script", "")));
+            WzNode r = p.resolve();
+            Portal portal = new Portal(r.getString("pn", ""), r.getInt("pt", 0), r.getInt("x", 0), r.getInt("y", 0),
+                    r.getInt("tm", 999999999), r.getString("tn", ""), r.getString("script", ""));
+            try {
+                portal.id = Integer.parseInt(p.name);
+            } catch (NumberFormatException e) {
+                portal.id = portals.size();
+            }
+            portals.add(portal);
         }
         portalAnim = Animation.of(wz.get("Map/MapHelper.img/portal/game/pv"), bank);
 
@@ -169,6 +175,12 @@ public final class Field {
         }
         for (Portal p : portals) if (p.isSpawn()) return p;
         return portals.isEmpty() ? null : portals.get(0);
+    }
+
+    /** The portal with this id (the server's spawn point number), or the first spawn point. */
+    public Portal portalById(int id) {
+        for (Portal p : portals) if (p.id == id) return p;
+        return spawnPortal(null);
     }
 
     public Ladder ladderAt(double x, double y, boolean upwards) {
