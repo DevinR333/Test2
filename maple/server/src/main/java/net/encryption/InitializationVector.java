@@ -7,6 +7,11 @@ public class InitializationVector {
         this.bytes = bytes;
     }
 
+    /** An IV received from the other side (used by the in-app client). */
+    public static InitializationVector of(byte[] bytes) {
+        return new InitializationVector(bytes.clone());
+    }
+
     public byte[] getBytes() {
         return bytes;
     }

@@ -111,13 +111,19 @@ public class Server {
     /** The offline app shuts the server down without exiting the whole program. */
     public static volatile boolean exitOnShutdown = true;
     private static final Logger log = LoggerFactory.getLogger(Server.class);
-    private static Server instance = null;
+    private static volatile Server instance;
 
     public static Server getInstance() {
-        if (instance == null) {
-            instance = new Server();
+        Server s = instance;
+        if (s == null) {
+            synchronized (Server.class) {
+                s = instance;
+                if (s == null) {
+                    instance = s = new Server();
+                }
+            }
         }
-        return instance;
+        return s;
     }
 
     private static final Set<Integer> activeFly = new HashSet<>();

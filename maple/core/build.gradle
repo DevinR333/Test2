@@ -1,18 +1,29 @@
+evaluationDependsOn(':server')
+
 apply plugin: 'java-library'
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_11
-    targetCompatibility = JavaVersion.VERSION_11
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
 }
 tasks.withType(JavaCompile).configureEach {
     options.encoding = 'UTF-8'
-    options.release = 11
+    options.release = 17
 }
 
 dependencies {
     api project(':wz')
+    api project(':server')
     api "com.badlogicgames.gdx:gdx:$gdxVersion"
     testImplementation 'junit:junit:4.13.2'
+    testImplementation files(project(':server').sourceSets.test.output)
     testImplementation "com.badlogicgames.gdx:gdx-backend-headless:$gdxVersion"
     testImplementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+}
+
+test {
+    workingDir = project(':server').projectDir // server scripts live there
+    maxHeapSize = '2g'
+    environment 'MAPLE_XML_WZ', System.getenv('MAPLE_XML_WZ') ?: ''
+    testLogging { events 'failed'; exceptionFormat 'full' }
 }

@@ -283,7 +283,7 @@ public class CashShop {
             List<CashItem> itemPool = items.values().stream()
                     .filter(CashItem::isOnSale)
                     .filter(cashItem -> !ItemId.isCashPackage(cashItem.itemId))
-                    .toList();
+                    .collect(java.util.stream.Collectors.toList());
             return Optional.of(getRandomItem(itemPool));
         }
 

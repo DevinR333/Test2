@@ -84,7 +84,7 @@ public class MonsterInformationProvider {
     private List<MonsterGlobalDropEntry> loadContinentDrops(int continentId) {
         return globaldrops.stream()
                 .filter(dropEntry -> dropEntry.continentid < 0 || dropEntry.continentid == continentId)
-                .toList();
+                .collect(java.util.stream.Collectors.toList());
     }
 
     private void retrieveGlobal() {

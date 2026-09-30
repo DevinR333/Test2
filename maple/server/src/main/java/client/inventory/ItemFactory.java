@@ -194,19 +194,27 @@ public enum ItemFactory {
         return items;
     }
 
+    /** Deletes this owner's stored items and their equipment rows (two statements; H2 has no multi-table DELETE). */
+    private void deleteStoredItems(Connection con, int id) throws SQLException {
+        String owner = account ? "accountid" : "characterid";
+        try (PreparedStatement ps = con.prepareStatement("DELETE FROM `inventoryequipment` WHERE `inventoryitemid` IN "
+                + "(SELECT `inventoryitemid` FROM `inventoryitems` WHERE `type` = ? AND `" + owner + "` = ?)")) {
+            ps.setInt(1, value);
+            ps.setInt(2, id);
+            ps.executeUpdate();
+        }
+        try (PreparedStatement ps = con.prepareStatement("DELETE FROM `inventoryitems` WHERE `type` = ? AND `" + owner + "` = ?")) {
+            ps.setInt(1, value);
+            ps.setInt(2, id);
+            ps.executeUpdate();
+        }
+    }
+
     private void saveItemsCommon(List<Pair<Item, InventoryType>> items, int id, Connection con) throws SQLException {
         Lock lock = locks[id % lockCount];
         lock.lock();
         try {
-            StringBuilder query = new StringBuilder();
-            query.append("DELETE `inventoryitems`, `inventoryequipment` FROM `inventoryitems` LEFT JOIN `inventoryequipment` USING(`inventoryitemid`) WHERE `type` = ? AND `");
-            query.append(account ? "accountid" : "characterid").append("` = ?");
-
-            try (PreparedStatement ps = con.prepareStatement(query.toString())) {
-                ps.setInt(1, value);
-                ps.setInt(2, id);
-                ps.executeUpdate();
-            }
+            deleteStoredItems(con, id);
 
             try (PreparedStatement psItem = con.prepareStatement("INSERT INTO `inventoryitems` VALUES (DEFAULT, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", Statement.RETURN_GENERATED_KEYS)) {
                 if (!items.isEmpty()) {
@@ -335,15 +343,7 @@ public enum ItemFactory {
                 ps.executeUpdate();
             }
 
-            StringBuilder query = new StringBuilder();
-            query.append("DELETE `inventoryitems`, `inventoryequipment` FROM `inventoryitems` LEFT JOIN `inventoryequipment` USING(`inventoryitemid`) WHERE `type` = ? AND `");
-            query.append(account ? "accountid" : "characterid").append("` = ?");
-
-            try (PreparedStatement ps = con.prepareStatement(query.toString())) {
-                ps.setInt(1, value);
-                ps.setInt(2, id);
-                ps.executeUpdate();
-            }
+            deleteStoredItems(con, id);
 
             int i = 0;
             for (Pair<Item, InventoryType> pair : items) {

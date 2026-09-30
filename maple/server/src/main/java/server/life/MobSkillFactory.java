@@ -52,7 +52,7 @@ public class MobSkillFactory {
 
     public static MobSkill getMobSkillOrThrow(MobSkillType type, int level) {
         return getMobSkill(type, level).orElseThrow(
-                () -> new IllegalArgumentException("No MobSkill exists for type %s, level %d".formatted(type, level))
+                () -> new IllegalArgumentException(String.format("No MobSkill exists for type %s, level %d", type, level))
         );
     }
 
@@ -78,7 +78,7 @@ public class MobSkillFactory {
                 return Optional.of(existingMs);
             }
 
-            Data skillData = skillRoot.getChildByPath("%d/level/%d".formatted(type.getId(), level));
+            Data skillData = skillRoot.getChildByPath(String.format("%d/level/%d", type.getId(), level));
             if (skillData == null) {
                 return Optional.empty();
             }

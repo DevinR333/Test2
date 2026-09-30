@@ -425,14 +425,14 @@ public final class RingActionHandler extends AbstractPacketHandler {
                             if (resStatus > 0) {
                                 long expiration = cserv.getWeddingTicketExpireTime(resStatus + 1);
 
-                                String baseMessage = "You've been invited to %s and %s's Wedding!".formatted(groom, bride);
+                                String baseMessage = String.format("You've been invited to %s and %s's Wedding!", groom, bride);
                                 Character guestChr = c.getWorldServer().getPlayerStorage().getCharacterById(guest);
                                 if (guestChr != null && InventoryManipulator.checkSpace(guestChr.getClient(), newItemId, 1, "") && InventoryManipulator.addById(guestChr.getClient(), newItemId, (short) 1, expiration)) {
-                                    guestChr.dropMessage(6, "[Wedding] %s".formatted(baseMessage));
+                                    guestChr.dropMessage(6, String.format("[Wedding] %s", baseMessage));
                                 } else {
                                     String dueyMessage = baseMessage + " Receive your invitation from Duey!";
                                     if (guestChr != null && guestChr.isLoggedinWorld()) {
-                                        guestChr.dropMessage(6, "[Wedding] %s".formatted(dueyMessage));
+                                        guestChr.dropMessage(6, String.format("[Wedding] %s", dueyMessage));
                                     } else {
                                         noteService.sendNormal(dueyMessage, groom, name);
                                     }

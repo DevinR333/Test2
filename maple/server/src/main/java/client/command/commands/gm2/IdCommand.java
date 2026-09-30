@@ -45,7 +45,7 @@ public class IdCommand extends Command {
             this.items = fileLines.stream()
                     .map(this::parseLine)
                     .filter(Predicate.not(Objects::isNull))
-                    .toList();
+                    .collect(java.util.stream.Collectors.toList());
         }
 
         private HandbookItem parseLine(String line) {
@@ -54,19 +54,19 @@ public class IdCommand extends Command {
             }
 
             String[] splitLine = line.split(" - ", 2);
-            if (splitLine.length < 2 || splitLine[1].isBlank()) {
+            if (splitLine.length < 2 || splitLine[1].trim().isEmpty()) {
                 return null;
             }
             return new HandbookItem(splitLine[0], splitLine[1]);
         }
 
         public List<HandbookItem> search(String query) {
-            if (query == null || query.isBlank()) {
+            if (query == null || query.trim().isEmpty()) {
                 return Collections.emptyList();
             }
             return items.stream()
                     .filter(item -> item.matches(query))
-                    .toList();
+                    .collect(java.util.stream.Collectors.toList());
         }
     }
 
@@ -109,10 +109,10 @@ public class IdCommand extends Command {
                 if (!searchHits.isEmpty()) {
                     String searchHitsText = searchHits.stream()
                             .limit(MAX_SEARCH_HITS)
-                            .map(item -> "Id for %s is: #b%s#k".formatted(item.name, item.id))
+                            .map(item -> String.format("Id for %s is: #b%s#k", item.name, item.id))
                             .collect(Collectors.joining(NpcChat.NEW_LINE));
                     int hitsCount = Math.min(searchHits.size(), MAX_SEARCH_HITS);
-                    String summaryText = "Results found: #r%d#k | Returned: #b%d#k/100 | Refine search query to improve time.".formatted(searchHits.size(), hitsCount);
+                    String summaryText = String.format("Results found: #r%d#k | Returned: #b%d#k/100 | Refine search query to improve time.", searchHits.size(), hitsCount);
                     String fullText = searchHitsText + NpcChat.NEW_LINE + summaryText;
                     chr.getAbstractPlayerInteraction().npcTalk(NpcId.MAPLE_ADMINISTRATOR, fullText);
                 } else {

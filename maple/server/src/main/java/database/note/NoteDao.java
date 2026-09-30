@@ -27,7 +27,7 @@ public class NoteDao {
             ps.setInt(6, 0);
             ps.executeUpdate();
         } catch (SQLException e) {
-            throw new DaoException("Failed to save note: %s".formatted(note.toString()), e);
+            throw new DaoException(String.format("Failed to save note: %s", note.toString()), e);
         }
     }
 
@@ -41,7 +41,7 @@ public class NoteDao {
             }
             return out;
         } catch (SQLException e) {
-            throw new DaoException("Failed to find notes sent to: %s".formatted(to), e);
+            throw new DaoException(String.format("Failed to find notes sent to: %s", to), e);
         }
     }
 
@@ -63,7 +63,7 @@ public class NoteDao {
             }
             return note;
         } catch (SQLException e) {
-            throw new DaoException("Failed to delete note with id: %d".formatted(id), e);
+            throw new DaoException(String.format("Failed to delete note with id: %d", id), e);
         }
     }
 }
