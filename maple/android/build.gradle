@@ -1,0 +1,112 @@
+plugins {
+    id 'com.android.application' version '8.11.1'
+}
+
+// Your MapleStory folder. The .wz files in it get packed into the APK (they never go into git).
+def wzFolder = file(wzDir.toString())
+def wzAssets = layout.buildDirectory.dir('generated/wzAssets')
+def wzNames = ['Base', 'Character', 'Effect', 'Etc', 'Item', 'Map', 'Mob', 'Morph', 'Npc',
+               'Quest', 'Reactor', 'Skill', 'Sound', 'String', 'TamingMob', 'UI']
+
+android {
+    namespace 'maple.android'
+    compileSdk 36
+
+    defaultConfig {
+        applicationId 'com.mapleoffline.v83'
+        minSdk 24
+        targetSdk 35
+        versionCode 1
+        versionName '0.1.0'
+        ndk { abiFilters 'arm64-v8a', 'x86_64' }
+    }
+
+    sourceSets {
+        main {
+            manifest.srcFile 'AndroidManifest.xml'
+            java.srcDirs = ['src/main/java']
+            res.srcDirs = ['res']
+            assets.srcDirs = [wzAssets]
+            jniLibs.srcDirs = ['libs']
+        }
+    }
+
+    // The game memory-maps the .wz files straight out of the APK, so they must be stored uncompressed.
+    androidResources {
+        noCompress += ['wz', 'mp3']
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_11
+        targetCompatibility JavaVersion.VERSION_11
+    }
+
+    buildTypes {
+        debug {
+            // Big assets: skip PNG crunching etc.
+            crunchPngs false
+        }
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.debug
+        }
+    }
+
+    packaging {
+        jniLibs { useLegacyPackaging true }
+    }
+}
+
+configurations { natives }
+
+dependencies {
+    implementation project(':core')
+    implementation "com.badlogicgames.gdx:gdx-backend-android:$gdxVersion"
+    natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-arm64-v8a"
+    natives "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-x86_64"
+}
+
+// Unpack libGDX's native libraries into libs/<abi>/
+tasks.register('copyAndroidNatives') {
+    doFirst {
+        configurations.natives.copy().files.each { jar ->
+            def outputDir = null
+            if (jar.name.endsWith('natives-arm64-v8a.jar')) outputDir = file('libs/arm64-v8a')
+            if (jar.name.endsWith('natives-x86_64.jar')) outputDir = file('libs/x86_64')
+            if (outputDir != null) {
+                copy {
+                    from zipTree(jar)
+                    into outputDir
+                    include '*.so'
+                }
+            }
+        }
+    }
+}
+
+// Copy the .wz files from your MapleStory folder into the APK's assets.
+tasks.register('copyWzFiles', Sync) {
+    from(wzFolder) {
+        include wzNames.collect { it + '.wz' }
+    }
+    into wzAssets.map { it.dir('wz') }
+    doFirst {
+        if (!wzFolder.isDirectory()) {
+            throw new GradleException("WZ folder not found: ${wzFolder}\nPass your MapleStory folder with -PwzDir=C:\\path\\to\\MapleStory")
+        }
+        def missing = wzNames.findAll { !new File(wzFolder, it + '.wz').exists() }
+        if (missing.contains('Map') || missing.contains('Character')) {
+            throw new GradleException("Map.wz / Character.wz not found in ${wzFolder}")
+        }
+        if (!missing.isEmpty()) logger.warn("Missing (the game will run without them): ${missing}")
+    }
+}
+
+tasks.matching { it.name.startsWith('merge') && it.name.endsWith('Assets') }.configureEach {
+    dependsOn 'copyWzFiles'
+}
+tasks.matching { it.name.contains('merge') && it.name.contains('JniLib') }.configureEach {
+    dependsOn 'copyAndroidNatives'
+}
+preBuild.dependsOn 'copyAndroidNatives'
+preBuild.dependsOn 'copyWzFiles'

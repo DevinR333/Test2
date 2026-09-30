@@ -1,0 +1,37 @@
+apply plugin: 'java'
+apply plugin: 'application'
+
+java {
+    sourceCompatibility = JavaVersion.VERSION_11
+    targetCompatibility = JavaVersion.VERSION_11
+}
+tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
+
+dependencies {
+    implementation project(':core')
+    implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
+    implementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+    implementation "com.badlogicgames.gdx:gdx-backend-headless:$gdxVersion"
+}
+
+application {
+    mainClass = 'maple.desktop.DesktopLauncher'
+}
+
+// Play on PC:  gradlew desktop:run -PwzDir=C:\msclass
+tasks.named('run') {
+    args = [wzDir.toString()]
+    workingDir = rootProject.file('.')
+    jvmArgs '-Xmx2g'
+    if (System.getProperty('os.name').toLowerCase().contains('mac')) jvmArgs '-XstartOnFirstThread'
+}
+
+// Check your WZ files and print a report:  gradlew desktop:wzcheck -PwzDir=C:\msclass
+tasks.register('wzcheck', JavaExec) {
+    group = 'maple'
+    description = 'Reads the WZ files and reports anything the game cannot understand.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'maple.desktop.WzCheck'
+    args = [wzDir.toString()]
+    jvmArgs '-Xmx2g'
+}

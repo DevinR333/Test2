@@ -1,0 +1,39 @@
+pluginManagement {
+    repositories {
+        google()
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+rootProject.name = 'maple-offline'
+include 'core', 'desktop'
+
+// The Android module needs the Android SDK. Look for it the same way Android Studio does,
+// and write local.properties so command-line builds find it too.
+def localProps = new File(settingsDir, 'local.properties')
+def sdkDir = null
+if (localProps.exists()) {
+    def p = new Properties()
+    localProps.withInputStream { p.load(it) }
+    sdkDir = p.getProperty('sdk.dir')
+}
+if (sdkDir == null) {
+    def candidates = [System.getenv('ANDROID_HOME'), System.getenv('ANDROID_SDK_ROOT')]
+    def lad = System.getenv('LOCALAPPDATA')
+    if (lad != null) candidates << "$lad\\Android\\Sdk"
+    def home = System.getProperty('user.home')
+    candidates << "$home/Android/Sdk" << "$home/Library/Android/sdk"
+    for (c in candidates) {
+        if (c != null && new File(c).isDirectory()) {
+            sdkDir = c
+            localProps.text = "sdk.dir=" + c.replace('\\', '\\\\').replace(':', '\\:') + "\n"
+            break
+        }
+    }
+}
+if (sdkDir != null && new File(sdkDir).isDirectory()) {
+    include 'android'
+} else {
+    println "Android SDK not found: only the desktop version can be built. Install Android Studio to build the APK."
+}

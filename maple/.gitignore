@@ -1,0 +1,11 @@
+# Nexon game data never goes into git.
+*.wz
+**/generated/
+.gradle/
+build/
+local.properties
+*.apk
+*.iml
+.idea/
+android/libs/
+screenshots-local/
