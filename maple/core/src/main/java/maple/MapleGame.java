@@ -68,6 +68,7 @@ public class MapleGame extends ApplicationAdapter {
     }
 
     public Player player() { return player; }
+    public Controls controls() { return controls; }
     public Field field() { return field; }
     public String fatalError() { return fatal; }
 
@@ -82,6 +83,8 @@ public class MapleGame extends ApplicationAdapter {
         uiFont = new BitmapFont(true);
         prefs = Gdx.app.getPreferences("maple-offline");
         Gdx.input.setCatchKey(Input.Keys.BACK, true);
+        controls.load(prefs);
+        Gdx.input.setInputProcessor(controls);
         wz = new Wz(source);
         Log.info("WZ source: " + source.describe());
         try {
@@ -91,6 +94,8 @@ public class MapleGame extends ApplicationAdapter {
             Log.error("open Map.wz", e);
             return;
         }
+        maple.map.Physics.load(wz.get("Map/Physics.img"));
+        Log.info(maple.map.Physics.describe());
         try {
             avatar = new Avatar(wz, 0, 20000, 30000, new int[]{1040002, 1060002, 1072001, 1302000});
             if (!avatar.problems.isEmpty()) showToast("Character: " + avatar.problems);
@@ -228,7 +233,7 @@ public class MapleGame extends ApplicationAdapter {
         while (accumulator >= TICK_MS) {
             accumulator -= TICK_MS;
             timeMs += (long) TICK_MS;
-            if (!menu.open) {
+            if (!menu.open && !controls.editing) {
                 tick(in);
                 if (first) {
                     in.consumeEdges();
@@ -247,8 +252,8 @@ public class MapleGame extends ApplicationAdapter {
     }
 
     private void handleButtons() {
-        if (controls.debugButton.clicked) debug = !debug;
-        if (controls.mapsButton.clicked || Gdx.input.isKeyJustPressed(Input.Keys.BACK)) {
+        if (controls.debugToggle) debug = !debug;
+        if (controls.travelToggle) {
             menu.open = !menu.open;
             if (menu.open && !menuNamesLoaded) {
                 menuNamesLoaded = true;
@@ -371,7 +376,6 @@ public class MapleGame extends ApplicationAdapter {
     private void drawHud() {
         shapes.setProjectionMatrix(uiCam.combined);
         textBatch.setProjectionMatrix(uiCam.combined);
-        controls.showTouch = true;
         controls.draw(shapes, textBatch, uiFont);
         textBatch.begin();
         uiFont.setColor(Color.WHITE);

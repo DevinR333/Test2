@@ -9,6 +9,12 @@ public class PhysicsObject {
     public Mode mode = Mode.NORMAL;
     public double x, y, lastX, lastY;
     public double hspeed, vspeed, hforce, vforce, hacc, vacc;
+    /** Held direction: -1 left, 0 none, 1 right. */
+    public int walkDir;
+    /** Jump on the next tick if standing. */
+    public boolean jumpRequest;
+    /** Speed and jump stats as multipliers (1 = 100%). */
+    public double speedMul = 1, jumpMul = 1;
     public int fhid;
     public double fhslope;
     public int fhlayer;
@@ -29,6 +35,8 @@ public class PhysicsObject {
         x = lastX = nx;
         y = lastY = ny;
         hspeed = vspeed = hforce = vforce = 0;
+        walkDir = 0;
+        jumpRequest = false;
         fhid = 0;
         onGround = false;
     }

@@ -28,6 +28,7 @@ final class Screenshotter {
         final String file = out;
         final int total = frames;
         final int mapId = map;
+        final boolean edit = java.util.Arrays.asList(args).contains("--edit");
         final Controls input = new Controls();
         input.left = hold.contains("left");
         input.right = hold.contains("right");
@@ -45,6 +46,7 @@ final class Screenshotter {
             public void run() {
                 n++;
                 if (n == 1 && mapId >= 0) game.warp(mapId, null);
+                if (n == 5 && edit) game.controls().editing = true;
                 if (!steps.isEmpty()) {
                     int f = n, idx = 0;
                     while (idx < steps.size() && f > Integer.parseInt(steps.get(idx)[1])) {

@@ -12,7 +12,6 @@ import java.util.Map;
  * walls, falling, slopes). Follows the v83 client's behaviour as reimplemented by open-source clients.
  */
 public final class FootholdTree {
-    public static final double GRAVITY = 0.14, FRICTION = 0.5, SLOPE_FACTOR = 0.1, GROUND_SLIP = 3.0;
     public static final double FLY_FRICTION = 0.05;
 
     private final Map<Integer, Foothold> footholds = new HashMap<>();
@@ -143,27 +142,43 @@ public final class FootholdTree {
         p.y += p.vspeed;
     }
 
+    /** Ground and air movement with the client's Physics.img constants (walk force/drag, float drag, gravity). */
     private void moveNormal(PhysicsObject p) {
-        p.vacc = 0;
-        p.hacc = 0;
+        int d = p.walkDir;
+        double max = Physics.walkSpeed * p.speedMul;
         if (p.onGround) {
-            p.vacc += p.vforce;
-            p.hacc += p.hforce;
-            if (p.hacc == 0 && p.hspeed < 0.1 && p.hspeed > -0.1) {
-                p.hspeed = 0;
+            if (d != 0) {
+                double acc = Physics.walkForce;
+                if (p.hspeed * d < 0) acc += Physics.walkDrag;
+                p.hspeed += d * acc;
+                if (p.hspeed * d > max) p.hspeed = d * max;
             } else {
-                double inertia = p.hspeed / GROUND_SLIP;
-                double slopef = Math.max(-0.5, Math.min(0.5, p.fhslope));
-                p.hacc -= (FRICTION + SLOPE_FACTOR * (1.0 + slopef * -inertia)) * inertia;
+                p.hspeed = toward(p.hspeed, 0, Physics.walkDrag);
+            }
+            if (p.jumpRequest) {
+                p.vspeed = -Physics.jumpSpeed * p.jumpMul;
             }
         } else if ((p.flags & PhysicsObject.NO_GRAVITY) == 0) {
-            p.vacc += GRAVITY;
+            p.vspeed = Math.min(p.vspeed + Physics.gravity, Physics.fallSpeed);
+            double airMax = max * 0.5;
+            if (d == 0) {
+                p.hspeed = toward(p.hspeed, 0, Physics.floatDrag2);
+            } else if (p.hspeed * d < 0) {
+                p.hspeed += d * Physics.floatDrag1;
+                if (p.hspeed * d > airMax) p.hspeed = d * airMax;
+            } else if (Math.abs(p.hspeed) < airMax) {
+                p.hspeed = d * Math.min(airMax, Math.abs(p.hspeed) + Physics.floatDrag2);
+            }
         }
+        p.jumpRequest = false;
         p.hforce = 0;
         p.vforce = 0;
-        p.hspeed += p.hacc;
-        p.vspeed += p.vacc;
-        if (p.vspeed > 8) p.vspeed = 8; // terminal fall speed
+    }
+
+    private static double toward(double v, double target, double step) {
+        if (v > target) return Math.max(target, v - step);
+        if (v < target) return Math.min(target, v + step);
+        return v;
     }
 
     private void moveFlying(PhysicsObject p) {

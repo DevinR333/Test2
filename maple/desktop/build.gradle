@@ -35,3 +35,12 @@ tasks.register('wzcheck', JavaExec) {
     args = [wzDir.toString()]
     jvmArgs '-Xmx2g'
 }
+
+// Structure of the UI/physics data (no images):  gradlew desktop:wzdump -PwzDir=...
+tasks.register('wzdump', JavaExec) {
+    group = 'maple'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'maple.desktop.WzDump'
+    args = [wzDir.toString(), rootProject.file('wz-structure.txt').absolutePath]
+    jvmArgs '-Xmx2g'
+}

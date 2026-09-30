@@ -71,7 +71,7 @@ public class WzReaderTest {
         assertEquals(200, p.y, 0.001);
         // walk right up the slope onto the y=150 floor
         for (int i = 0; i < 2000; i++) {
-            p.hforce = 0.16;
+            p.walkDir = 1;
             fht.move(p);
         }
         assertTrue("x=" + p.x, p.x > 600);
@@ -79,7 +79,8 @@ public class WzReaderTest {
         // the wall at x=900 stops us
         assertTrue(p.x <= 900);
         // jump
-        p.vforce = -4.5;
+        p.walkDir = 0;
+        p.jumpRequest = true;
         fht.move(p);
         fht.move(p);
         assertFalse(p.onGround);

@@ -67,6 +67,7 @@ public final class Life {
         flying = isMob && anims.containsKey("fly");
         double sp = isMob ? img.get("info").getInt(flying ? "flySpeed" : "speed", 0) : 0;
         speed = Math.max(0.02, 0.1 * (100 + sp) / 100.0);
+        phys.speedMul = Math.max(0.1, (100 + sp) / 100.0);
         facingRight = src.getInt("f", 0) != 0;
         int x = src.getInt("x", 0);
         int cy = src.getInt("cy", src.getInt("y", 0));
@@ -99,13 +100,15 @@ public final class Life {
         if (moving || (flying && stance.equals("fly"))) {
             if (phys.x <= rx0) facingRight = true;
             else if (phys.x >= rx1) facingRight = false;
-            phys.hforce = facingRight ? speed : -speed;
+            if (flying) phys.hforce = facingRight ? speed : -speed;
+            else phys.walkDir = facingRight ? 1 : -1;
             if (!flying) phys.flags |= PhysicsObject.TURN_AT_EDGES;
         }
         if (flying) {
             // gentle bobbing around the spawn height
             phys.vforce = (baseY + Math.sin(now / 600.0) * 10 - phys.y) * 0.002;
         }
+        if (!moving && !flying) phys.walkDir = 0;
         double before = phys.x;
         fht.move(phys);
         if (!flying && stance.equals("move") && Math.abs(phys.x - before) < 0.0001 && phys.onGround) {

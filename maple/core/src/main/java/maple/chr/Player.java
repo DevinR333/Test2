@@ -28,9 +28,7 @@ public final class Player {
     public void setAvatar(Avatar a) { avatar = a; }
     public Avatar avatar() { return avatar; }
 
-    double walkForce() { return 0.05 + 0.11 * speed / 100.0; }
-    double jumpForce() { return 1.0 + 3.5 * jump / 100.0; }
-    double climbSpeed() { return 0.8 * speed / 100.0; }
+    double climbSpeed() { return maple.map.Physics.walkSpeed * speed / 100.0; }
 
     public void spawn(double x, double y) {
         phys.setPosition(x, y);
@@ -43,6 +41,9 @@ public final class Player {
     public void update(Field field, Controls in) {
         FootholdTree fht = field.footholds;
         if (ladderCooldown > 0) ladderCooldown--;
+        phys.walkDir = 0;
+        phys.speedMul = speed / 100.0;
+        phys.jumpMul = jump / 100.0;
         switch (state) {
             case STAND: case WALK: case PRONE:
                 groundControl(field, in);
@@ -97,27 +98,24 @@ public final class Player {
         }
         if (left || right) {
             facingRight = right;
-            phys.hforce += right ? walkForce() : -walkForce();
+            phys.walkDir = right ? 1 : -1;
             state = State.WALK;
         } else {
             state = State.STAND;
         }
         if (in.jump) {
-            phys.vforce = -jumpForce();
+            phys.jumpRequest = true;
             state = State.FALL;
         }
     }
 
     private void airControl(Field field, Controls in) {
-        double h = phys.hspeed;
         if (in.left && !in.right) {
             facingRight = false;
-            if (h > 0) phys.hspeed -= 0.025;
-            else if (h > -0.35) phys.hspeed -= 0.01;
+            phys.walkDir = -1;
         } else if (in.right && !in.left) {
             facingRight = true;
-            if (h < 0) phys.hspeed += 0.025;
-            else if (h < 0.35) phys.hspeed += 0.01;
+            phys.walkDir = 1;
         }
         if (in.up && ladderCooldown == 0) {
             Ladder l = field.ladderAt(phys.x, phys.y, true);
@@ -149,8 +147,8 @@ public final class Player {
         if (in.jump && (in.left || in.right)) {
             release(State.FALL);
             facingRight = in.right;
-            phys.hspeed = in.right ? 1.2 : -1.2;
-            phys.vspeed = -2.2;
+            phys.hspeed = (in.right ? 1 : -1) * maple.map.Physics.walkSpeed;
+            phys.vspeed = -maple.map.Physics.jumpSpeed * 0.6;
             return;
         }
         double v = 0;

@@ -25,21 +25,17 @@ Everything is inside the APK. After installing, the phone doesn't need your PC o
 
 | Script | What it does |
 | --- | --- |
+| `DUMP-WZ.bat` | Writes `wz-structure.txt`: the names, positions and sizes inside your UI/physics data (no pictures or sounds), so screens can match your client exactly. |
 | `CHECK-WZ.bat` | Reads your `.wz` files like the game does and writes a report to `wzcheck.txt`. Run this first if anything looks wrong. |
 | `PLAY-ON-PC.bat` | Runs the same game in a window on your PC: arrow keys to move, Alt or Space to jump, Up for portals and ladders, M for the travel menu, F3 for debug. |
 
-## Controls on the phone
+## Controls
 
-| Control | What it does |
-| --- | --- |
-| D-pad (bottom left) | Walk, climb ladders and ropes (up/down), lie down (down) |
-| **JUMP** | Jump. Down + Jump drops through a platform. Jump + left/right jumps off a ladder. |
-| **UP** | Go through a portal |
-| **MAPS** (top right) | Travel list: Henesys, Ellinia, Perion, Kerning, Orbis, Ludibrium... |
-| **DEBUG** | Shows footholds, ladders, portal areas and your position |
-| Back button | Opens the travel list |
+Keyboard: same as the PC client (arrow keys, Alt to jump, Ctrl to attack, Z to pick up).
 
-The game remembers the last map you were on.
+Touch: every on-screen button presses one keyboard key. Tap the **gear** (top right) to edit:
+**Add button** (pick any key, or a D-pad), drag to move, tap a button for **Key**, **Bigger**,
+**Smaller**, **Fade** or **Delete**, **Reset** for the default layout, and **Done**. The layout is saved on the phone.
 
 ## What works (phase 1)
 
