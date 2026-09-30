@@ -18,7 +18,7 @@ application {
     mainClass = 'maple.desktop.DesktopLauncher'
 }
 
-// Play on PC:  gradlew desktop:run -PwzDir=C:\msclass
+// Play on PC:  gradlew desktop:run -PwzDir=C:\msclassicv83\MapleStory
 tasks.named('run') {
     args = [wzDir.toString()]
     workingDir = rootProject.file('.')
@@ -26,7 +26,7 @@ tasks.named('run') {
     if (System.getProperty('os.name').toLowerCase().contains('mac')) jvmArgs '-XstartOnFirstThread'
 }
 
-// Check your WZ files and print a report:  gradlew desktop:wzcheck -PwzDir=C:\msclass
+// Check your WZ files and print a report:  gradlew desktop:wzcheck -PwzDir=C:\msclassicv83\MapleStory
 tasks.register('wzcheck', JavaExec) {
     group = 'maple'
     description = 'Reads the WZ files and reports anything the game cannot understand.'

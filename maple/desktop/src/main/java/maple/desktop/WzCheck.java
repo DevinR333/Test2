@@ -16,10 +16,10 @@ public final class WzCheck {
     private static int problems;
 
     public static void main(String[] args) {
-        File dir = new File(args.length > 0 ? args[0] : "C:\\msclass");
+        File dir = new File(args.length > 0 ? args[0] : "C:\\msclassicv83\\MapleStory");
         System.out.println("=== WZ check: " + dir.getAbsolutePath() + " ===");
         if (!dir.isDirectory()) {
-            System.out.println("FOLDER NOT FOUND. Pass the folder with your .wz files, e.g. -PwzDir=C:\\msclass");
+            System.out.println("FOLDER NOT FOUND. Pass the folder with your .wz files, e.g. -PwzDir=C:\\msclassicv83\\MapleStory");
             System.exit(1);
         }
         Wz wz = new Wz(new FolderSource(dir));

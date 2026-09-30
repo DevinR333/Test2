@@ -2,7 +2,7 @@ allprojects {
     ext {
         gdxVersion = '1.14.2'
         // Folder that holds your MapleStory v83 .wz files. Override with -PwzDir=...
-        wzDir = project.findProperty('wzDir') ?: 'C:\\msclass'
+        wzDir = project.findProperty('wzDir') ?: 'C:\\msclassicv83\\MapleStory'
     }
     repositories {
         mavenCentral()

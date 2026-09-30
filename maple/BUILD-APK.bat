@@ -3,8 +3,8 @@ setlocal
 cd /d "%~dp0"
 title Build Maple v83 APK
 
-rem ---- Where are your .wz files? (default C:\msclass, or pass a folder / drag it onto this file)
-set "WZ=C:\msclass"
+rem ---- Where are your .wz files? (default C:\msclassicv83\MapleStory, or pass a folder / drag it onto this file)
+set "WZ=C:\msclassicv83\MapleStory"
 if not "%~1"=="" set "WZ=%~1"
 
 call :findjava || goto :fail

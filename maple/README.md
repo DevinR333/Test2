@@ -12,7 +12,7 @@ You need Android Studio installed. It includes Java and the Android SDK.
 
 1. Get this repo onto your PC. You can use **Code → Download ZIP** on GitHub (pick this branch) or `git clone`.
 2. Open the `maple` folder and double-click **`BUILD-APK.bat`**.
-   - It reads the `.wz` files from `C:\msclass`. If your game is somewhere else, the script asks you
+   - It reads the `.wz` files from `C:\msclassicv83\MapleStory`. If your game is somewhere else, the script asks you
      to drag the folder into the window.
    - The first build downloads libGDX and the Android build tools, then packs about 1.9 GB of game
      data, so it takes a few minutes.
@@ -70,5 +70,5 @@ The game remembers the last map you were on.
 | `desktop` | PC version, `wzcheck` tool, screenshot test mode |
 | `android` | Android launcher. `copyWzFiles` puts your `.wz` files into the APK uncompressed so the game can map them. |
 
-Command line: `gradlew android:assembleDebug -PwzDir=C:\msclass`, `gradlew desktop:run -PwzDir=...`,
+Command line: `gradlew android:assembleDebug -PwzDir=C:\msclassicv83\MapleStory`, `gradlew desktop:run -PwzDir=...`,
 `gradlew core:test`.

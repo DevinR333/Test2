@@ -10,7 +10,7 @@ import java.io.File;
 /** PC version, handy for testing. Pass the folder with your .wz files as the first argument. */
 public final class DesktopLauncher {
     public static void main(String[] args) {
-        File dir = new File(args.length > 0 ? args[0] : "C:\\msclass");
+        File dir = new File(args.length > 0 ? args[0] : "C:\\msclassicv83\\MapleStory");
         Lwjgl3ApplicationConfiguration cfg = new Lwjgl3ApplicationConfiguration();
         cfg.setTitle("MapleStory v83 Offline");
         cfg.setWindowedMode(1280, 720);
