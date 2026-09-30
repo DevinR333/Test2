@@ -1,0 +1,44 @@
+apply plugin: 'java-library'
+
+// Cosmic (AGPL-3.0, see LICENSE in this folder): the v83 game server, adapted to run inside the
+// app with an embedded database, Rhino for scripts and the player's .wz files as data.
+java {
+    sourceCompatibility = JavaVersion.VERSION_17
+    targetCompatibility = JavaVersion.VERSION_17
+}
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+    options.release = 17
+    options.compilerArgs += ['-Xlint:none', '-nowarn']
+}
+
+sourceSets {
+    main {
+        resources {
+            srcDirs = ['src/main/resources']
+        }
+    }
+}
+
+dependencies {
+    api project(':wz')
+    api 'io.netty:netty-transport:4.1.119.Final'
+    api 'io.netty:netty-codec:4.1.119.Final'
+    api 'io.netty:netty-buffer:4.1.119.Final'
+    api 'io.netty:netty-handler:4.1.119.Final'
+    api 'com.esotericsoftware.yamlbeans:yamlbeans:1.17'
+    api 'net.jcip:jcip-annotations:1.0'
+    api 'com.h2database:h2:2.2.224'
+    api 'org.mozilla:rhino:1.7.15'
+    api 'org.slf4j:slf4j-api:2.0.17'
+    implementation 'org.slf4j:slf4j-simple:2.0.17'
+}
+
+dependencies {
+    testImplementation 'junit:junit:4.13.2'
+}
+test {
+    workingDir = projectDir
+    maxHeapSize = '2g'
+    testLogging { events 'failed'; exceptionFormat 'full' }
+}

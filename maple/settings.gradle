@@ -7,7 +7,7 @@ pluginManagement {
 }
 
 rootProject.name = 'maple-offline'
-include 'core', 'desktop'
+include 'wz', 'core', 'server', 'desktop'
 
 // The Android module needs the Android SDK. Look for it the same way Android Studio does,
 // and write local.properties so command-line builds find it too.
