@@ -129,6 +129,11 @@ public final class CashShopScreen extends Widget implements Ui.Refreshable {
         return l;
     }
 
+    /** Never expires: no period, or cash items made permanent by the offline option. */
+    private static boolean permanent(Offer o) {
+        return o.period <= 0 || offline.OfflineOptions.permanentCash;
+    }
+
     private List<Offer> visibleOffers() {
         List<Offer> out = new ArrayList<>();
         int category = TAB_CATEGORIES[tab];
@@ -230,7 +235,7 @@ public final class CashShopScreen extends Widget implements Ui.Refreshable {
             return;
         }
         String name = ItemInfo.get(o.itemId).name;
-        String period = o.period > 0 ? " (" + o.period + " days)" : "";
+        String period = o.period > 0 && !permanent(o) ? " (" + o.period + " days)" : "";
         String cost = free() ? "free" : "for " + String.format(Locale.US, "%,d", o.price) + " NX";
         ui.open(new Dialogs.Notice(ui, "Would you like to buy " + name + period + " " + cost + "?", true,
                 () -> world.cashBuy(o.sn, o.itemId, currency), null));
@@ -369,7 +374,7 @@ public final class CashShopScreen extends Widget implements Ui.Refreshable {
             g.text(name, bx + 76, by + 5, 12, false, 0xFF111111);
             String price = free() && o.category != 8 ? "Free" : String.format(Locale.US, "%,d %s", o.price, o.category == 8 ? "Mesos" : "NX");
             g.text(price, bx + 79, by + 25, 12, false, 0xFFFFFFFF);
-            g.text(o.count + " item(s) / " + (o.period > 0 ? o.period : 90) + " days", bx + 79, by + 39, 12, false, 0xFFFFFFFF);
+            g.text(o.count + " item(s) / " + (permanent(o) ? "Permanent" : o.period + " days"), bx + 79, by + 39, 12, false, 0xFFFFFFFF);
         }
         // page numbers
         int pages = pages(), start = (page / 10) * 10;
