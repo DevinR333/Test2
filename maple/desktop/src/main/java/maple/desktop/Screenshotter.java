@@ -136,6 +136,15 @@ final class Screenshotter {
                 act(game, "tap:" + bx + ":" + by, pad);
                 break;
             }
+            case "audit": // every window: can each button be tapped?
+                audit(game, p.length > 1 ? p[1] : "Equip|Item|Stat|Skill|Quest|KeyConfig|MiniMap|GameMenu|ShortCut|SysOpt|Quit|Friends|Party|Guild|Messenger|MonsterBook|WorldMap");
+                break;
+            case "serverwin": { // a server-opened window: shop or storage
+                client.Character chr = net.server.Server.getInstance().getWorld(0).getPlayerStorage().getCharacterByName("Mapler");
+                if (p[1].equals("shop")) server.ShopFactory.getInstance().getShopForNPC(1012004).sendShop(chr.getClient());
+                else chr.getStorage().sendStorage(chr.getClient(), 1012009);
+                break;
+            }
             case "appswitch": // what Android does when you leave the app and come back
                 game.pause();
                 game.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -171,6 +180,79 @@ final class Screenshotter {
                 break;
             default:
                 System.out.println("unknown action " + action);
+        }
+    }
+
+    private static void audit(MapleGame game, String names) {
+        int checked = 0, bad = 0;
+        for (String name : names.split("[|]")) {
+            if (!name.equals("-")) {
+                for (String n : name.split(";")) invoke(game, "openWindow", n);
+            }
+            int[] r = auditOpen(game, name);
+            checked += r[0];
+            bad += r[1];
+            invoke(game, "closeAllWindows", null);
+        }
+        // the HUD on its own
+        int[] r = auditWidget(game, game.ui().hud, "HUD");
+        checked += r[0];
+        bad += r[1];
+        System.out.println("AUDIT done: " + checked + " controls checked, " + bad + " not tappable");
+    }
+
+    private static int[] auditOpen(MapleGame game, String label) {
+        int checked = 0, bad = 0;
+        if (game.ui().windows().isEmpty()) System.out.println("AUDIT " + label + ": no window opened");
+        for (maple.ui.Window w : game.ui().windows()) {
+            int[] r = auditWidget(game, w, label + "/" + w.name);
+            checked += r[0];
+            bad += r[1];
+        }
+        return new int[]{checked, bad};
+    }
+
+    private static int[] auditWidget(MapleGame game, maple.ui.Widget w, String where) {
+        int checked = 0, bad = 0;
+        if (!w.visible) return new int[]{0, 0};
+        if (w.interactive() && !(w instanceof maple.ui.Window) && !(w instanceof maple.ui.Button && ((maple.ui.Button) w).disabled)) {
+            float cx = w.screenX() + w.w / 2, cy = w.screenY() + w.h / 2;
+            maple.ui.Widget hit = game.ui().widgetAt(cx, cy);
+            boolean onScreen = cx >= -game.ui().offsetX / game.ui().scale && cx <= maple.ui.Ui.W + game.ui().offsetX / game.ui().scale && cy >= 0 && cy <= maple.ui.Ui.H;
+            String id = w instanceof maple.ui.Button ? ((maple.ui.Button) w).path : w.getClass().getSimpleName();
+            checked++;
+            String problem = null;
+            if (!onScreen) problem = "off screen at " + (int) cx + "," + (int) cy;
+            else if (game.touch.gearAt(cx, cy)) problem = "under the touch Edit gear";
+            else if (where.startsWith("HUD") && game.touch.covers(cx, cy)) problem = "under a touch button";
+            else if (hit != w && (hit == null || !isAncestor(w, hit))) problem = "covered by " + (hit == null ? "nothing (falls through)" : hit.getClass().getSimpleName()
+                    + (hit instanceof maple.ui.Button ? " " + ((maple.ui.Button) hit).path : ""));
+            if (problem != null) {
+                bad++;
+                System.out.println("AUDIT BAD " + where + ": " + id + " " + problem);
+            }
+        }
+        for (maple.ui.Widget c : new java.util.ArrayList<>(w.children)) {
+            int[] r = auditWidget(game, c, where);
+            checked += r[0];
+            bad += r[1];
+        }
+        return new int[]{checked, bad};
+    }
+
+    private static boolean isAncestor(maple.ui.Widget a, maple.ui.Widget b) {
+        for (maple.ui.Widget p = b.parent; p != null; p = p.parent) if (p == a) return true;
+        return false;
+    }
+
+    private static void invoke(MapleGame game, String method, String arg) {
+        try {
+            java.lang.reflect.Method m = arg == null ? MapleGame.class.getDeclaredMethod(method) : MapleGame.class.getDeclaredMethod(method, String.class);
+            m.setAccessible(true);
+            if (arg == null) m.invoke(game);
+            else m.invoke(game, arg);
+        } catch (ReflectiveOperationException e) {
+            throw new RuntimeException(e);
         }
     }
 

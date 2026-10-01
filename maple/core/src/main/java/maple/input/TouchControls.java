@@ -125,16 +125,18 @@ public final class TouchControls {
     /** Stick on the left; Attack, Jump, Pick up, NPC chat and the quick-slot keys on the right. */
     public void defaults() {
         items.clear();
-        items.add(new Item(true, false, 0.19f, 0.70f, 0.34f, -1));
-        items.add(new Item(false, true, 0.135f, 0.80f, 0.20f, 29)); // Ctrl: attack
-        items.add(new Item(false, true, 0.30f, 0.88f, 0.17f, 56)); // Alt: jump
-        items.add(new Item(false, true, 0.30f, 0.68f, 0.13f, 44)); // Z: pick up
-        items.add(new Item(false, true, 0.135f, 0.58f, 0.13f, 57)); // Space: NPC chat
-        items.add(new Item(false, true, 0.30f, 0.50f, 0.11f, 42)); // Shift
-        items.add(new Item(false, true, 0.135f, 0.40f, 0.11f, 82)); // Ins
-        items.add(new Item(false, true, 0.30f, 0.33f, 0.11f, 71)); // Home
-        items.add(new Item(false, true, 0.135f, 0.23f, 0.11f, 73)); // PgUp
-        items.add(new Item(false, false, 0.11f, 0.36f, 0.11f, 28)); // Enter: chat
+        // Kept above the status bar and quick slots (the bottom ~25% on the right, ~12% elsewhere) so
+        // those stay tappable; in side-bar layouts the right column sits in the bar.
+        items.add(new Item(true, false, 0.19f, 0.64f, 0.30f, -1));
+        items.add(new Item(false, true, 0.135f, 0.62f, 0.20f, 29)); // Ctrl: attack
+        items.add(new Item(false, true, 0.31f, 0.66f, 0.15f, 56)); // Alt: jump
+        items.add(new Item(false, true, 0.30f, 0.50f, 0.12f, 44)); // Z: pick up
+        items.add(new Item(false, true, 0.135f, 0.44f, 0.12f, 57)); // Space: NPC chat
+        items.add(new Item(false, true, 0.30f, 0.36f, 0.10f, 42)); // Shift
+        items.add(new Item(false, true, 0.135f, 0.29f, 0.10f, 82)); // Ins
+        items.add(new Item(false, true, 0.30f, 0.23f, 0.10f, 71)); // Home
+        items.add(new Item(false, true, 0.135f, 0.16f, 0.10f, 73)); // PgUp
+        items.add(new Item(false, false, 0.11f, 0.33f, 0.10f, 28)); // Enter: chat
     }
 
     /** The whole screen in UI units (it extends past the 800x600 game area into the side bars). */
@@ -155,6 +157,11 @@ public final class TouchControls {
     /** The Edit (gear) button is under this point. */
     public boolean gearAt(float ux, float uy) {
         return enabled && onGear(ux, uy);
+    }
+
+    /** A touch button or the stick is under this point (UI units). */
+    public boolean covers(float ux, float uy) {
+        return enabled && itemAt(ux, uy) != null;
     }
 
     private boolean onGear(float ux, float uy) {
