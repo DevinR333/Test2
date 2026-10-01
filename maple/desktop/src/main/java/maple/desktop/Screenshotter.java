@@ -146,8 +146,9 @@ final class Screenshotter {
                 game.touch.enabled = true;
                 game.touch.editing = true;
                 break;
-            case "touch":
+            case "touch": // behave like a phone
                 game.touch.enabled = true;
+                game.ui().touchDevice = true;
                 break;
             default:
                 System.out.println("unknown action " + action);

@@ -38,6 +38,8 @@ public final class Ui {
     private Widget lastClick;
     private long lastClickTime;
     public boolean mouseVisible;
+    /** A touchscreen device: a single tap talks to an NPC even if a stylus or mouse has hovered. */
+    public boolean touchDevice;
     /** Show the cursor at the last tapped point (a touch mouse button was used). */
     public boolean touchCursor;
     private long time;

@@ -191,6 +191,7 @@ public class MapleGame extends ApplicationAdapter {
         applyOptions();
         touch.load(prefs);
         touch.mouseListener = this::touchMouse;
+        ui.touchDevice = Gdx.app.getType() == com.badlogic.gdx.Application.ApplicationType.Android;
         logoNexon = assets.animation("Logo.img/Nexon");
         logoWizet = assets.animation("Logo.img/Wizet");
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -515,7 +516,7 @@ public class MapleGame extends ApplicationAdapter {
             public boolean click(float x, float y, boolean doubleClick) {
                 if (world == null || field == null) return false;
                 Npc n = world.npcAt((float) (x + camX - Ui.W / 2.0), (float) (y + camY - 300));
-                if (n != null && (doubleClick || !ui.mouseVisible)) {
+                if (n != null && (doubleClick || !ui.mouseVisible || ui.touchDevice)) {
                     world.talkTo(n);
                     return true;
                 }
