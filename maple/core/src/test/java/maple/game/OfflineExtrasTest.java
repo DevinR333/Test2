@@ -324,6 +324,52 @@ public class OfflineExtrasTest {
         world.shopLeave();
     }
 
+    @Test(timeout = 180000)
+    public void petSummonAndFollow() throws Exception {
+        client.Character chr = server();
+        // buy a pet in the Cash Shop and take it out into the Cash inventory
+        boolean[] opened = {false};
+        c.cashShopHandler = () -> opened[0] = true;
+        c.enterCashShop();
+        stepUntil(() -> opened[0] && c.inCashShop, 10000);
+        int sn = 0, petId = 0;
+        for (maple.wz.WzNode n : wz.get("Etc/Commodity.img").children()) {
+            int id = n.getInt("ItemId", 0);
+            if (n.getInt("OnSale", 0) == 1 && id / 10000 == 500 && server.CashShop.CashItemFactory.getItem(n.getInt("SN", 0)) != null) {
+                sn = n.getInt("SN", 0);
+                petId = id;
+                break;
+            }
+        }
+        assertTrue("a pet on sale", sn != 0);
+        int before = world.cash.locker.size();
+        world.cashBuy(sn, petId, 1);
+        stepUntil(() -> world.cash.locker.size() > before, 10000);
+        long cashId = world.cash.locker.get(world.cash.locker.size() - 1).cashId;
+        world.cashTakeOut(cashId);
+        int pid = petId;
+        stepUntil(() -> c.player.inventory(5).values().stream().anyMatch(it -> it.itemId == pid), 5000);
+        warp = null;
+        c.leaveCashShop();
+        pump(() -> warp != null);
+        enterMap(warp[0]);
+
+        Item pet = null;
+        for (Item it : c.player.inventory(5).values()) if (it.itemId == petId) pet = it;
+        assertNotNull("pet in the Cash inventory", pet);
+        world.spawnPet(pet.position);
+        stepUntil(() -> world.pets[0] != null, 5000);
+        assertNotNull("pet summoned", world.pets[0]);
+        assertNotNull("server agrees", chr.getPet(0));
+        // it stays with its owner
+        for (int i = 0; i < 300; i++) step();
+        assertTrue("pet near its owner", Math.abs(world.pets[0].phys.x - player.phys.x) < 200);
+        // and is put away again
+        world.spawnPet(pet.position);
+        stepUntil(() -> world.pets[0] == null, 5000);
+        assertNull("pet put away", world.pets[0]);
+    }
+
     @Test(timeout = 60000)
     public void ratesChangeWhilePlaying() {
         client.Character chr = server();

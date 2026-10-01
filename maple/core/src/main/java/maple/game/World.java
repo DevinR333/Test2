@@ -46,6 +46,9 @@ public final class World {
     private final List<Effect> effects = new ArrayList<>();
     private final List<PendingHit> pendingHits = new ArrayList<>();
     public long timeMs;
+    /** Summoned pets (up to 3), redrawn from petSpecs on every map (each map has its own sprite bank). */
+    public final Pet[] pets = new Pet[3];
+    private final Object[][] petSpecs = new Object[3][]; // {itemId, name, uniqueId}
     private int attackCooldown;
     private short mobMoveId = 1;
     private long nextHeal;
@@ -123,6 +126,7 @@ public final class World {
         npcs.clear();
         drops.clear();
         reactors.clear();
+        java.util.Arrays.fill(pets, null); // re-made on the new map
         effects.clear();
         pendingHits.clear();
         bank.dispose();
@@ -158,6 +162,7 @@ public final class World {
             else if (op == SendOpcode.MOVE_MONSTER_RESPONSE.getValue()) { /* nothing to do in single player */ }
             else if (op == SendOpcode.SHOW_MONSTER_HP.getValue()) mobHp(r);
             else if (op == SendOpcode.DAMAGE_MONSTER.getValue()) damageMobPacket(r);
+            else if (op == SendOpcode.SPAWN_PET.getValue()) petPacket(r);
             else if (op == SendOpcode.SPAWN_NPC.getValue()) spawnNpc(r, false);
             else if (op == SendOpcode.SPAWN_NPC_REQUEST_CONTROLLER.getValue()) spawnNpc(r, true);
             else if (op == SendOpcode.REMOVE_NPC.getValue()) npcs.remove(r.readInt());
@@ -897,6 +902,14 @@ public final class World {
             if (m.dead) it.remove();
         }
         for (Npc n : npcs.values()) n.update(timeMs);
+        for (int i = 0; i < 3; i++) {
+            if (petSpecs[i] == null) continue;
+            if (pets[i] == null) {
+                pets[i] = new Pet(wz, bank, i, (Integer) petSpecs[i][0], (String) petSpecs[i][1], (Long) petSpecs[i][2],
+                        (int) player.phys.x, (int) player.phys.y - 5);
+            }
+            pets[i].update(field, player.phys.x, player.phys.y, player.facingRight, timeMs);
+        }
         for (Iterator<Drop> it = drops.values().iterator(); it.hasNext(); ) {
             Drop d = it.next();
             d.update(field.footholds);
@@ -2273,6 +2286,36 @@ public final class World {
         if (mode == 8) storage = null;
     }
 
+    /** SPAWN_PET (showPet): int owner, byte slot, then 1 + 0 + item, name, unique id, x, y, stance, fh; or 0 + hunger. */
+    private void petPacket(PacketReader r) {
+        int owner = r.readInt();
+        if (data() != null && owner != data().stats.id) return;
+        int slot = r.readUByte();
+        if (slot < 0 || slot > 2) return;
+        if (r.readUByte() == 1) {
+            r.readUByte();
+            int itemId = r.readInt();
+            String name = r.readString();
+            long uid = r.readLong();
+            petSpecs[slot] = new Object[]{itemId, name, uid};
+            pets[slot] = null; // made at the owner's side on the next tick
+        } else {
+            petSpecs[slot] = null;
+            pets[slot] = null;
+        }
+        events.refresh();
+    }
+
+    /** SPAWN_PET request: summon or put away the pet in a Cash inventory slot. */
+    public void spawnPet(int slot) {
+        PacketWriter w = new PacketWriter(RecvOpcode.SPAWN_PET.getValue());
+        w.writeInt(stamp());
+        w.writeByte(slot);
+        w.writeByte(0);
+        w.writeByte(0); // not the lead pet
+        client.send(w);
+    }
+
     /** QUEST_ACTION: 1 start, 2 complete, 3 forfeit, 4 scripted start, 5 scripted end. */
     public void questAction(int action, int questId, int npcId, int selection) {
         PacketWriter w = new PacketWriter(RecvOpcode.QUEST_ACTION.getValue());
@@ -2311,6 +2354,7 @@ public final class World {
         if (field == null) return;
         for (Reactor rc : reactors.values()) if (layer == 7) rc.draw(batch, timeMs);
         for (Npc n : npcs.values()) if (field.footholds.get(n.fh).layer == layer) n.draw(batch, timeMs);
+        if (layer == Math.max(0, Math.min(7, player.layer()))) for (Pet p : pets) if (p != null) p.draw(batch, alpha, timeMs);
         for (Mob m : mobs.values()) if (m.phys.fhlayer == layer || (layer == 7 && m.canFly)) m.draw(batch, alpha, timeMs);
     }
 

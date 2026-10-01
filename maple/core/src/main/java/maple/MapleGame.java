@@ -947,6 +947,11 @@ public class MapleGame extends ApplicationAdapter {
             WorldLabels.nameTag(g, n.name, x, y + 2, 0xFFFFFF00, true);
             if (n.func != null && !n.func.isEmpty()) WorldLabels.nameTag(g, n.func, x, y + 24, 0xFFFFFF00, true);
         }
+        // pet name tags
+        for (maple.game.Pet p : world.pets) {
+            if (p == null) continue;
+            WorldLabels.nameTag(g, p.name, (float) (Math.round(p.phys.drawX(alpha)) + viewX), (float) (Math.round(p.phys.drawY(alpha)) + viewY + 2), 0xFFFFFFFF, false);
+        }
         // quest markers over NPC heads: 0 available, 1 in progress, 2 ready to complete
         for (Npc n : world.npcs.values()) {
             if (!n.visible) continue;

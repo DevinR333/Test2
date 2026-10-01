@@ -166,6 +166,7 @@ public final class ItemWindow extends Window implements Ui.DropTarget {
         if (type() == 1) world.equip(slot);
         else if (type() == 2) world.useItem(slot);
         else if (type() == 3) world.useItemId(it.itemId); // chairs
+        else if (type() == 5 && it.itemId / 10000 == 500) world.spawnPet(slot); // summon / put away
     }
 
     @Override
