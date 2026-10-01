@@ -16,6 +16,9 @@ import java.util.Set;
 public final class OfflineItems {
     /** Use: grants one level. Free in every shop and in the Cash Shop. */
     public static final int LEVEL_POTION = 2002031;
+    /** Use: pick another job at the same advancement (offline_jobswitch.js). Free in the Cash Shop. */
+    public static final int JOB_TOKEN = 2002032;
+
     /** Its picture is borrowed from this item. */
     private static final int LEVEL_POTION_LOOK = 2002028;
 
@@ -27,6 +30,7 @@ public final class OfflineItems {
             {20099904, 1002517, 1, 0}, // Maple Bandana Red
             {20099905, 1002518, 1, 0}, // Maple Bandana Blue
             {30099901, LEVEL_POTION, 1, 0}, // Use > Scroll
+            {30099902, JOB_TOKEN, 1, 0},
     };
 
     /**
@@ -76,12 +80,29 @@ public final class OfflineItems {
             info.addExisting(look.child("icon")).addExisting(look.child("iconRaw"));
             info.addInt("price", 0).addInt("slotMax", 100);
             item.addProp("spec");
+            // the Job Switch Token wears the AP Reset scroll's picture (Item.wz/Cash/0505.img/05050000)
+            String tid = "0" + JOB_TOKEN;
+            if (img.child(tid) == null) {
+                WzNode root = img;
+                while (root.parent != null) root = root.parent;
+                WzNode apReset = root.path("Cash/0505.img/05050000/info");
+                WzNode token = img.addProp(tid);
+                WzNode tinfo = token.addProp("info");
+                tinfo.addExisting(apReset.child("icon")).addExisting(apReset.child("iconRaw"));
+                tinfo.addInt("price", 0).addInt("slotMax", 1);
+                token.addProp("spec");
+            }
         });
         WzPatches.register("String.wz/Consume.img", img -> {
             String id = Integer.toString(LEVEL_POTION);
             if (img.child(id) != null) return;
             img.addProp(id).addString("name", "Level Up Potion")
                     .addString("desc", "A mysterious potion that instantly raises your level by 1.");
+            String tid = Integer.toString(JOB_TOKEN);
+            if (img.child(tid) == null) {
+                img.addProp(tid).addString("name", "Job Switch Token")
+                        .addString("desc", "Double-click to become another job at the same advancement. Your level and EXP stay; all SP and AP are given back. Used up when you switch.");
+            }
         });
         for (int[] s : HOLIDAY_SPAWNS) {
             int mob = s[0], count = s[2];

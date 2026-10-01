@@ -53,7 +53,12 @@ public final class UseItemHandler extends AbstractPacketHandler {
         int itemId = p.readInt();
         Item toUse = chr.getInventory(InventoryType.USE).getItem(slot);
         if (toUse != null && toUse.getQuantity() > 0 && toUse.getItemId() == itemId) {
-            if (itemId == offline.OfflineItems.LEVEL_POTION) {
+            if (itemId == offline.OfflineItems.JOB_TOKEN) {
+                // the token is used up by the script only when a job is chosen
+                scripting.npc.NPCScriptManager.getInstance().start(c, 9010000, "offline_jobswitch", chr);
+                c.sendPacket(PacketCreator.enableActions());
+                return;
+            } else if (itemId == offline.OfflineItems.LEVEL_POTION) {
                 if (chr.getLevel() < chr.getMaxLevel()) {
                     remove(c, slot);
                     chr.levelUp(false);

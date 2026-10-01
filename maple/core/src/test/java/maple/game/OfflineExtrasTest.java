@@ -370,6 +370,55 @@ public class OfflineExtrasTest {
         assertNull("pet put away", world.pets[0]);
     }
 
+    @Test(timeout = 120000)
+    public void jobSwitchToken() throws Exception {
+        client.Character chr = server();
+        // a level 30 Fighter with skills learned, stats spent and a warrior-only weapon on
+        while (chr.getLevel() < 30) chr.levelUp(false);
+        chr.changeJob(client.Job.WARRIOR);
+        chr.changeJob(client.Job.FIGHTER);
+        client.Skill power = client.SkillFactory.getSkill(1000000); // Improved HP Recovery (warrior)
+        chr.changeSkillLevel(power, (byte) 5, 16, -1);
+        int str = chr.getStr(), dex = chr.getDex(), in = chr.getInt(), luk = chr.getLuk(), ap = chr.getRemainingAp();
+        int sp = chr.getRemainingSp() + 5;
+        client.inventory.manipulator.InventoryManipulator.addById(chr.getClient(), 1302133, (short) 1, "", -1); // warrior-only sword (reqJob 1)
+        stepUntil(() -> c.player.inventory(1).values().stream().anyMatch(it -> it.itemId == 1302133), 5000);
+        for (Item it : c.player.inventory(1).values()) if (it.itemId == 1302133) world.equip(it.position);
+        stepUntil(() -> chr.getInventory(client.inventory.InventoryType.EQUIPPED).getItem((short) -11) != null
+                && chr.getInventory(client.inventory.InventoryType.EQUIPPED).getItem((short) -11).getItemId() == 1302133, 5000);
+        client.inventory.manipulator.InventoryManipulator.addById(chr.getClient(), offline.OfflineItems.JOB_TOKEN, (short) 1, "", -1);
+        stepUntil(() -> c.player.inventory(2).values().stream().anyMatch(it -> it.itemId == offline.OfflineItems.JOB_TOKEN), 5000);
+        assertEquals("named", "Job Switch Token", ItemInfo.get(offline.OfflineItems.JOB_TOKEN).name);
+
+        talks.clear();
+        world.talk = null;
+        world.useItemId(offline.OfflineItems.JOB_TOKEN);
+        stepUntil(() -> world.talk != null, 5000);
+        NpcTalk menu = world.talk;
+        assertNotNull("job menu", menu);
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("#L(\\d+)#Cleric#l").matcher(menu.text);
+        assertTrue("Cleric offered: " + menu.text, m.find());
+        assertFalse("not its own job", menu.text.contains("#Fighter#"));
+        world.answer(1, Integer.parseInt(m.group(1)), null);
+        stepUntil(() -> chr.getJob().getId() == 230 && c.player.stats.job == 230, 5000);
+        assertEquals("now a Cleric", 230, chr.getJob().getId());
+        assertEquals("the client knows", 230, c.player.stats.job);
+        assertEquals("level kept", 30, chr.getLevel());
+        assertEquals("STR back to 4", 4, chr.getStr());
+        assertEquals("all AP back", ap + str + dex + in + luk - 16, chr.getRemainingAp());
+        assertEquals("all SP back", sp, chr.getRemainingSp());
+        assertEquals("skill unlearned", 0, chr.getSkillLevel(power));
+        stepUntil(() -> chr.getInventory(client.inventory.InventoryType.EQUIPPED).getItem((short) -11) == null, 5000);
+        assertNull("warrior sword taken off", chr.getInventory(client.inventory.InventoryType.EQUIPPED).getItem((short) -11));
+        assertTrue("sword in the bag", chr.getInventory(client.inventory.InventoryType.EQUIP).countById(1302133) > 0);
+        stepUntil(() -> !chr.haveItem(offline.OfflineItems.JOB_TOKEN), 5000);
+        assertFalse("token used up", chr.haveItem(offline.OfflineItems.JOB_TOKEN));
+        // the token is in the Cash Shop, free
+        assertEquals(offline.OfflineItems.JOB_TOKEN, server.CashShop.CashItemFactory.getItem(30099902).getItemId());
+        assertEquals(0, server.CashShop.CashItemFactory.getItem(30099902).getPrice());
+        for (int i = 0; i < 30 && world.talk != null; i++) world.answer(1, 0, null);
+    }
+
     @Test(timeout = 60000)
     public void ratesChangeWhilePlaying() {
         client.Character chr = server();

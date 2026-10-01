@@ -7912,6 +7912,47 @@ public class Character extends AbstractCharacterObject {
         visibleMapObjects.remove(mo);
     }
 
+    /**
+     * Offline Job Switch Token: becomes another job at the same advancement. Level and EXP stay; every
+     * SP spent on job skills comes back and the skills are unlearned; STR/DEX/INT/LUK go back to 4 with
+     * the rest as free AP; equipment the new job cannot wear is taken off (into the Equip inventory).
+     */
+    public synchronized void offlineSwitchJob(Job newJob) {
+        int sp = getRemainingSp();
+        for (Map.Entry<Skill, SkillEntry> e : new ArrayList<>(getSkills().entrySet())) {
+            int skillJob = e.getKey().getId() / 10000;
+            if (skillJob % 1000 == 0) continue; // beginner skills stay
+            sp += Math.max(0, e.getValue().skillevel);
+            changeSkillLevel(e.getKey(), (byte) 0, 0, -1);
+        }
+        int ap = getRemainingAp() + getStr() + getDex() + getInt() + getLuk() - 16;
+        job = newJob;
+        updateSingleStat(Stat.JOB, newJob.getId());
+        effLock.lock();
+        statWlock.lock();
+        try {
+            updateStrDexIntLukSp(4, 4, 4, 4, Math.max(0, ap), sp, GameConstants.getSkillBook(newJob.getId()));
+        } finally {
+            statWlock.unlock();
+            effLock.unlock();
+        }
+        // take off what the new job cannot wear (reqJob is a class mask: 1 warrior, 2 mage, 4 bowman, 8 thief, 16 pirate)
+        int cls = (newJob.getId() % 1000) / 100;
+        int bit = cls >= 1 && cls <= 5 ? 1 << (cls - 1) : 0;
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        for (Item it : new ArrayList<>(getInventory(InventoryType.EQUIPPED).list())) {
+            Map<String, Integer> stats = ii.getEquipStats(it.getItemId());
+            int req = stats == null || stats.get("reqJob") == null ? 0 : stats.get("reqJob");
+            boolean wearable = req == 0 || (req > 0 && (req & bit) != 0);
+            if (wearable) continue;
+            short free = getInventory(InventoryType.EQUIP).getNextFreeSlot();
+            if (free < 0) break; // no room: leave the rest on
+            InventoryManipulator.unequip(client, it.getPosition(), free);
+        }
+        getMap().broadcastMessage(this, PacketCreator.showForeignEffect(getId(), 8), false); // job change effect
+        sendPacket(PacketCreator.showSpecialEffect(8));
+    }
+
     public synchronized void resetStats() {
         if (!YamlConfig.config.server.USE_AUTOASSIGN_STARTERS_AP) {
             return;
