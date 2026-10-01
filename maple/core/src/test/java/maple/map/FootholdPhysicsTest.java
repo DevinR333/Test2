@@ -146,4 +146,109 @@ public class FootholdPhysicsTest {
         int id = t.fhBelow(p.x, p.y);
         return id == 0 ? Double.POSITIVE_INFINITY : t.get(id).groundBelow(p.x);
     }
+
+    /** Every map in the game: drops land on the first platform, slopes hold you walking and standing. */
+    @Test
+    public void allTerrainEverywhere() {
+        Wz wz = wz();
+        int maps = 0, drops = 0, slopes = 0;
+        StringBuilder problems = new StringBuilder();
+        for (int folder = 0; folder <= 9; folder++) {
+            for (maple.wz.WzNode img : wz.get("Map/Map/Map" + folder).children()) {
+                maple.wz.WzNode fhNode = img.get("foothold");
+                if (!fhNode.exists() || fhNode.childCount() == 0) continue;
+                FootholdTree t = new FootholdTree(fhNode);
+                if (t.all().size() < 2) continue;
+                maps++;
+                for (int x = t.wallLeft + 5; x < t.wallRight - 5; x += 41) {
+                    double startY = t.borderTop + 10;
+                    int expect = t.fhBelow(x, startY);
+                    if (expect == 0) continue;
+                    PhysicsObject p = new PhysicsObject();
+                    p.setPosition(x, startY);
+                    p.vspeed = Physics.fallSpeed;
+                    for (int i = 0; i < 6000 && !p.onGround; i++) t.move(p);
+                    drops++;
+                    if (!p.onGround || Math.abs(t.get(expect).groundBelow(x) - p.y) > 1.0) {
+                        problems.append(img.name).append(" drop x=").append(x).append('\n');
+                    }
+                }
+                for (Foothold fh : t.all()) {
+                    if (fh.isWall() || fh.isFloor() || fh.r() - fh.l() < 20) continue;
+                    double ty = Math.abs(fh.slope()) / Math.sqrt(1 + fh.slope() * fh.slope());
+                    if (ty > 0.9) continue;
+                    PhysicsObject p = new PhysicsObject();
+                    double mx = (fh.l() + fh.r()) / 2.0;
+                    p.setPosition(mx, fh.groundBelow(mx) - 3);
+                    for (int i = 0; i < 20 && !p.onGround; i++) t.move(p);
+                    if (!p.onGround || p.fhid != fh.id) continue;
+                    double x0 = p.x;
+                    for (int i = 0; i < 200; i++) t.move(p); // standing
+                    if (!p.onGround || Math.abs(p.x - x0) > 0.001) problems.append(img.name).append(" slid on fh ").append(fh.id).append('\n');
+                    for (int dir : new int[]{-1, 1}) {
+                        for (int i = 0; i < 400; i++) {
+                            p.walkDir = dir;
+                            t.move(p);
+                            if (!p.onGround) {
+                                problems.append(img.name).append(" fell walking fh ").append(fh.id).append('\n');
+                                break;
+                            }
+                            if (p.x <= fh.l() + 2 || p.x >= fh.r() - 2) break;
+                        }
+                        p.walkDir = 0;
+                        p.setPosition(mx, fh.groundBelow(mx) - 3);
+                        for (int i = 0; i < 20 && !p.onGround; i++) t.move(p);
+                    }
+                    slopes++;
+                }
+            }
+        }
+        System.out.println("allTerrain: " + maps + " maps, " + drops + " drops, " + slopes + " slopes");
+        assertTrue("maps checked: " + maps, maps > 500);
+        assertEquals("problems:\n" + (problems.length() > 3000 ? problems.substring(0, 3000) : problems), 0, problems.length());
+    }
+
+    /** Random walking and jumping on every 10th map of the game (steps, stairs, slopes, platforms). */
+    @Test
+    public void randomPlayAcrossTheGame() {
+        Wz wz = wz();
+        java.util.Random rng = new java.util.Random(7);
+        int maps = 0, n = 0;
+        StringBuilder problems = new StringBuilder();
+        for (int folder = 0; folder <= 9; folder++) {
+            for (maple.wz.WzNode img : wz.get("Map/Map/Map" + folder).children()) {
+                if (n++ % 10 != 0) continue;
+                maple.wz.WzNode fhNode = img.get("foothold");
+                if (!fhNode.exists() || fhNode.childCount() == 0) continue;
+                FootholdTree t = new FootholdTree(fhNode);
+                if (t.all().size() < 2) continue;
+                maps++;
+                PhysicsObject p = new PhysicsObject();
+                p.setPosition(t.wallLeft + rng.nextDouble() * (t.wallRight - t.wallLeft), t.borderTop + 10);
+                int dir = 0;
+                for (int i = 0; i < 8000; i++) {
+                    if (i % 50 == 0) dir = rng.nextInt(3) - 1;
+                    p.walkDir = dir;
+                    if (p.onGround && rng.nextInt(80) == 0) p.jumpRequest = true;
+                    double under = p.onGround ? Double.NaN : groundUnder(t, p);
+                    t.move(p);
+                    if (p.y >= t.borderBottom - 1) {
+                        // falling out is only right when nothing at all was below
+                        if (!Double.isInfinite(under)) problems.append(img.name).append(" fell out at x=").append((int) p.x).append('\n');
+                        p.setPosition(t.wallLeft + rng.nextDouble() * (t.wallRight - t.wallLeft), t.borderTop + 10);
+                        continue;
+                    }
+                    if (p.onGround) {
+                        Foothold fh = t.get(p.fhid);
+                        if (fh.isWall() || Math.abs(fh.groundBelow(p.x) - p.y) > 0.01) problems.append(img.name).append(" off the line\n");
+                    } else if (p.vspeed > 0 && !Double.isNaN(under) && p.y > under + 0.01 && groundUnder(t, p) < p.y) {
+                        problems.append(img.name).append(" passed through at x=").append((int) p.x).append('\n');
+                    }
+                }
+            }
+        }
+        System.out.println("randomPlay: " + maps + " maps");
+        assertTrue(maps > 200);
+        assertEquals("problems:\n" + (problems.length() > 3000 ? problems.substring(0, 3000) : problems), 0, problems.length());
+    }
 }

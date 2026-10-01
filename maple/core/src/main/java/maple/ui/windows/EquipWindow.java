@@ -128,6 +128,12 @@ public final class EquipWindow extends Window implements Ui.DropTarget {
     public boolean drop(Ui.Carry c, float lx, float ly) {
         if (!(c instanceof ItemCarry)) return false;
         ItemCarry ic = (ItemCarry) c;
+        if (ic.type == 2 && ic.item.itemId / 10000 == 204) { // a scroll onto something being worn
+            int i = indexAt(lx, ly);
+            Item target = i < 0 ? null : shown(i);
+            if (target != null) world.scroll(ic.slot, target.position);
+            return true;
+        }
         if (ic.type == 1) world.equip(ic.slot);
         return true;
     }

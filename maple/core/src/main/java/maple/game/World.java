@@ -163,6 +163,13 @@ public final class World {
             else if (op == SendOpcode.SHOW_MONSTER_HP.getValue()) mobHp(r);
             else if (op == SendOpcode.DAMAGE_MONSTER.getValue()) damageMobPacket(r);
             else if (op == SendOpcode.SPAWN_PET.getValue()) petPacket(r);
+            else if (op == SendOpcode.MAP_TRANSFER_RESULT.getValue()) { // teleport rock list: 2 deleted / 3 saved
+                int mode = r.readUByte();
+                if ((mode == 2 || mode == 3) && data() != null) {
+                    int[] list = r.readUByte() == 1 ? data().vipTeleportMaps : data().teleportMaps;
+                    for (int i = 0; i < list.length; i++) list[i] = r.readInt();
+                }
+            }
             else if (op == SendOpcode.SPAWN_NPC.getValue()) spawnNpc(r, false);
             else if (op == SendOpcode.SPAWN_NPC_REQUEST_CONTROLLER.getValue()) spawnNpc(r, true);
             else if (op == SendOpcode.REMOVE_NPC.getValue()) npcs.remove(r.readInt());
@@ -2180,12 +2187,213 @@ public final class World {
     public void useItem(int slot) {
         Item it = data().inventory(2).get(slot);
         if (it == null || !canAct()) return;
+        int family = it.itemId / 10000;
+        // each item family has its own request, as in the original client
+        switch (family) {
+            case 204: // scrolls: put onto an equip
+                localSay("Drag the #b#t" + it.itemId + "##k onto an item you are wearing (in the Equip window).");
+                return;
+            case 210: simpleUse(RecvOpcode.USE_SUMMON_BAG, slot, it.itemId); return;
+            case 212: simpleUse(RecvOpcode.PET_FOOD, slot, it.itemId); return;
+            case 226: simpleUse(RecvOpcode.USE_MOUNT_FOOD, slot, it.itemId); return;
+            case 228: case 229: simpleUse(RecvOpcode.USE_SKILL_BOOK, slot, it.itemId); return;
+            case 227: { // monster capture: the nearest monster in front
+                Mob target = null;
+                double best = 250;
+                for (Mob m : mobs.values()) {
+                    double d = Math.abs(m.phys.x - player.phys.x) + Math.abs(m.phys.y - player.phys.y) * 0.5;
+                    if (!m.dead && d < best) {
+                        best = d;
+                        target = m;
+                    }
+                }
+                if (target == null) {
+                    localSay("There is no monster close enough.");
+                    return;
+                }
+                PacketWriter w = new PacketWriter(RecvOpcode.USE_CATCH_ITEM.getValue());
+                w.writeInt(stamp()).writeShort(slot).writeInt(it.itemId).writeInt(target.oid);
+                client.send(w);
+                return;
+            }
+            default:
+                break;
+        }
         PacketWriter w = new PacketWriter(RecvOpcode.USE_ITEM.getValue());
         w.writeInt(stamp());
         w.writeShort(slot);
         w.writeInt(it.itemId);
         client.send(w);
         UiSounds.game("UseShopItem");
+    }
+
+    private void simpleUse(RecvOpcode op, int slot, int itemId) {
+        PacketWriter w = new PacketWriter(op.getValue());
+        w.writeInt(stamp()).writeShort(slot).writeInt(itemId);
+        client.send(w);
+    }
+
+    /** USE_UPGRADE_SCROLL: a scroll from the Use tab onto an equip (equipped: negative slot). */
+    public void scroll(int scrollSlot, int equipSlot) {
+        if (!canAct()) return;
+        PacketWriter w = new PacketWriter(RecvOpcode.USE_UPGRADE_SCROLL.getValue());
+        w.writeInt(stamp()).writeShort(scrollSlot).writeShort(equipSlot).writeShort(0);
+        client.send(w);
+    }
+
+    private void localSay(String text) {
+        NpcTalk t = localTalk(9010000, 0, text, false, false);
+        t.local = (a, s, x) -> { };
+        showLocal(t);
+    }
+
+    private void localText(String prompt, java.util.function.Consumer<String> then) {
+        NpcTalk t = localTalk(9010000, 2, prompt, false, false);
+        t.local = (a, s, x) -> {
+            if (a == 1 && x != null && !x.trim().isEmpty()) then.accept(x);
+        };
+        showLocal(t);
+    }
+
+    private void localMenu(String prompt, List<String> options, java.util.function.IntConsumer then) {
+        StringBuilder sb = new StringBuilder(prompt).append("#b");
+        for (int i = 0; i < options.size(); i++) sb.append("\r\n#L").append(i).append("#").append(options.get(i)).append("#l");
+        NpcTalk t = localTalk(9010000, 4, sb.toString(), false, false);
+        t.local = (a, s, x) -> {
+            if (a == 1 && s >= 0 && s < options.size()) then.accept(s);
+        };
+        showLocal(t);
+    }
+
+    private PacketWriter cashUse(int slot, int itemId) {
+        PacketWriter w = new PacketWriter(RecvOpcode.USE_CASH_ITEM.getValue());
+        w.writeShort(slot).writeInt(itemId);
+        return w;
+    }
+
+    /** Double-click in the Cash tab: pets, teleport rocks, AP/SP resets, megaphones and the like. */
+    public void useCashItem(int slot) {
+        Item it = data() == null ? null : data().inventory(5).get(slot);
+        if (it == null || !canAct()) return;
+        int id = it.itemId, family = id / 10000;
+        switch (family) {
+            case 500: spawnPet(slot); return;
+            case 504: teleportRock(slot, id); return;
+            case 505: if (id == 5050000) apReset(slot, id); else spReset(slot, id); return;
+            case 507: {
+                int kind = (id / 1000) % 10;
+                if (kind == 5) {
+                    localSay("Maple TV is not available offline.");
+                    return;
+                }
+                localText("What would you like to say?", text -> {
+                    PacketWriter w = cashUse(slot, id);
+                    if (kind == 7) w.writeByte(1); // triple megaphone: one line
+                    w.writeString(text);
+                    if (kind == 2 || kind == 6 || kind == 7) w.writeByte(0); // no whisper
+                    if (kind == 6) w.writeByte(0); // no item shown
+                    client.send(w);
+                });
+                return;
+            }
+            case 508: case 512: case 537:
+                localText(family == 537 ? "What would you like to write on the chalkboard?" : "What message would you like to show?",
+                        text -> client.send(cashUse(slot, id).writeString(text)));
+                return;
+            case 517:
+                localText("What would you like to name your pet?", text -> client.send(cashUse(slot, id).writeString(text)));
+                return;
+            case 539:
+                localText("What would you like to say?", text -> {
+                    PacketWriter w = cashUse(slot, id);
+                    w.writeString(text).writeString("").writeString("").writeString("").writeByte(0);
+                    client.send(w);
+                });
+                return;
+            case 510: case 520: case 524: case 530: case 533: case 545: case 550:
+                client.send(cashUse(slot, id));
+                return;
+            default:
+                // the rest work by being in the inventory (EXP/drop coupons, safety charms...)
+                localSay("#b#t" + id + "##k works while it is in your inventory.");
+        }
+    }
+
+    /** Teleport Rock / VIP Teleport Rock: saved maps (MAP_TRANSFER_RESULT keeps the list current). */
+    private void teleportRock(int slot, int id) {
+        boolean vip = id / 1000 >= 5041;
+        int[] saved = vip ? data().vipTeleportMaps : data().teleportMaps;
+        List<String> options = new ArrayList<>();
+        List<Integer> maps = new ArrayList<>();
+        for (int m : saved) {
+            if (m <= 0 || m == 999999999) continue;
+            maps.add(m);
+            options.add("Go to " + Names.map(m));
+        }
+        int register = options.size();
+        options.add("Save this map (" + Names.map(field == null ? 0 : field.id) + ")");
+        int remove = maps.isEmpty() ? -1 : options.size();
+        if (remove >= 0) options.add("Remove a saved map");
+        localMenu("Where would you like to go?", options, choice -> {
+            if (choice < maps.size()) {
+                PacketWriter w = cashUse(slot, id);
+                w.writeByte(0).writeInt(maps.get(choice)); // 0: to a map
+                client.send(w);
+            } else if (choice == register) {
+                PacketWriter w = new PacketWriter(RecvOpcode.TROCK_ADD_MAP.getValue());
+                w.writeByte(1).writeByte(vip ? 1 : 0);
+                client.send(w);
+            } else if (choice == remove) {
+                List<String> names = new ArrayList<>();
+                for (int m : maps) names.add(Names.map(m));
+                localMenu("Which map should be removed?", names, k -> {
+                    PacketWriter w = new PacketWriter(RecvOpcode.TROCK_ADD_MAP.getValue());
+                    w.writeByte(0).writeByte(vip ? 1 : 0).writeInt(maps.get(k));
+                    client.send(w);
+                });
+            }
+        });
+    }
+
+    private static final String[] AP_NAMES = {"STR", "DEX", "INT", "LUK", "Max HP", "Max MP"};
+    private static final int[] AP_STATS = {0x40, 0x80, 0x100, 0x200, 0x800, 0x2000};
+
+    private void apReset(int slot, int id) {
+        List<String> names = java.util.Arrays.asList(AP_NAMES);
+        localMenu("Take 1 AP away from:", names, from -> localMenu("And put it into:", names, to -> {
+            PacketWriter w = cashUse(slot, id);
+            w.writeInt(AP_STATS[to]).writeInt(AP_STATS[from]);
+            client.send(w);
+        }));
+    }
+
+    private void spReset(int slot, int id) {
+        List<Integer> learned = new ArrayList<>(), raisable = new ArrayList<>();
+        List<String> learnedNames = new ArrayList<>(), raisableNames = new ArrayList<>();
+        for (Map.Entry<Integer, int[]> e : data().skills.entrySet()) {
+            int sid = e.getKey(), lv = e.getValue()[0];
+            if ((sid / 10000) % 1000 == 0) continue; // beginner skills
+            SkillInfo si = SkillInfo.get(sid);
+            if (si == null) continue;
+            int cap = e.getValue()[1] > 0 ? e.getValue()[1] : si.maxLevel;
+            if (lv > 0) {
+                learned.add(sid);
+                learnedNames.add(si.name + " (" + lv + ")");
+            }
+            if (lv < cap) {
+                raisable.add(sid);
+                raisableNames.add(si.name + " (" + lv + ")");
+            }
+        }
+        if (learned.isEmpty() || raisable.isEmpty()) {
+            localSay("You have no skill points to move.");
+            return;
+        }
+        localMenu("Take 1 SP away from:", learnedNames, from -> localMenu("And put it into:", raisableNames, to -> {
+            PacketWriter w = cashUse(slot, id);
+            w.writeInt(raisable.get(to)).writeInt(learned.get(from));
+            client.send(w);
+        }));
     }
 
     /** Uses the first item with this id (key bindings, quick slots). */
@@ -2198,6 +2406,7 @@ public final class World {
         for (Item it : data().inventory(ItemInfo.inventoryType(itemId)).values()) {
             if (it.itemId == itemId) {
                 if (ItemInfo.inventoryType(itemId) == 2) useItem(it.position);
+                else if (ItemInfo.inventoryType(itemId) == 5) useCashItem(it.position);
                 return;
             }
         }

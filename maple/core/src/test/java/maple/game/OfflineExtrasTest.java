@@ -439,6 +439,80 @@ public class OfflineExtrasTest {
         for (int i = 0; i < 30 && world.talk != null; i++) world.answer(1, 0, null);
     }
 
+    static Item firstOf(int inv, int itemId) {
+        for (Item it : c.player.inventory(inv).values()) if (it.itemId == itemId) return it;
+        return null;
+    }
+
+    static void give(int itemId, int count) throws InterruptedException {
+        client.inventory.manipulator.InventoryManipulator.addById(server().getClient(), itemId, (short) count, "", -1);
+        stepUntil(() -> firstOf(ItemInfo.inventoryType(itemId), itemId) != null, 5000);
+        assertNotNull("got " + itemId, firstOf(ItemInfo.inventoryType(itemId), itemId));
+    }
+
+    /** Picks the menu entry whose text contains `label` in the client-side menu now shown. */
+    static void pick(String label) {
+        NpcTalk t = world.talk;
+        assertNotNull("menu shown for " + label, t);
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("#L(\\d+)#([^#]*)#l").matcher(t.text);
+        while (m.find()) {
+            if (m.group(2).contains(label)) {
+                world.answer(1, Integer.parseInt(m.group(1)), null);
+                return;
+            }
+        }
+        fail("no '" + label + "' in: " + t.text);
+    }
+
+    @Test(timeout = 180000)
+    public void itemsOfEveryKindWork() throws Exception {
+        client.Character chr = server();
+        // VIP Teleport Rock: save this map, go elsewhere, come back with the rock
+        give(5041000, 2);
+        int home = chr.getMapId();
+        world.useCashItem(firstOf(5, 5041000).position);
+        pick("Save this map");
+        stepUntil(() -> java.util.Arrays.stream(c.player.vipTeleportMaps).anyMatch(m -> m == home), 5000);
+        assertTrue("map saved", java.util.Arrays.stream(c.player.vipTeleportMaps).anyMatch(m -> m == home));
+        warp = null;
+        chr.changeMap(100010000);
+        pump(() -> warp != null);
+        enterMap(warp[0]);
+        Thread.sleep(3100); // the server allows one cash item every 3 seconds
+        warp = null;
+        world.useCashItem(firstOf(5, 5041000).position);
+        pick("Go to");
+        pump(() -> warp != null);
+        assertEquals("teleported back", home, warp[0]);
+        enterMap(warp[0]);
+
+        // a scroll dragged onto a sword uses one of its upgrade slots
+        give(1302000, 1);
+        give(2043001, 1);
+        Item sword = firstOf(1, 1302000);
+        world.equip(sword.position); // v83: scrolls go on worn items (bag items need Legendary Spirit)
+        stepUntil(() -> chr.getInventory(client.inventory.InventoryType.EQUIPPED).getItem((short) -11) != null
+                && chr.getInventory(client.inventory.InventoryType.EQUIPPED).getItem((short) -11).getItemId() == 1302000, 5000);
+        client.inventory.Equip eq = (client.inventory.Equip) chr.getInventory(client.inventory.InventoryType.EQUIPPED).getItem((short) -11);
+        int slots = eq.getUpgradeSlots(), level = eq.getLevel();
+        world.scroll(firstOf(2, 2043001).position, -11);
+        stepUntil(() -> firstOf(2, 2043001) == null, 5000);
+        assertNull("scroll used", firstOf(2, 2043001));
+        client.inventory.Equip after = (client.inventory.Equip) chr.getInventory(client.inventory.InventoryType.EQUIPPED).getItem((short) -11);
+        assertTrue("upgrade slot used", after == null || after.getUpgradeSlots() == slots - 1 || after.getLevel() == level + 1);
+
+        // a megaphone asks for the message and shows it
+        Thread.sleep(3100);
+        while (chr.getLevel() < 10) chr.levelUp(false); // v83: megaphones from level 10
+        give(5071000, 1);
+        chat.clear();
+        world.useCashItem(firstOf(5, 5071000).position);
+        assertEquals("asks for the message", 2, world.talk.type);
+        world.answer(1, 0, "hello maple");
+        stepUntil(() -> chat.stream().anyMatch(s -> s.contains("hello maple")), 5000);
+        assertTrue("megaphone shown: " + chat, chat.stream().anyMatch(s -> s.contains("hello maple")));
+    }
+
     @Test(timeout = 60000)
     public void ratesChangeWhilePlaying() {
         client.Character chr = server();

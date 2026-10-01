@@ -166,7 +166,7 @@ public final class ItemWindow extends Window implements Ui.DropTarget {
         if (type() == 1) world.equip(slot);
         else if (type() == 2) world.useItem(slot);
         else if (type() == 3) world.useItemId(it.itemId); // chairs
-        else if (type() == 5 && it.itemId / 10000 == 500) world.spawnPet(slot); // summon / put away
+        else if (type() == 5) world.useCashItem(slot); // pets, teleport rocks, megaphones...
     }
 
     @Override
@@ -177,6 +177,11 @@ public final class ItemWindow extends Window implements Ui.DropTarget {
         if (slot == 0) return true;
         if (ic.type == -1) {
             if (type() == 1) world.moveItem(1, ic.slot, slot, 1); // unequip into this slot
+            return true;
+        }
+        // a scroll dropped on an equip in the Equip tab scrolls it
+        if (ic.type == 2 && ic.item.itemId / 10000 == 204 && type() == 1) {
+            if (world.data().inventory(1).get(slot) != null) world.scroll(ic.slot, slot);
             return true;
         }
         if (ic.type != type()) return true;
