@@ -129,6 +129,8 @@ public class Client extends ChannelInboundHandlerAdapter {
     private Set<String> macs = new HashSet<>();
     private Map<String, ScriptEngine> engines = new HashMap<>();
     private byte characterSlots = 3;
+    /** Offline: 42 pages of 3. The character list counts characters in a signed byte, so 127 is the ceiling. */
+    public static final byte MAX_CHARACTER_SLOTS = 126;
     private byte loginattempt = 0;
     private String pin = "";
     private int pinattempt = 0;
@@ -666,7 +668,7 @@ public class Client extends ChannelInboundHandlerAdapter {
                     pin = rs.getString("pin");
                     pic = rs.getString("pic");
                     gender = rs.getByte("gender");
-                    characterSlots = (byte) Math.max(15, rs.getByte("characterslots")); // offline: 15 slots (5 pages of 3)
+                    characterSlots = (byte) Math.max(MAX_CHARACTER_SLOTS, rs.getByte("characterslots")); // offline: as many as the packets allow
                     lang = rs.getInt("language");
                     String passhash = rs.getString("password");
                     byte tos = rs.getByte("tos");
@@ -1379,7 +1381,7 @@ public class Client extends ChannelInboundHandlerAdapter {
     }
 
     public boolean canGainCharacterSlot() {
-        return characterSlots < 15;
+        return characterSlots < MAX_CHARACTER_SLOTS;
     }
 
     public synchronized boolean gainCharacterSlot() {

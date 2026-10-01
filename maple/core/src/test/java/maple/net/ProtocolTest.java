@@ -61,6 +61,21 @@ public class ProtocolTest {
         assertEquals(10000, e.stats.mapId);
         assertEquals(1302000, (int) e.look.equips.get(11));
 
+        // Offline: far more than the original 15 character slots
+        assertEquals(126, c.characterSlots);
+        for (int i = 1; i <= 15; i++) {
+            int before = c.characters.size();
+            c.createCharacter("Alt" + i, 1, 20000, 30030, 0, 0, 1040002, 1060002, 1072001, 1302000, 0);
+            long end = System.currentTimeMillis() + 30000;
+            while (c.characters.size() == before) {
+                c.update();
+                if (c.error != null) fail(c.error);
+                if (System.currentTimeMillis() > end) fail("character " + (i + 1) + " was not created");
+                Thread.sleep(20);
+            }
+        }
+        assertEquals(16, c.characters.size());
+
         c.selectCharacter(e.stats.id);
         waitFor(c, GameClient.State.IN_GAME);
         assertEquals("Mapler", c.player.stats.name);
