@@ -155,7 +155,7 @@ public final class Field {
         for (WzNode l : src.get("ladderRope").children()) {
             l = l.resolve();
             ladders.add(new Ladder(l.getInt("l", 0) != 0, l.getInt("uf", 1) != 0,
-                    l.getInt("x", 0), l.getInt("y1", 0), l.getInt("y2", 0)));
+                    l.getInt("x", 0), l.getInt("y1", 0), l.getInt("y2", 0), l.getInt("page", 0)));
         }
 
         for (WzNode p : src.get("portal").children()) {

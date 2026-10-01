@@ -327,7 +327,12 @@ public final class Player {
         batch.setColor(1, 1, 1, 1);
     }
 
-    public int layer() { return phys.fhlayer; }
+    /** The map layer the character is drawn on: the rope's or ladder's while climbing, else the foothold's. */
+    public int layer() {
+        Ladder l = ladder;
+        if (l != null && (state == State.LADDER || state == State.ROPE)) return l.page;
+        return phys.fhlayer;
+    }
 
     /** v83 movement stance byte: walk 2, stand 4, jump 6, prone 10, ladder 14, rope 16; +1 when facing left. */
     public int stanceByte() {

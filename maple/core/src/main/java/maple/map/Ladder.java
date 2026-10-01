@@ -5,8 +5,11 @@ public final class Ladder {
     public final boolean isLadder;
     public final boolean exitTop;
     public final int x, y1, y2;
+    /** The map layer its picture is on: a climbing character is drawn on this layer, in front of it. */
+    public final int page;
 
-    Ladder(boolean isLadder, boolean exitTop, int x, int y1, int y2) {
+    Ladder(boolean isLadder, boolean exitTop, int x, int y1, int y2, int page) {
+        this.page = Math.max(0, Math.min(7, page));
         this.isLadder = isLadder;
         this.exitTop = exitTop;
         this.x = x;
