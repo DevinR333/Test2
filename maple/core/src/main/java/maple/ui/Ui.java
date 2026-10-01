@@ -157,7 +157,16 @@ public final class Ui {
         if (!windows.remove(w)) return;
         if (pressed != null && pressed.window() == w) pressed = null;
         if (hovered != null && hovered.window() == w) hovered = null;
+        // a text box in the closed window must not keep the keyboard (it would freeze movement)
+        if (Widgets.Focus.get() instanceof Widget && !attached((Widget) Widgets.Focus.get())) Widgets.Focus.set(null);
         w.closed();
+    }
+
+    /** The widget is on screen: inside an open window, the HUD or the overlay. */
+    public boolean attached(Widget w) {
+        Widget root = w;
+        while (root.parent != null) root = root.parent;
+        return root == hud || root == overlay || root instanceof Window && windows.contains(root);
     }
 
     public void front(Window w) {

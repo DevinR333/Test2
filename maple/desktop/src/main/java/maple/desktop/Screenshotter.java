@@ -145,6 +145,33 @@ final class Screenshotter {
                 else chr.getStorage().sendStorage(chr.getClient(), 1012009);
                 break;
             }
+            case "meso": { // give the character mesos (server side)
+                client.Character chr = net.server.Server.getInstance().getWorld(0).getPlayerStorage().getCharacterByName("Mapler");
+                chr.gainMeso(Integer.parseInt(p[1]), true);
+                break;
+            }
+            case "selectbuy": { // select an item in the open shop's buy list (then tapbtn:BtBuy)
+                try {
+                    maple.ui.windows.ShopWindow sw = game.ui().find(maple.ui.windows.ShopWindow.class);
+                    java.lang.reflect.Field fs = sw.getClass().getDeclaredField("shop");
+                    fs.setAccessible(true);
+                    maple.game.Shop shop = (maple.game.Shop) fs.get(sw);
+                    int idx = -1;
+                    for (int i = 0; i < shop.items.size(); i++) if (shop.items.get(i).itemId == Integer.parseInt(p[1])) idx = i;
+                    java.lang.reflect.Field fb = sw.getClass().getDeclaredField("buySel");
+                    fb.setAccessible(true);
+                    fb.setInt(sw, idx);
+                    sw.refresh();
+                    System.out.println("selected shop row " + idx + " for " + p[1]);
+                } catch (ReflectiveOperationException e) {
+                    throw new RuntimeException(e);
+                }
+                break;
+            }
+            case "type": // type text into whatever has the keyboard, then Enter (the keypad's Done)
+                for (char ch : p[1].toCharArray()) Gdx.input.getInputProcessor().keyTyped(ch);
+                Gdx.input.getInputProcessor().keyTyped('\r');
+                break;
             case "closeall":
                 invoke(game, "closeAllWindows", null);
                 break;
@@ -157,6 +184,9 @@ final class Screenshotter {
                 StringBuilder sb = new StringBuilder("REPORT windows=");
                 for (maple.ui.Window w : game.ui().windows()) sb.append(w.name).append(' ');
                 sb.append(" npcTalk=").append(game.world() != null && game.world().talk != null);
+                sb.append(" x=").append(game.player() == null ? -1 : (int) game.player().phys.x);
+                sb.append(" focus=").append(maple.ui.Widgets.Focus.get() == null ? "none" : maple.ui.Widgets.Focus.get().getClass().getSimpleName());
+                sb.append(" meso=").append(game.world() == null || game.world().data() == null ? -1 : game.world().data().meso);
                 sb.append(" screen=").append(game.screen()).append(" hud=");
                 for (maple.ui.Widget w : game.ui().hud.children) sb.append(w.getClass().getSimpleName()).append(' ');
                 System.out.println(sb);

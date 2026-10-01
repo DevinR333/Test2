@@ -1,0 +1,2 @@
+WZ source: /tmp/binwz, build v0.6.0 (built 2026-10-01 16:17)
+Logos: Nexon 13700 ms, Wizet 6100 ms

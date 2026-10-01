@@ -707,7 +707,9 @@ public class MapleGame extends ApplicationAdapter {
 
     private boolean inputBlocked() {
         if (world == null || world.talk != null || ui.modal() != null) return true;
-        if (Widgets.Focus.get() != null) return true;
+        Widgets.Focusable f = Widgets.Focus.get();
+        if (f instanceof Widget && !ui.attached((Widget) f)) Widgets.Focus.set(null); // left over from a closed window
+        else if (f != null) return true; // typing
         return touch.editing || ui.find(KeyConfigWindow.class) != null && ui.carry != null;
     }
 
