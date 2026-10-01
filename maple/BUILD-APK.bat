@@ -31,13 +31,22 @@ echo.
 echo Building the APK with the game files from: %WZ%
 echo This packs about 1.9 GB of game data, so the first build takes a few minutes.
 echo.
+rem Remove old outputs first so a failed build can never hand you an old APK.
+if exist "MapleV83.apk" del /f /q "MapleV83.apk"
+if exist "android\build\outputs\apk\debug\android-debug.apk" del /f /q "android\build\outputs\apk\debug\android-debug.apk"
+
 call gradlew.bat android:assembleDebug "-PwzDir=%WZ%"
 if errorlevel 1 goto :fail
+if not exist "android\build\outputs\apk\debug\android-debug.apk" (
+  echo The build did not produce an APK.
+  goto :fail
+)
 
 copy /y "android\build\outputs\apk\debug\android-debug.apk" "MapleV83.apk" >nul
 echo.
 echo ============================================================
-echo  DONE:  %cd%\MapleV83.apk
+set /p VER=<VERSION
+echo  DONE:  %cd%\MapleV83.apk   (version %VER%)
 echo  Install it: plug in your phone and run INSTALL-ON-PHONE.bat,
 echo  or copy MapleV83.apk to the phone and tap it.
 echo ============================================================

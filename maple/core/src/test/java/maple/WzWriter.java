@@ -19,8 +19,15 @@ import java.util.zip.Deflater;
  */
 public final class WzWriter {
     // ---- tree model ----
+    /** An image produced only when the file is written (keeps big conversions out of memory). */
+    public static final class LazyImg {
+        final java.util.function.Supplier<Prop> source;
+        public LazyImg(java.util.function.Supplier<Prop> source) { this.source = source; }
+    }
+
     public static class Dir {
-        final Map<String, Object> entries = new LinkedHashMap<>(); // Dir or Prop (img)
+        final Map<String, Object> entries = new LinkedHashMap<>(); // Dir, Prop or LazyImg (img)
+        public void lazyImg(String name, java.util.function.Supplier<Prop> source) { entries.put(name, new LazyImg(source)); }
         public Dir dir(String name) { return (Dir) entries.computeIfAbsent(name, k -> new Dir()); }
         public Prop img(String name) { return (Prop) entries.computeIfAbsent(name, k -> new Prop()); }
     }
@@ -44,8 +51,11 @@ public final class WzWriter {
     public static class Canvas {
         final int w, h;
         final int argb;
+        /** Declared size only: the pixel data is a tiny placeholder (for data-structure tests). */
+        boolean blank;
         public final Prop props = new Prop();
         Canvas(int w, int h, int argb) { this.w = w; this.h = h; this.argb = argb; }
+        public static Canvas blank(int w, int h) { Canvas c = new Canvas(w, h, 0); c.blank = true; return c; }
     }
 
     public static class Sound { final byte[] data; public Sound(byte[] d) { data = d; } }
@@ -67,35 +77,50 @@ public final class WzWriter {
         List<Dir> dirs = new ArrayList<>();
         collect(root, dirs);
         Map<Dir, Integer> dirOffset = new LinkedHashMap<>();
-        Map<Prop, byte[]> imgBytes = new LinkedHashMap<>();
-        Map<Prop, Integer> imgOffset = new LinkedHashMap<>();
-        for (Dir d : dirs)
-            for (Object o : d.entries.values())
-                if (o instanceof Prop) imgBytes.put((Prop) o, image((Prop) o));
-
+        Map<Object, Integer> imgOffset = new java.util.IdentityHashMap<>();
+        // Pass 1: serialise every image to a temp file, remembering sizes only.
+        File tmp = File.createTempFile("wzimg", ".bin");
+        tmp.deleteOnExit();
+        List<Object> imgs = new ArrayList<>();
+        List<Integer> sizes = new ArrayList<>();
+        try (java.io.OutputStream to = new java.io.BufferedOutputStream(new FileOutputStream(tmp))) {
+            for (Dir d : dirs)
+                for (Object o : d.entries.values()) {
+                    if (o instanceof Dir) continue;
+                    Prop p = o instanceof LazyImg ? ((LazyImg) o).source.get() : (Prop) o;
+                    byte[] bytes = image(p);
+                    to.write(bytes);
+                    imgs.add(o);
+                    sizes.add(bytes.length);
+                }
+        }
         int pos = dataStart + 2;
         for (Dir d : dirs) {
             dirOffset.put(d, pos);
             pos += dirBlock(d, pos, dirOffset, imgOffset, true).length;
         }
-        for (Map.Entry<Prop, byte[]> e : imgBytes.entrySet()) {
-            imgOffset.put(e.getKey(), pos);
-            pos += e.getValue().length;
+        for (int i = 0; i < imgs.size(); i++) {
+            imgOffset.put(imgs.get(i), pos);
+            pos += sizes.get(i);
         }
-        ByteArrayOutputStream file = new ByteArrayOutputStream();
-        file.write("PKG1".getBytes(StandardCharsets.ISO_8859_1));
-        le64(file, pos - dataStart);
-        le32(file, dataStart);
+        ByteArrayOutputStream head = new ByteArrayOutputStream();
+        head.write("PKG1".getBytes(StandardCharsets.ISO_8859_1));
+        le64(head, pos - dataStart);
+        le32(head, dataStart);
         byte[] copyright = "Package file v1.0 Copyright 2002 Wizet, ZMS".getBytes(StandardCharsets.ISO_8859_1);
-        file.write(copyright);
-        file.write(0);
-        while (file.size() < dataStart) file.write(0);
-        le16(file, enc);
-        for (Dir d : dirs) file.write(dirBlock(d, file.size(), dirOffset, imgOffset, false));
-        for (byte[] b : imgBytes.values()) file.write(b);
-        try (FileOutputStream fo = new FileOutputStream(out)) {
-            fo.write(file.toByteArray());
+        head.write(copyright);
+        head.write(0);
+        while (head.size() < dataStart) head.write(0);
+        le16(head, enc);
+        for (Dir d : dirs) head.write(dirBlock(d, head.size(), dirOffset, imgOffset, false));
+        try (java.io.OutputStream fo = new java.io.BufferedOutputStream(new FileOutputStream(out));
+             java.io.InputStream ti = new java.io.BufferedInputStream(new java.io.FileInputStream(tmp))) {
+            head.writeTo(fo);
+            byte[] buf = new byte[1 << 16];
+            int n;
+            while ((n = ti.read(buf)) > 0) fo.write(buf, 0, n);
         }
+        tmp.delete();
     }
 
     private void collect(Dir d, List<Dir> out) {
@@ -103,7 +128,7 @@ public final class WzWriter {
         for (Object o : d.entries.values()) if (o instanceof Dir) collect((Dir) o, out);
     }
 
-    private byte[] dirBlock(Dir d, int blockPos, Map<Dir, Integer> dirOff, Map<Prop, Integer> imgOff, boolean sizing) {
+    private byte[] dirBlock(Dir d, int blockPos, Map<Dir, Integer> dirOff, Map<Object, Integer> imgOff, boolean sizing) {
         ByteArrayOutputStream b = new ByteArrayOutputStream();
         cint(b, d.entries.size());
         for (Map.Entry<String, Object> e : d.entries.entrySet()) {
@@ -186,6 +211,18 @@ public final class WzWriter {
             cint(b, 2); // BGRA8888
             b.write(0);
             le32(b, 0);
+            if (c.blank) {
+                Deflater d0 = new Deflater();
+                d0.setInput(new byte[16]);
+                d0.finish();
+                byte[] z0 = new byte[64];
+                int n0 = d0.deflate(z0);
+                d0.end();
+                le32(b, n0 + 1);
+                b.write(0);
+                b.write(z0, 0, n0);
+                return;
+            }
             byte[] px = new byte[c.w * c.h * 4];
             for (int i = 0; i < c.w * c.h; i++) {
                 int x = i % c.w, y = i / c.w;
