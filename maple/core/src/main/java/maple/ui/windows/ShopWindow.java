@@ -125,7 +125,10 @@ public final class ShopWindow extends Window {
         if (ItemInfo.inventoryType(e.itemId) != 1 && !info.isRechargeable()) {
             int stack = Math.max(1, info.slotMax);
             int max = Math.max(1, e.price > 0 ? Math.min(stack, meso / e.price) : stack); // free items: a full stack
-            ui.open(new QuantityPrompt(ui, "How many are you willing to buy?", 1, max, n -> world.shopBuy(buySel, e.itemId, n)));
+            QuantityPrompt q = new QuantityPrompt(ui, "How many are you willing to buy?", 1, max, n -> world.shopBuy(buySel, e.itemId, n));
+            boolean mesoLimited = e.price > 0 && meso / e.price < stack;
+            q.overMax = mesoLimited ? "You only have enough mesos for " + max + "." : "You can buy up to " + max + " at a time.";
+            ui.open(q);
         } else {
             int idx = buySel;
             ui.open(new Dialogs.Notice(ui, "Are you sure you want to buy it?", true, () -> world.shopBuy(idx, e.itemId, 1), null));

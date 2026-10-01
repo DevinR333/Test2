@@ -21,6 +21,8 @@ public final class QuantityPrompt extends Window {
     private final int min, max, def;
     private final IntConsumer onOk;
     private final int textHeight;
+    /** Shown when more than the maximum is asked for (why it is the maximum); null: just correct it. */
+    public String overMax;
 
     public QuantityPrompt(Ui ui, String text, int def, int max, IntConsumer onOk) {
         this(ui, text, def, 1, max, onOk);
@@ -62,6 +64,8 @@ public final class QuantityPrompt extends Window {
         }
         if (n < min || n > max) {
             field.text = Integer.toString(Math.max(min, Math.min(max, n)));
+            field.selected = true;
+            if (n > max && overMax != null) ui.open(new maple.ui.Dialogs.Notice(ui, overMax, false, null, null));
             return;
         }
         close();
