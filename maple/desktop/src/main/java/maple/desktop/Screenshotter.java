@@ -124,6 +124,18 @@ final class Screenshotter {
                     throw new RuntimeException(e);
                 }
                 break;
+            case "tapbtn": { // tap a window button by name (e.g. BtNo) like a finger would
+                maple.ui.Button found = null;
+                for (maple.ui.Window w : game.ui().windows()) found = findButton(w, p[1], found);
+                if (found == null) {
+                    System.out.println("no button " + p[1]);
+                    break;
+                }
+                float bx = found.screenX() + found.w / 2, by = found.screenY() + found.h / 2;
+                System.out.println("tapping " + p[1] + " at " + (int) bx + "," + (int) by);
+                act(game, "tap:" + bx + ":" + by, pad);
+                break;
+            }
             case "appswitch": // what Android does when you leave the app and come back
                 game.pause();
                 game.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -160,6 +172,12 @@ final class Screenshotter {
             default:
                 System.out.println("unknown action " + action);
         }
+    }
+
+    private static maple.ui.Button findButton(maple.ui.Widget w, String name, maple.ui.Button found) {
+        if (w instanceof maple.ui.Button && ((maple.ui.Button) w).path.endsWith("/" + name) && w.visible) found = (maple.ui.Button) w;
+        for (maple.ui.Widget c : w.children) found = findButton(c, name, found);
+        return found;
     }
 
     private static void save(String file) {
