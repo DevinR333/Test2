@@ -21,3 +21,7 @@ android/build/libs/**/*.aar
 maple/bgm/
 maple/sfx/
 maple/maple-log.txt
+# runtime files the game writes into whatever directory it is started from
+maple/**/maple-log.txt
+maple/server/src/main/resources/db/data/bgm/
+maple/server/src/main/resources/db/data/sfx/
