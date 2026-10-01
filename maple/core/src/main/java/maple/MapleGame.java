@@ -101,6 +101,7 @@ public class MapleGame extends ApplicationAdapter {
         font = new BitmapFont(true);
         font.setUseIntegerPositions(false);
         uiFont = new BitmapFont(true);
+        Log.captureConsole();
         prefs = Gdx.app.getPreferences("maple-offline");
         Gdx.input.setCatchKey(Input.Keys.BACK, true);
         controls.load(prefs);
@@ -270,7 +271,17 @@ public class MapleGame extends ApplicationAdapter {
             } else if (client != null && client.state == GameClient.State.CHARACTER_SELECT) {
                 mode = Mode.CHAR_SELECT;
             }
-            drawMessage((client == null ? "Starting MapleStory..." : "Logging in...") + "\n\nBuild " + Log.build());
+            StringBuilder msg = new StringBuilder(client == null ? "Starting MapleStory..." : "Logging in...");
+            msg.append("\n\nBuild ").append(Log.build());
+            if (client != null) {
+                msg.append("\n");
+                for (String st : client.steps) msg.append("\n - ").append(st);
+                if (System.currentTimeMillis() - client.lastProgress > 20000) {
+                    msg.append("\n\nNo answer from the game server for 20 seconds. Its last messages:\n");
+                    for (String l : Log.recent(14)) msg.append(l.length() > 160 ? l.substring(0, 160) : l).append('\n');
+                }
+            }
+            drawMessage(msg.toString());
             after();
             return;
         }

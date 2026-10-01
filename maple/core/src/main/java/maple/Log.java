@@ -9,6 +9,53 @@ import java.io.StringWriter;
 public final class Log {
     private Log() {}
 
+    private static final java.util.ArrayDeque<String> RECENT = new java.util.ArrayDeque<>();
+    private static boolean captured;
+
+    /** Keeps the last lines printed by the game and the server so they can be shown on screen. */
+    public static synchronized void captureConsole() {
+        if (captured) return;
+        captured = true;
+        System.setOut(new java.io.PrintStream(new LineTee(System.out), true));
+        System.setErr(new java.io.PrintStream(new LineTee(System.err), true));
+    }
+
+    static void remember(String line) {
+        synchronized (RECENT) {
+            RECENT.addLast(line);
+            while (RECENT.size() > 60) RECENT.removeFirst();
+        }
+    }
+
+    /** The last {@code n} console lines (oldest first). */
+    public static java.util.List<String> recent(int n) {
+        synchronized (RECENT) {
+            java.util.List<String> all = new java.util.ArrayList<>(RECENT);
+            return all.subList(Math.max(0, all.size() - n), all.size());
+        }
+    }
+
+    private static final class LineTee extends java.io.OutputStream {
+        private final java.io.PrintStream original;
+        private final java.io.ByteArrayOutputStream line = new java.io.ByteArrayOutputStream();
+
+        LineTee(java.io.PrintStream original) { this.original = original; }
+
+        @Override
+        public synchronized void write(int b) {
+            original.write(b);
+            if (b == '\n') {
+                remember(new String(line.toByteArray(), java.nio.charset.StandardCharsets.UTF_8).replace("\r", ""));
+                line.reset();
+            } else if (line.size() < 2000) {
+                line.write(b);
+            }
+        }
+
+        @Override
+        public void flush() { original.flush(); }
+    }
+
     public static void info(String msg) {
         System.out.println("[maple] " + msg);
         append(msg);

@@ -41,17 +41,29 @@ public final class GameClient {
     public Consumer<int[]> warpHandler;
 
     private Session login, channel;
+    /** Login steps so far (shown while logging in). */
+    public final java.util.List<String> steps = new java.util.concurrent.CopyOnWriteArrayList<>();
+    public long lastProgress = System.currentTimeMillis();
+
+    private void step(String s) {
+        steps.add(s);
+        lastProgress = System.currentTimeMillis();
+        System.out.println("[maple] login: " + s);
+    }
     private int selectedId;
 
     public void start() {
+        step("connecting to the game server");
         try {
             login = new Session("login", HOST, LOGIN_PORT);
+            step("connected");
         } catch (IOException e) {
             fail("Could not reach the game server: " + e.getMessage());
             return;
         }
         state = State.LOGGING_IN;
         sendLogin();
+        step("sent login");
     }
 
     private void sendLogin() {
@@ -86,6 +98,7 @@ public final class GameClient {
     private void handleLogin(PacketReader r) {
         if (r.opcode == SendOpcode.LOGIN_STATUS.getValue()) {
             int reason = r.readUByte();
+            step("login answer " + reason);
             if (reason == 23) { // terms of service for a new account: accept
                 login.send(new PacketWriter(RecvOpcode.ACCEPT_TOS.getValue()).writeByte(1));
                 return;
@@ -100,14 +113,17 @@ public final class GameClient {
             int gender = r.readByte();
             if (gender == 10) { // account gender not chosen yet
                 login.send(new PacketWriter(RecvOpcode.SET_GENDER.getValue()).writeByte(1).writeByte(0));
+                step("sent account gender");
                 return;
             }
             login.send(new PacketWriter(RecvOpcode.SERVERLIST_REQUEST.getValue()));
+            step("asked for worlds");
         } else if (r.opcode == SendOpcode.SERVERLIST.getValue()) {
             int world = r.readUByte();
             if (world == 0xFF) {
                 // End of the list: open world 0, channel 1.
                 login.send(new PacketWriter(RecvOpcode.CHARLIST_REQUEST.getValue()).writeByte(0).writeByte(0).writeByte(0));
+                step("asked for characters");
             } else if (worldName.isEmpty()) {
                 worldName = r.readString();
             }
@@ -122,6 +138,7 @@ public final class GameClient {
             for (int i = 0; i < n; i++) characters.add(Decode.charEntry(r));
             r.readByte(); // PIC mode
             characterSlots = r.readInt();
+            step("got " + characters.size() + " characters");
             state = State.CHARACTER_SELECT;
         } else if (r.opcode == SendOpcode.CHAR_NAME_RESPONSE.getValue()) {
             checkedName = r.readString();
