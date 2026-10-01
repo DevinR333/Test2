@@ -255,6 +255,28 @@ public class OfflineExtrasTest {
         enterMap(warp[0]);
     }
 
+    @Test(timeout = 120000)
+    public void holidaysAllYear() throws Exception {
+        // turkeys roam The Forest of Wisdom, sharing the Slimes' drops
+        server.maps.MapleMap forest = net.server.Server.getInstance().getWorld(0).getChannel(1).getMapFactory().getMap(100040100);
+        long turkeys = forest.getAllMonsters().stream().filter(m -> m.getId() == 9400505).count();
+        assertTrue("turkeys spawned (" + turkeys + ")", turkeys > 0);
+        assertFalse("turkeys drop things", server.life.MonsterInformationProvider.getInstance().retrieveDrop(9400505).isEmpty());
+        // a 2008 event quest's end date no longer closes it
+        server.quest.Quest q = server.quest.Quest.getInstance(9952);
+        java.lang.reflect.Field f = server.quest.Quest.class.getDeclaredField("startReqs");
+        f.setAccessible(true);
+        @SuppressWarnings("unchecked")
+        java.util.Map<server.quest.QuestRequirementType, server.quest.requirements.AbstractQuestRequirement> reqs =
+                (java.util.Map<server.quest.QuestRequirementType, server.quest.requirements.AbstractQuestRequirement>) f.get(q);
+        server.quest.requirements.AbstractQuestRequirement end = reqs.get(server.quest.QuestRequirementType.END_DATE);
+        assertNotNull("quest 9952 has an end date", end);
+        assertTrue("still open", end.check(server(), 9010010));
+        offline.OfflineOptions.holidays = false;
+        assertFalse("closed in the original game", end.check(server(), 9010010));
+        offline.OfflineOptions.holidays = true;
+    }
+
     static int price(int sn) {
         return server.CashShop.CashItemFactory.getItem(sn).getPrice();
     }

@@ -29,6 +29,27 @@ public final class OfflineItems {
             {30099901, LEVEL_POTION, 1, 0}, // Use > Scroll
     };
 
+    /**
+     * Holiday monsters that only ever came from timed events, added as extra spawns on a map of their
+     * level (copying that map's spawn points): mob, map, how many, the map's own monster whose drops
+     * they share (they have none of their own).
+     */
+    private static final int[][] HOLIDAY_SPAWNS = {
+            {9400505, 100040100, 8, 210100},   // Turkey (lv 6): The Forest of Wisdom
+            {9500195, 104040001, 6, 1210101},  // Jack-o-Lantern (lv 10): Henesys Hunting Ground II
+            {9400568, 106000100, 8, 1140100},  // Turkey Commando (lv 20): Deep Valley II
+            {9400508, 105040000, 8, 2230100},  // Mad Turkey (lv 27): Swampy Land in a Deep Forest
+            {9420508, 106000130, 6, 4230400},  // Octobunny (lv 43): The Burnt Land IV
+            {9500317, 209080000, 3, 210100},   // Kid Snowman: Happyville, Extra Frosty Snow Zone
+            {9500318, 209080000, 3, 4230103},  // Angry Snowman (lv 40): same
+    };
+
+    /** The monster whose drops a holiday monster uses, or 0. */
+    public static int dropTemplate(int mobId) {
+        for (int[] s : HOLIDAY_SPAWNS) if (s[0] == mobId) return s[3];
+        return 0;
+    }
+
     private static boolean installed;
 
     private OfflineItems() {}
@@ -52,6 +73,25 @@ public final class OfflineItems {
             img.addProp(id).addString("name", "Level Up Potion")
                     .addString("desc", "A mysterious potion that instantly raises your level by 1.");
         });
+        for (int[] s : HOLIDAY_SPAWNS) {
+            int mob = s[0], count = s[2];
+            WzPatches.register("Map.wz/Map/Map" + s[1] / 100000000 + "/" + s[1] + ".img", img -> {
+                if (!OfflineOptions.holidays) return;
+                WzNode life = img.get("life");
+                if (!life.exists()) return;
+                java.util.List<WzNode> spots = new java.util.ArrayList<>();
+                for (WzNode e : life.children()) if ("m".equals(e.getString("type", ""))) spots.add(e);
+                if (spots.isEmpty()) return;
+                int name = 10000 + life.childCount();
+                for (int i = 0; i < count; i++) {
+                    WzNode at = spots.get(i * spots.size() / count);
+                    WzNode n = life.addProp(Integer.toString(name++));
+                    n.addString("type", "m").addString("id", Integer.toString(mob));
+                    for (String k : new String[]{"x", "y", "fh", "cy", "rx0", "rx1", "f"}) n.addInt(k, at.getInt(k, 0));
+                    n.addInt("mobTime", at.getInt("mobTime", 0));
+                }
+            });
+        }
         WzPatches.register("Etc.wz/Commodity.img", img -> {
             int next = 1_000_000;
             for (int[] c : EXTRA_COMMODITIES) {

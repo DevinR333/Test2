@@ -12,6 +12,8 @@ public final class OfflineOptions {
     public static volatile boolean permanentCash = true;
     /** The Cash Shop also sells its retired seasonal and limited items. */
     public static volatile boolean limitedCash = true;
+    /** Holiday events all year: dated event quests stay open and holiday monsters roam (map changes need a restart). */
+    public static volatile boolean holidays = true;
 
     private OfflineOptions() {}
 }

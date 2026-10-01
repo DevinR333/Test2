@@ -52,6 +52,7 @@ public class EndDateRequirement extends AbstractQuestRequirement {
 
     @Override
     public boolean check(Character chr, Integer npcid) {
+        if (offline.OfflineOptions.holidays) return true; // offline: event quests never close
         Calendar cal = Calendar.getInstance();
         cal.set(Integer.parseInt(timeStr.substring(0, 4)), Integer.parseInt(timeStr.substring(4, 6)), Integer.parseInt(timeStr.substring(6, 8)), Integer.parseInt(timeStr.substring(8, 10)), 0);
         return cal.getTimeInMillis() >= System.currentTimeMillis();

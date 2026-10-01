@@ -168,6 +168,9 @@ public class MonsterInformationProvider {
             return ret;
         }
 
+        int template = offline.OfflineItems.dropTemplate(monsterId);
+        if (ret.isEmpty() && template != 0) ret.addAll(retrieveDrop(template)); // offline: holiday monsters
+
         drops.put(monsterId, ret);
         return ret;
     }
