@@ -14,24 +14,53 @@ import java.util.List;
 /**
  * On-screen controls for touch screens: an analog stick for the arrow keys and round buttons that each
  * press one v83 key slot, showing the icon of whatever that key is bound to. The gear button opens the
- * editor: drag to move, and Key / Bigger / Smaller / Fade / Delete / Add / Reset. Positions are kept as
- * fractions of the whole screen, sizes as fractions of its height, and saved in the preferences.
+ * editor: drag to move, and Key / Bigger / Smaller / Fade / Delete / Add / Reset. Each control is anchored
+ * to its nearer side of the screen: its distance from that side and its size are kept in screen
+ * heights, its height as a fraction, so it keeps its shape and spacing on any screen (4:3 or wide).
+ * Besides keys, a button can be a mouse action (left/right/middle click, wheel up/down) done at the
+ * last tapped point.
  */
 public final class TouchControls {
     public static final class Item {
         public boolean stick;
-        public float cx, cy, size; // fractions of the screen (size: diameter / screen height)
+        public boolean right; // anchored to the right side of the screen
+        public float ox; // distance of the centre from that side, in screen heights
+        public float cy, size; // fraction of the screen height; diameter / screen height
         public int slot;
         public float alpha = 1f;
 
-        Item(boolean stick, float cx, float cy, float size, int slot) {
+        Item(boolean stick, boolean right, float ox, float cy, float size, int slot) {
             this.stick = stick;
-            this.cx = cx;
+            this.right = right;
+            this.ox = ox;
             this.cy = cy;
             this.size = size;
             this.slot = slot;
         }
     }
+
+    /** Mouse actions a button can do instead of a key (slots past the keyboard's 90). */
+    public static final int LEFT_CLICK = 100, RIGHT_CLICK = 101, MIDDLE_CLICK = 102, WHEEL_UP = 103, WHEEL_DOWN = 104;
+
+    public static boolean isMouse(int slot) { return slot >= LEFT_CLICK && slot <= WHEEL_DOWN; }
+
+    public static String mouseName(int slot) {
+        switch (slot) {
+            case LEFT_CLICK: return "L-Click";
+            case RIGHT_CLICK: return "R-Click";
+            case MIDDLE_CLICK: return "M-Click";
+            case WHEEL_UP: return "Wheel Up";
+            case WHEEL_DOWN: return "Wheel Dn";
+            default: return null;
+        }
+    }
+
+    /** Does a mouse button's action. */
+    public interface MouseListener {
+        void mouse(int slot);
+    }
+
+    public MouseListener mouseListener;
 
     /** What a key slot is bound to, for the button's picture. */
     public interface Bindings {
@@ -63,14 +92,16 @@ public final class TouchControls {
     public void load(Preferences p) {
         prefs = p;
         items.clear();
-        String s = p == null ? "" : p.getString("touch.layout", "");
+        // version 2: side-anchored; an older (screen-fraction) layout is replaced by the defaults
+        String s = p == null ? "" : p.getString("touch.layout2", "");
         if (!s.isEmpty()) {
             for (String part : s.split(";")) {
                 String[] f = part.split(",");
-                if (f.length < 6) continue;
+                if (f.length < 7) continue;
                 try {
-                    Item it = new Item(f[0].equals("s"), Float.parseFloat(f[1]), Float.parseFloat(f[2]), Float.parseFloat(f[3]), Integer.parseInt(f[4]));
-                    it.alpha = Float.parseFloat(f[5]);
+                    Item it = new Item(f[0].equals("s"), f[1].equals("r"), Float.parseFloat(f[2]), Float.parseFloat(f[3]),
+                            Float.parseFloat(f[4]), Integer.parseInt(f[5]));
+                    it.alpha = Float.parseFloat(f[6]);
                     items.add(it);
                 } catch (NumberFormatException ignored) {
                 }
@@ -84,26 +115,26 @@ public final class TouchControls {
         StringBuilder sb = new StringBuilder();
         for (Item it : items) {
             if (sb.length() > 0) sb.append(';');
-            sb.append(it.stick ? "s" : "b").append(',').append(it.cx).append(',').append(it.cy).append(',').append(it.size).append(',')
-                    .append(it.slot).append(',').append(it.alpha);
+            sb.append(it.stick ? "s" : "b").append(',').append(it.right ? "r" : "l").append(',').append(it.ox).append(',')
+                    .append(it.cy).append(',').append(it.size).append(',').append(it.slot).append(',').append(it.alpha);
         }
-        prefs.putString("touch.layout", sb.toString());
+        prefs.putString("touch.layout2", sb.toString());
         prefs.flush();
     }
 
     /** Stick on the left; Attack, Jump, Pick up, NPC chat and the quick-slot keys on the right. */
     public void defaults() {
         items.clear();
-        items.add(new Item(true, 0.10f, 0.70f, 0.34f, -1));
-        items.add(new Item(false, 0.925f, 0.80f, 0.20f, 29)); // Ctrl: attack
-        items.add(new Item(false, 0.835f, 0.88f, 0.17f, 56)); // Alt: jump
-        items.add(new Item(false, 0.835f, 0.68f, 0.13f, 44)); // Z: pick up
-        items.add(new Item(false, 0.925f, 0.58f, 0.13f, 57)); // Space: NPC chat
-        items.add(new Item(false, 0.835f, 0.50f, 0.11f, 42)); // Shift
-        items.add(new Item(false, 0.925f, 0.40f, 0.11f, 82)); // Ins
-        items.add(new Item(false, 0.835f, 0.33f, 0.11f, 71)); // Home
-        items.add(new Item(false, 0.925f, 0.23f, 0.11f, 73)); // PgUp
-        items.add(new Item(false, 0.06f, 0.36f, 0.11f, 28)); // Enter: chat
+        items.add(new Item(true, false, 0.19f, 0.70f, 0.34f, -1));
+        items.add(new Item(false, true, 0.135f, 0.80f, 0.20f, 29)); // Ctrl: attack
+        items.add(new Item(false, true, 0.30f, 0.88f, 0.17f, 56)); // Alt: jump
+        items.add(new Item(false, true, 0.30f, 0.68f, 0.13f, 44)); // Z: pick up
+        items.add(new Item(false, true, 0.135f, 0.58f, 0.13f, 57)); // Space: NPC chat
+        items.add(new Item(false, true, 0.30f, 0.50f, 0.11f, 42)); // Shift
+        items.add(new Item(false, true, 0.135f, 0.40f, 0.11f, 82)); // Ins
+        items.add(new Item(false, true, 0.30f, 0.33f, 0.11f, 71)); // Home
+        items.add(new Item(false, true, 0.135f, 0.23f, 0.11f, 73)); // PgUp
+        items.add(new Item(false, false, 0.11f, 0.36f, 0.11f, 28)); // Enter: chat
     }
 
     /** The whole screen in UI units (it extends past the 800x600 game area into the side bars). */
@@ -114,12 +145,17 @@ public final class TouchControls {
         this.height = height;
     }
 
-    private float x(Item it) { return left + it.cx * width; }
+    private float x(Item it) { return it.right ? left + width - it.ox * height : left + it.ox * height; }
     private float y(Item it) { return top + it.cy * height; }
     private float r(Item it) { return it.size * height / 2; }
 
     private float gearX() { return left + width - 30; }
     private float gearY() { return top + 28; }
+
+    /** The Edit (gear) button is under this point. */
+    public boolean gearAt(float ux, float uy) {
+        return enabled && onGear(ux, uy);
+    }
 
     private boolean onGear(float ux, float uy) {
         float dx = ux - gearX(), dy = uy - gearY();
@@ -167,6 +203,7 @@ public final class TouchControls {
         }
         Item hit = itemAt(ux, uy);
         if (hit == null) return false;
+        if (!hit.stick && isMouse(hit.slot) && mouseListener != null) mouseListener.mouse(hit.slot);
         owner[pointer] = hit;
         if (hit.stick) {
             stickPointer = pointer;
@@ -181,7 +218,9 @@ public final class TouchControls {
         if (editing) {
             if (pointer == dragPointer && selected >= 0) {
                 Item it = items.get(selected);
-                it.cx = Math.max(0, Math.min(1, (ux - dragDX - left) / width));
+                float nx = Math.max(left, Math.min(left + width, ux - dragDX));
+                it.right = nx > left + width / 2;
+                it.ox = (it.right ? left + width - nx : nx - left) / height;
                 it.cy = Math.max(0, Math.min(1, (uy - dragDY - top) / height));
             }
             return true;
@@ -192,7 +231,7 @@ public final class TouchControls {
         else {
             // sliding a finger from one button to the next presses the new one
             Item now = itemAt(ux, uy);
-            if (now != null && !now.stick && now != it) {
+            if (now != null && !now.stick && now != it && !isMouse(now.slot)) {
                 owner[pointer] = now;
                 recomputeHeld();
             }
@@ -263,7 +302,7 @@ public final class TouchControls {
             int slot = pickerAt(ux, uy);
             if (slot >= 0) {
                 if (addAfterPick) {
-                    Item it = new Item(false, 0.5f, 0.5f, 0.13f, slot);
+                    Item it = new Item(false, false, width / height / 2, 0.5f, 0.13f, slot);
                     items.add(it);
                     selected = items.size() - 1;
                 } else if (selected >= 0) {
@@ -335,7 +374,7 @@ public final class TouchControls {
     // The key picker shows the Key Config keyboard (cells 32px at its recovered coordinates).
     private static final int[] PICK = {1, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 87, 88, 41, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
             15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 43, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 28, 42, 44, 45, 46, 47,
-            48, 49, 50, 51, 52, 53, 29, 56, 57, 82, 71, 73, 83, 79, 81};
+            48, 49, 50, 51, 52, 53, 29, 56, 57, 82, 71, 73, 83, 79, 81, LEFT_CLICK, RIGHT_CLICK, MIDDLE_CLICK, WHEEL_UP, WHEEL_DOWN};
 
     private float[] pickCell(int i) {
         int cols = 14;

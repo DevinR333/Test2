@@ -120,7 +120,7 @@ public final class ChatBar extends Widget {
 
     @Override
     public Widget hit(float lx, float ly) {
-        Widget h = super.hit(lx, ly);
+        Widget h = hitChildren(lx, ly);
         if (h != null) return h;
         if (expanded && lx >= 4 && lx < 570 && ly >= logTop() && ly < 532) return this;
         if (lx >= 85 && lx < 525 && ly >= 538 && ly < 558) return input;

@@ -73,13 +73,20 @@ public class Widget {
 
     /** The deepest visible widget at local (lx, ly) that wants the pointer, or null. */
     public Widget hit(float lx, float ly) {
+        Widget h = hitChildren(lx, ly);
+        if (h != null) return h;
+        return interactive() && contains(lx, ly) ? this : null;
+    }
+
+    /** Only the children (for full-screen layers that must not take taps everywhere). */
+    protected Widget hitChildren(float lx, float ly) {
         for (int i = children.size() - 1; i >= 0; i--) {
             Widget c = children.get(i);
             if (!c.visible) continue;
             Widget h = c.hit(lx - c.x, ly - c.y);
             if (h != null) return h;
         }
-        return interactive() && contains(lx, ly) ? this : null;
+        return null;
     }
 
     /** Whether this widget itself takes pointer input (buttons, slots, drag bars...). */

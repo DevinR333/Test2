@@ -77,6 +77,8 @@ public final class KeyMap {
 
     /** Short printable name of a key slot (touch buttons, the key picker). */
     public static String slotName(int slot) {
+        String mouse = maple.input.TouchControls.mouseName(slot);
+        if (mouse != null) return mouse;
         switch (slot) {
             case 1: return "Esc";
             case 12: return "-";

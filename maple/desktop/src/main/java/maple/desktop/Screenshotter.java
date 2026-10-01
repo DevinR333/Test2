@@ -101,6 +101,36 @@ final class Screenshotter {
                 Gdx.input.getInputProcessor().touchUp((int) sx, (int) sy, 0, 0);
                 break;
             }
+            case "tapnpc": {
+                maple.game.Npc n = game.world().npcs.values().iterator().next();
+                float[] u = game.worldToUi(n.x, n.y - 20);
+                act(game, "tap:" + u[0] + ":" + u[1], pad);
+                System.out.println("tapped NPC " + n.name + " at " + (int) u[0] + "," + (int) u[1]);
+                break;
+            }
+            case "pointnpc": { // put the touch cursor on the first NPC without tapping
+                maple.game.Npc n = game.world().npcs.values().iterator().next();
+                float[] u = game.worldToUi(n.x, n.y - 20);
+                game.ui().mouseX = u[0];
+                game.ui().mouseY = u[1];
+                break;
+            }
+            case "mouse": // a touch button set to a mouse action
+                try {
+                    java.lang.reflect.Method m = MapleGame.class.getDeclaredMethod("touchMouse", int.class);
+                    m.setAccessible(true);
+                    m.invoke(game, Integer.parseInt(p[1]));
+                } catch (ReflectiveOperationException e) {
+                    throw new RuntimeException(e);
+                }
+                break;
+            case "report": {
+                StringBuilder sb = new StringBuilder("REPORT windows=");
+                for (maple.ui.Window w : game.ui().windows()) sb.append(w.name).append(' ');
+                sb.append(" npcTalk=").append(game.world() != null && game.world().talk != null);
+                System.out.println(sb);
+                break;
+            }
             case "hold":
                 pad.left = action.contains("left");
                 pad.right = action.contains("right");

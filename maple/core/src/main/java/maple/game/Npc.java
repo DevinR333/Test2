@@ -95,7 +95,8 @@ public final class Npc {
         Animation a = anims.get(stance);
         Sprite s = a == null ? null : a.first();
         int w = s == null ? 40 : s.w, h = s == null ? 70 : s.h;
-        return wx >= x - w / 2f && wx <= x + w / 2f && wy >= y - h && wy <= y;
+        int pad = 8; // fingers are less exact than a mouse
+        return wx >= x - w / 2f - pad && wx <= x + w / 2f + pad && wy >= y - h - pad && wy <= y + pad;
     }
 
     public int height() {

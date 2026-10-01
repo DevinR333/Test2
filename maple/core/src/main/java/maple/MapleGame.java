@@ -38,6 +38,7 @@ import maple.ui.Ui;
 import maple.ui.UiAssets;
 import maple.ui.UiDraw;
 import maple.ui.UiSounds;
+import maple.ui.Widget;
 import maple.ui.Widgets;
 import maple.ui.Window;
 import maple.ui.hud.ChatBar;
@@ -149,6 +150,11 @@ public class MapleGame extends ApplicationAdapter {
     public Screen screen() { return screen; }
     public String fatalError() { return fatal; }
 
+    /** Where a map point is on the 800x600 (or wider) interface (testing aid). */
+    public float[] worldToUi(double wx, double wy) {
+        return new float[]{(float) (wx - Math.round(camX) + Ui.W / 2.0), (float) (wy - Math.round(camY) + 300)};
+    }
+
     // ------------------------------------------------------------------ setup
 
     @Override
@@ -184,6 +190,7 @@ public class MapleGame extends ApplicationAdapter {
         }
         applyOptions();
         touch.load(prefs);
+        touch.mouseListener = this::touchMouse;
         logoNexon = assets.animation("Logo.img/Nexon");
         logoWizet = assets.animation("Logo.img/Wizet");
         resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
@@ -928,6 +935,36 @@ public class MapleGame extends ApplicationAdapter {
         }
     }
 
+    /**
+     * A touch button set to a mouse action: it clicks, right-clicks or scrolls at the last tapped
+     * point (the middle of the screen before any tap), and from then on the cursor is shown there.
+     */
+    private void touchMouse(int slot) {
+        if (ui == null) return;
+        if (ui.mouseX < 0) {
+            ui.mouseX = Ui.W / 2f;
+            ui.mouseY = Ui.H / 2f;
+        }
+        ui.touchCursor = true;
+        float sx = ui.offsetX + ui.mouseX * ui.scale, sy = ui.offsetY + ui.mouseY * ui.scale;
+        final int pointer = 19; // past any finger, so it never collides with a real touch
+        switch (slot) {
+            case TouchControls.LEFT_CLICK:
+            case TouchControls.RIGHT_CLICK:
+                ui.pointerDown(pointer, sx, sy, slot == TouchControls.RIGHT_CLICK);
+                ui.pointerUp(pointer, sx, sy);
+                break;
+            case TouchControls.WHEEL_UP:
+                ui.scrolled(sx, sy, -1);
+                break;
+            case TouchControls.WHEEL_DOWN:
+                ui.scrolled(sx, sy, 1);
+                break;
+            default:
+                break; // middle click: v83 gives it no action
+        }
+    }
+
     /** Icons for the touch buttons: whatever their key is bound to. */
     private final class SlotIcons implements TouchControls.Bindings {
         @Override
@@ -1179,6 +1216,17 @@ public class MapleGame extends ApplicationAdapter {
             return Widgets.Focus.keyTyped(character);
         }
 
+        /**
+         * A tap on a real interface control (a button, a slot, a window) goes to the interface even
+         * where a touch button overlaps it; the bars' empty background does not count. The gear
+         * and the touch editor always come first.
+         */
+        private boolean uiFirst(int sx, int sy) {
+            if (touch.editing || !ui.onScreen(sx, sy) || touch.gearAt(ui.toUiX(sx), ui.toUiY(sy))) return false;
+            Widget w = ui.widgetAt(ui.toUiX(sx), ui.toUiY(sy));
+            return w != null && w != statusBar && w != chatBar;
+        }
+
         private float ux(int sx) { return ui.toUiX(sx); }
         private float uy(int sy) { return ui.toUiY(sy); }
 
@@ -1189,7 +1237,7 @@ public class MapleGame extends ApplicationAdapter {
                 skipLogos = true;
                 return true;
             }
-            if (screen == Screen.GAME && touch.touchDown(pointer, ux(sx), uy(sy))) return true;
+            if (screen == Screen.GAME && !uiFirst(sx, sy) && touch.touchDown(pointer, ux(sx), uy(sy))) return true;
             return ui.pointerDown(pointer, sx, sy, button == Input.Buttons.RIGHT);
         }
 

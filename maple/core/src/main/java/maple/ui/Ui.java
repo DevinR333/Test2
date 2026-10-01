@@ -38,6 +38,8 @@ public final class Ui {
     private Widget lastClick;
     private long lastClickTime;
     public boolean mouseVisible;
+    /** Show the cursor at the last tapped point (a touch mouse button was used). */
+    public boolean touchCursor;
     private long time;
     private final Animation[] cursor = new Animation[13];
     private int cursorState;
@@ -461,7 +463,7 @@ public final class Ui {
             Tooltip t = hovered.tooltip(mouseX - absX(hovered), mouseY - absY(hovered));
             if (t != null) t.draw(g, mouseX, mouseY);
         }
-        if (mouseVisible && mouseX >= 0) {
+        if ((mouseVisible || touchCursor) && mouseX >= 0) {
             Animation c = cursor[cursorState] != null ? cursor[cursorState] : cursor[0];
             if (c != null) g.anim(c, mouseX, mouseY, time - cursorStart);
         }

@@ -84,7 +84,7 @@ public final class StatusBar extends Widget {
 
     @Override
     public Widget hit(float lx, float ly) {
-        Widget h = super.hit(lx, ly);
+        Widget h = hitChildren(lx, ly);
         if (h != null) return h;
         // the bar itself swallows clicks so they don't reach the world
         return ly >= 529 && lx >= 0 && lx < 800 ? this : null;
