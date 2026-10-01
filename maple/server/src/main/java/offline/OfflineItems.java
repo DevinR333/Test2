@@ -71,7 +71,7 @@ public final class OfflineItems {
     public static synchronized void install() {
         if (installed) return;
         installed = true;
-        WzPatches.register("Item.wz/Consume/0200.img", img -> {
+        WzPatches.register("Item/Consume/0200.img", img -> {
             String id = "0" + LEVEL_POTION;
             if (img.child(id) != null) return;
             WzNode look = img.get("0" + LEVEL_POTION_LOOK).get("info");
@@ -93,7 +93,7 @@ public final class OfflineItems {
                 token.addProp("spec");
             }
         });
-        WzPatches.register("String.wz/Consume.img", img -> {
+        WzPatches.register("String/Consume.img", img -> {
             String id = Integer.toString(LEVEL_POTION);
             if (img.child(id) != null) return;
             img.addProp(id).addString("name", "Level Up Potion")
@@ -106,7 +106,7 @@ public final class OfflineItems {
         });
         for (int[] s : HOLIDAY_SPAWNS) {
             int mob = s[0], count = s[2];
-            WzPatches.register("Map.wz/Map/Map" + s[1] / 100000000 + "/" + s[1] + ".img", img -> {
+            WzPatches.register("Map/Map/Map" + s[1] / 100000000 + "/" + s[1] + ".img", img -> {
                 if (!OfflineOptions.holidays) return;
                 WzNode life = img.get("life");
                 if (!life.exists()) return;
@@ -123,7 +123,7 @@ public final class OfflineItems {
                 }
             });
         }
-        WzPatches.register("Etc.wz/Commodity.img", img -> {
+        WzPatches.register("Etc/Commodity.img", img -> {
             int next = 1_000_000;
             for (int[] c : EXTRA_COMMODITIES) {
                 img.addProp(Integer.toString(next++)).addInt("SN", c[0]).addInt("ItemId", c[1]).addInt("Count", c[2])

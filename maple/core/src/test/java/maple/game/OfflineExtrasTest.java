@@ -280,6 +280,11 @@ public class OfflineExtrasTest {
         stepUntil(() -> npc(starter) != null && npc(rooney) != null, 5000);
         assertTrue("quest offered", world.quests.startable(starter).contains(q));
         assertEquals("bulb over the NPC", 0, world.quests.marker(starter));
+        // stand next to the NPC (the server only accepts quests from NPCs within about a screen)
+        player.spawn(npc(starter).x, npc(starter).y - 10);
+        for (int i = 0; i < 50; i++) step();
+        sendMove();
+        for (int i = 0; i < 50; i++) step();
         talkThrough(npc(starter), world.quests.name(q));
         stepUntil(() -> world.quests.state(q) == 1, 5000);
         assertEquals("the server started it", 1, world.quests.state(q));
@@ -287,6 +292,10 @@ public class OfflineExtrasTest {
         assertTrue("marker over Rooney", world.quests.marker(rooney) >= 1);
         assertTrue(world.quests.finishing(rooney).contains(q));
         if (world.quests.ready(q)) {
+            player.spawn(npc(rooney).x, npc(rooney).y - 10);
+            for (int i = 0; i < 50; i++) step();
+            sendMove();
+            for (int i = 0; i < 50; i++) step();
             talkThrough(npc(rooney), world.quests.name(q));
             stepUntil(() -> world.quests.state(q) == 2, 5000);
             assertEquals("the server completed it", 2, world.quests.state(q));

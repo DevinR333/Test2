@@ -8,7 +8,7 @@ import java.util.concurrent.ConcurrentHashMap;
 /**
  * Additions made to images as they are read, e.g. offline-only items. The game and the in-process
  * server read the same parsed tree, so both see them. Keyed by the image's full path
- * ("Item.wz/Consume/0200.img").
+ * ("Item/Consume/0200.img").
  */
 public final class WzPatches {
     /** Adds to a freshly parsed image. */

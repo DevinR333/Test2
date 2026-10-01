@@ -137,7 +137,7 @@ public final class QuestBook {
     public List<Integer> startable(int npcId) {
         index();
         List<Integer> out = new ArrayList<>();
-        for (int id : startAt.getOrDefault(npcId, List.of())) if (canStart(id)) out.add(id);
+        for (int id : startAt.getOrDefault(npcId, java.util.Collections.emptyList())) if (canStart(id)) out.add(id);
         return out;
     }
 
@@ -145,7 +145,7 @@ public final class QuestBook {
     public List<Integer> finishing(int npcId) {
         index();
         List<Integer> out = new ArrayList<>();
-        for (int id : endAt.getOrDefault(npcId, List.of())) if (state(id) == 1) out.add(id);
+        for (int id : endAt.getOrDefault(npcId, java.util.Collections.emptyList())) if (state(id) == 1) out.add(id);
         return out;
     }
 

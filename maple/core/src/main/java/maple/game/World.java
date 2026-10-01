@@ -2081,7 +2081,7 @@ public final class World {
     private void finishQuest(Npc n, int q) {
         if (!quests.ready(q)) {
             List<String> stop = quests.say(q, 1, "stop");
-            if (stop.isEmpty()) stop = List.of("You haven't finished #b" + quests.name(q) + "#k yet.");
+            if (stop.isEmpty()) stop = java.util.Collections.singletonList("You haven't finished #b" + quests.name(q) + "#k yet.");
             questPages(n.id, stop, 0, false, null, null);
             return;
         }
