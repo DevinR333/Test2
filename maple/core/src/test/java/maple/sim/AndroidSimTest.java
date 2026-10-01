@@ -11,8 +11,9 @@ import static org.junit.Assert.assertTrue;
 public class AndroidSimTest {
     @Test(timeout = 300000)
     public void fullFlowWithoutClassesAndroidLacks() throws Throwable {
-        String xml = System.getenv("MAPLE_XML_WZ");
-        Assume.assumeTrue("no XML export", xml != null && !xml.isEmpty() && new File(xml).isDirectory());
+        String xml = System.getenv("MAPLE_XML_WZ"), bin = System.getenv("MAPLE_BIN_WZ");
+        Assume.assumeTrue("no game data", (xml != null && !xml.isEmpty() && new File(xml).isDirectory())
+                || (bin != null && !bin.isEmpty() && new File(bin).isDirectory()));
         AndroidSimLoader loader = new AndroidSimLoader();
         Thread t = new Thread(() -> {
             try {

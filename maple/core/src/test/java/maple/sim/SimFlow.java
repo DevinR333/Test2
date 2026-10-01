@@ -14,10 +14,16 @@ public final class SimFlow implements Runnable {
     @Override
     public void run() {
         try {
-            String xml = System.getenv("MAPLE_XML_WZ");
-            DataProviderFactory.override = f -> new XMLWZFile(Path.of(xml, f.getBaseName() + ".wz"));
+            String bin = System.getenv("MAPLE_BIN_WZ");
             File save = Files.createTempDirectory("maple-sim").toFile();
-            OfflineServer.start(null, save, null);
+            if (bin != null && !bin.isEmpty()) {
+                // Same path as the phone: the server reads binary .wz files through the WZ reader.
+                OfflineServer.start(new maple.wz.Wz(new maple.wz.FolderSource(new File(bin))), save, null);
+            } else {
+                String xml = System.getenv("MAPLE_XML_WZ");
+                DataProviderFactory.override = f -> new XMLWZFile(Path.of(xml, f.getBaseName() + ".wz"));
+                OfflineServer.start(null, save, null);
+            }
             long end = System.currentTimeMillis() + 120000;
             while (!OfflineServer.isOnline()) {
                 if (OfflineServer.failure() != null) throw new RuntimeException("server failed", OfflineServer.failure());
