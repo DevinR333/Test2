@@ -140,6 +140,8 @@ public final class Widgets {
         private long blink;
         private boolean dialogOpen;
         public java.util.function.Predicate<Character> allowed = c -> c >= 32 && c < 127;
+        /** The text starts selected (like the original edit boxes): the first key typed replaces it. */
+        public boolean selected;
 
         public TextField(float x, float y, float w, float h) {
             super(x, y, w, h);
@@ -167,7 +169,8 @@ public final class Widgets {
                     public void canceled() {
                         dialogOpen = false;
                     }
-                }, hint.isEmpty() ? "Enter text" : hint, text, "");
+                }, hint.isEmpty() ? "Enter text" : hint, selected ? "" : text, selected ? text : "");
+                selected = false;
             }
             return false;
         }
@@ -177,6 +180,11 @@ public final class Widgets {
 
         @Override
         public boolean keyTyped(char c) {
+            if (selected && c != '\r' && c != '\n') {
+                selected = false;
+                text = ""; // typing replaces the selected text (backspace just clears it)
+                if (c == '\b') return true;
+            }
             if (c == '\b') {
                 if (!text.isEmpty()) text = text.substring(0, text.length() - 1);
                 return true;
@@ -198,6 +206,11 @@ public final class Widgets {
         public void draw(UiDraw g) {
             float tw = g.textWidth(text, size, false);
             float tx = center ? (w - tw) / 2 : 1;
+            if (selected && !text.isEmpty()) {
+                g.fill(tx, 1, tw + 1, h - 2, 0xFF3060C0); // selected: white on blue
+                g.text(text, tx, (h - size) / 2f - 1, size, false, 0xFFFFFFFF);
+                return;
+            }
             g.text(text, tx, (h - size) / 2f - 1, size, false, color);
             if (focused && (blink / 500) % 2 == 0) g.fill(tx + tw + 1, 1, 1, h - 2, color);
         }

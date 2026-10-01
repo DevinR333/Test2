@@ -123,7 +123,8 @@ public final class ShopWindow extends Window {
             return;
         }
         if (ItemInfo.inventoryType(e.itemId) != 1 && !info.isRechargeable()) {
-            int max = Math.max(1, Math.min(Math.max(1, info.slotMax), e.price > 0 ? meso / e.price : 1));
+            int stack = Math.max(1, info.slotMax);
+            int max = Math.max(1, e.price > 0 ? Math.min(stack, meso / e.price) : stack); // free items: a full stack
             ui.open(new QuantityPrompt(ui, "How many are you willing to buy?", 1, max, n -> world.shopBuy(buySel, e.itemId, n)));
         } else {
             int idx = buySel;

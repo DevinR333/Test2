@@ -18,7 +18,7 @@ import java.util.function.IntConsumer;
 public final class QuantityPrompt extends Window {
     private final String text;
     private final Widgets.TextField field;
-    private final int min, max;
+    private final int min, max, def;
     private final IntConsumer onOk;
     private final int textHeight;
 
@@ -31,6 +31,7 @@ public final class QuantityPrompt extends Window {
         this.text = text;
         this.min = min;
         this.max = max;
+        this.def = def;
         this.onOk = onOk;
         modal = true;
         draggable = false;
@@ -39,6 +40,7 @@ public final class QuantityPrompt extends Window {
         h = 99 + textHeight;
         field = add(new Widgets.TextField(19, h - 73, 226, 15));
         field.text = Integer.toString(def);
+        field.selected = true; // typing replaces the default
         field.maxLength = 10;
         field.allowed = Character::isDigit;
         field.hint = text;
@@ -54,7 +56,7 @@ public final class QuantityPrompt extends Window {
     private void ok() {
         int n;
         try {
-            n = Integer.parseInt(field.text.trim());
+            n = field.text.trim().isEmpty() ? def : Integer.parseInt(field.text.trim()); // empty: keep the default
         } catch (NumberFormatException e) {
             return;
         }
