@@ -10,6 +10,8 @@ tasks.withType(JavaCompile).configureEach { options.encoding = 'UTF-8' }
 dependencies {
     implementation project(':core')
     implementation "com.badlogicgames.gdx:gdx-backend-lwjgl3:$gdxVersion"
+    // ANGLE: OpenGL ES on top of DirectX, for Windows PCs without usable OpenGL (e.g. Remote Desktop).
+    implementation "com.badlogicgames.gdx:gdx-lwjgl3-angle:$gdxVersion"
     implementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
     implementation "com.badlogicgames.gdx:gdx-backend-headless:$gdxVersion"
 }

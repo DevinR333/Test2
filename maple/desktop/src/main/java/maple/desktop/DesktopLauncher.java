@@ -45,7 +45,24 @@ public final class DesktopLauncher {
         if (args.length > 1 && args[1].startsWith("--screenshot=")) {
             Screenshotter.attach(game, args);
         }
-        new Lwjgl3Application(game, cfg);
+        // On Windows draw through ANGLE (DirectX): works over Remote Desktop and with drivers lacking OpenGL.
+        // -Dmaple.gl=opengl forces plain OpenGL.
+        boolean windows = System.getProperty("os.name", "").toLowerCase().contains("win");
+        String gl = System.getProperty("maple.gl", windows ? "angle" : "opengl");
+        if (gl.equals("angle")) useAngle(cfg);
+        System.out.println("[maple] Graphics: " + (gl.equals("angle") ? "ANGLE (DirectX)" : "OpenGL"));
+        try {
+            new Lwjgl3Application(game, cfg);
+        } catch (com.badlogic.gdx.utils.GdxRuntimeException e) {
+            if (gl.equals("angle") || !String.valueOf(e.getMessage()).contains("Couldn't create window")) throw e;
+            System.out.println("[maple] OpenGL window failed, retrying with ANGLE (DirectX)");
+            useAngle(cfg);
+            new Lwjgl3Application(game, cfg);
+        }
+    }
+
+    private static void useAngle(Lwjgl3ApplicationConfiguration cfg) {
+        cfg.setOpenGLEmulation(Lwjgl3ApplicationConfiguration.GLEmulation.ANGLE_GLES20, 0, 0);
     }
 
     static AbstractScriptManager.ScriptLoader folderScripts(File root) {
