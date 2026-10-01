@@ -28,3 +28,18 @@ test {
     environment 'MAPLE_XML_WZ', System.getenv('MAPLE_XML_WZ') ?: ''
     testLogging { events 'failed'; exceptionFormat 'full' }
 }
+
+// A build stamp shown on the start and error screens, so it's clear which build a phone is running.
+def buildStampDir = layout.buildDirectory.dir('generated/buildStamp')
+tasks.register('buildStamp') {
+    def out = buildStampDir.map { it.file('maple-build.txt') }
+    outputs.upToDateWhen { false }
+    outputs.file(out)
+    doLast {
+        def version = rootProject.file('VERSION').exists() ? rootProject.file('VERSION').text.trim() : 'dev'
+        out.get().asFile.parentFile.mkdirs()
+        out.get().asFile.text = 'v' + version + ' (built ' + new Date().format('yyyy-MM-dd HH:mm') + ')'
+    }
+}
+sourceSets.main.resources.srcDir(buildStampDir)
+processResources.dependsOn 'buildStamp'

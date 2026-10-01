@@ -106,7 +106,7 @@ public class MapleGame extends ApplicationAdapter {
         controls.load(prefs);
         Gdx.input.setInputProcessor(controls);
         wz = new Wz(source);
-        Log.info("WZ source: " + source.describe());
+        Log.info("WZ source: " + source.describe() + ", build " + Log.build());
         try {
             wz.file("Map");
         } catch (RuntimeException e) {
@@ -235,14 +235,14 @@ public class MapleGame extends ApplicationAdapter {
         Gdx.gl.glClearColor(0, 0, 0, 1);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         if (fatal != null) {
-            drawMessage(fatal);
+            drawMessage(fatal + "\n\nBuild " + Log.build());
             after();
             return;
         }
         if (client != null) client.update();
         if (mode == Mode.BOOT) {
             if (OfflineServer.failure() != null) {
-                fatal = "The game server could not start:\n\n" + Log.brief(OfflineServer.failure());
+                fatal = "The game server could not start:\n\n" + Log.details(OfflineServer.failure());
             } else if (client == null && OfflineServer.isOnline()) {
                 startClient();
             } else if (client != null && client.state == GameClient.State.FAILED) {
@@ -250,7 +250,7 @@ public class MapleGame extends ApplicationAdapter {
             } else if (client != null && client.state == GameClient.State.CHARACTER_SELECT) {
                 mode = Mode.CHAR_SELECT;
             }
-            drawMessage(client == null ? "Starting MapleStory..." : "Logging in...");
+            drawMessage((client == null ? "Starting MapleStory..." : "Logging in...") + "\n\nBuild " + Log.build());
             after();
             return;
         }

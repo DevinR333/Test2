@@ -29,6 +29,35 @@ public final class Log {
         }
     }
 
+    /** Build stamp (commit + time), or "unknown". */
+    public static String build() {
+        try (java.io.InputStream in = Log.class.getClassLoader().getResourceAsStream("maple-build.txt")) {
+            if (in == null) return "unknown";
+            java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();
+            byte[] buf = new byte[256];
+            int n;
+            while ((n = in.read(buf)) > 0) out.write(buf, 0, n);
+            return new String(out.toByteArray(), java.nio.charset.StandardCharsets.UTF_8).trim();
+        } catch (Exception e) {
+            return "unknown";
+        }
+    }
+
+    /** The error plus its first stack lines (and causes), for the on-screen error report. */
+    public static String details(Throwable t) {
+        StringBuilder sb = new StringBuilder();
+        int depth = 0;
+        while (t != null && depth < 3) {
+            if (depth > 0) sb.append("Caused by: ");
+            sb.append(brief(t)).append('\n');
+            StackTraceElement[] st = t.getStackTrace();
+            for (int i = 0; i < Math.min(6, st.length); i++) sb.append("   at ").append(st[i]).append('\n');
+            t = t.getCause() == t ? null : t.getCause();
+            depth++;
+        }
+        return sb.toString();
+    }
+
     public static String brief(Throwable t) {
         String m = t.getMessage();
         return t.getClass().getSimpleName() + (m == null ? "" : ": " + m);
