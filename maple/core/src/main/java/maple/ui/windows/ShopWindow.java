@@ -78,7 +78,7 @@ public final class ShopWindow extends Window {
         buyRows.clear();
         for (int i = 0; i < shop.items.size(); i++) {
             Shop.Entry e = shop.items.get(i);
-            if ((e.price > 0 || e.pitch > 0 || e.recharge) && (buyTab == 0 || recommended(e))) buyRows.add(i);
+            if ((e.price > 0 || e.pitch > 0 || e.recharge || e.itemId == offline.OfflineItems.LEVEL_POTION) && (buyTab == 0 || recommended(e))) buyRows.add(i);
         }
         sellRows.clear();
         if (world.data() != null) sellRows.addAll(world.data().inventory(sellTab + 1).values());
@@ -211,7 +211,7 @@ public final class ShopWindow extends Window {
             ItemWindow.drawItem(g, ui, it, 238 - 2, anchor - 19 - 0, sellTab >= 1 && sellTab <= 3);
             boolean rechargeable = info.isRechargeable();
             g.text(clip(g, info.name, rechargeable ? 120 : 152), 279, anchor - 18, 152, Align.left, false, 12, false, 0xFF000000);
-            String value = String.format(Locale.US, "%,d meso", info.price);
+            String value = String.format(Locale.US, "%,d meso", offline.OfflineItems.sellPrice(it.itemId, info.price));
             g.text(value, 279, anchor, 155, Align.left, false, 12, false, 0xFF000000);
         }
     }

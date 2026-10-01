@@ -205,6 +205,7 @@ public class Shop {
 
             ItemInformationProvider ii = ItemInformationProvider.getInstance();
             int recvMesos = ii.getPrice(item.getItemId(), quantity);
+            if (recvMesos <= 0) recvMesos = offline.OfflineItems.sellPrice(item.getItemId(), 0) * quantity; // offline: cash items sell too
             if (recvMesos > 0) {
                 c.getPlayer().gainMeso(recvMesos, false);
             }

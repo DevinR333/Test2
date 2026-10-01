@@ -293,6 +293,37 @@ public class OfflineExtrasTest {
         }
     }
 
+    @Test(timeout = 120000)
+    public void cashItemsSellAtShops() throws Exception {
+        client.Character chr = server();
+        // a cash hat on sale in the Cash Shop
+        int hat = 0;
+        for (maple.wz.WzNode n : wz.get("Etc/Commodity.img").children()) {
+            int id = n.getInt("ItemId", 0);
+            if (n.getInt("OnSale", 0) == 1 && id / 10000 == 100 && n.getInt("Price", 0) > 0
+                    && server.ItemInformationProvider.getInstance().isCash(id)) {
+                hat = id;
+                break;
+            }
+        }
+        assertTrue("found a cash hat", hat != 0);
+        int price = offline.OfflineItems.sellPrice(hat, 0);
+        assertTrue("cash items have a selling price (" + price + ")", price >= 1000);
+        client.inventory.manipulator.InventoryManipulator.addById(chr.getClient(), hat, (short) 1, "", -1);
+        int id = hat;
+        stepUntil(() -> c.player.inventory(1).values().stream().anyMatch(it -> it.itemId == id), 5000);
+        Item item = null;
+        for (Item it : c.player.inventory(1).values()) if (it.itemId == hat) item = it;
+        assertNotNull("got the hat", item);
+        server.ShopFactory.getInstance().getShopForNPC(1012004).sendShop(chr.getClient());
+        stepUntil(() -> chr.getShop() != null, 5000);
+        int meso = chr.getMeso();
+        world.shopSell(item.position, hat, 1);
+        stepUntil(() -> c.player.inventory(1).values().stream().noneMatch(it -> it.itemId == id), 5000);
+        assertEquals("paid for the cash item", meso + price, chr.getMeso());
+        world.shopLeave();
+    }
+
     @Test(timeout = 60000)
     public void ratesChangeWhilePlaying() {
         client.Character chr = server();

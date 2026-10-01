@@ -44,6 +44,16 @@ public final class OfflineItems {
             {9500318, 209080000, 3, 4230103},  // Angry Snowman (lv 40): same
     };
 
+    /**
+     * What an NPC shop pays for one: its own price, or for cash items (which have none) 10 mesos per
+     * NX of their Cash Shop price, at least 1,000.
+     */
+    public static int sellPrice(int itemId, int ownPrice) {
+        if (ownPrice > 0) return ownPrice;
+        if (!server.ItemInformationProvider.getInstance().isCash(itemId)) return ownPrice;
+        return Math.max(1000, server.CashShop.CashItemFactory.lowestPrice(itemId) * 10);
+    }
+
     /** The monster whose drops a holiday monster uses, or 0. */
     public static int dropTemplate(int mobId) {
         for (int[] s : HOLIDAY_SPAWNS) if (s[0] == mobId) return s[3];

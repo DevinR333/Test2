@@ -296,6 +296,21 @@ public class CashShop {
             return items.get(new Random().nextInt(items.size()));
         }
 
+        private static volatile Map<Integer, Integer> lowestPrices;
+
+        /** The cheapest Cash Shop price of an item, or 0 if it is not sold there. */
+        public static int lowestPrice(int itemId) {
+            Map<Integer, Integer> m = lowestPrices;
+            if (m == null) {
+                m = new HashMap<>();
+                for (CashItem ci : items.values()) {
+                    if (ci.getPrice() > 0 && ci.getCount() <= 1) m.merge(ci.getItemId(), ci.getPrice(), Math::min);
+                }
+                lowestPrices = m;
+            }
+            return m.getOrDefault(itemId, 0);
+        }
+
         public static CashItem getItem(int sn) {
             return items.get(sn);
         }
