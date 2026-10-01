@@ -108,6 +108,11 @@ public class MapleGame extends ApplicationAdapter {
         wz = new Wz(source);
         Log.info("WZ source: " + source.describe() + ", build " + Log.build());
         try {
+            Log.info("GL: " + Gdx.gl.glGetString(GL20.GL_VERSION) + " / " + Gdx.gl.glGetString(GL20.GL_RENDERER));
+        } catch (RuntimeException ignored) {
+            // informational only
+        }
+        try {
             wz.file("Map");
         } catch (RuntimeException e) {
             fatal = "Could not read Map.wz\n\n" + Log.brief(e) + "\n\nWZ folder: " + source.describe();
@@ -230,8 +235,23 @@ public class MapleGame extends ApplicationAdapter {
         Log.info(msg);
     }
 
+    private long frames, lastHeartbeat;
+
+    /** Writes a line to the log now and then, so a blank screen can be told apart from a stuck game. */
+    private void heartbeat() {
+        frames++;
+        long now = System.currentTimeMillis();
+        if (frames == 1 || now - lastHeartbeat > 10000) {
+            lastHeartbeat = now;
+            Log.info("Frame " + frames + ": " + mode + ", " + Gdx.graphics.getFramesPerSecond() + " fps, "
+                    + Gdx.graphics.getBackBufferWidth() + "x" + Gdx.graphics.getBackBufferHeight()
+                    + (client != null ? ", client " + client.state : "") + (fatal != null ? ", error shown" : ""));
+        }
+    }
+
     @Override
     public void render() {
+        heartbeat();
         Gdx.gl.glClearColor(0, 0, 0, 1);
         Gdx.gl.glClear(GL20.GL_COLOR_BUFFER_BIT);
         if (fatal != null) {

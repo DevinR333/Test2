@@ -43,3 +43,8 @@ Loaded map 10000 () in 70 ms: 64 tiles, 3 objects, 2 life, 18 sprites
 Map 10000
 WZ source: /home/user/Test2/maple/core/build/synthetic-wz, build v0.4.4 (built 2026-10-01 02:15)
 defaults: walk 125.0 px/s, jump 555.0 px/s, gravity 2000.0, fall 670.0
+WZ source: /home/user/Test2/maple/core/build/synthetic-wz, build v0.4.6 (built 2026-10-01 02:34)
+GL: 4.5 (Compatibility Profile) Mesa 25.2.8-0ubuntu0.24.04.1 / llvmpipe (LLVM 20.1.2, 256 bits)
+defaults: walk 125.0 px/s, jump 555.0 px/s, gravity 2000.0, fall 670.0
+Frame 1: BOOT, 0 fps, 1280x720
+Frame 587: CHAR_SELECT, 61 fps, 1280x720, client CHARACTER_SELECT

@@ -69,6 +69,12 @@ public final class Session {
                 in.readFully(data);
                 recvCypher.crypt(data);
                 MapleCustomEncryption.decryptData(data);
+                int opcode = data.length >= 2 ? (data[0] & 0xFF) | (data[1] & 0xFF) << 8 : -1;
+                if (opcode == net.opcodes.SendOpcode.PING.getValue()) {
+                    // Keep-alive: answer right away (the server drops clients that don't answer within 15 s).
+                    send(new PacketWriter(net.opcodes.RecvOpcode.PONG.getValue()));
+                    continue;
+                }
                 incoming.add(data);
             }
         } catch (EOFException e) {

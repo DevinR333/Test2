@@ -36,6 +36,15 @@ public class ProtocolTest {
         assertEquals("Scania", c.worldName);
         assertEquals(0, c.characters.size());
 
+        // Sit at character select longer than the server's idle limit (30 s + 15 s): pings must be answered.
+        if (Boolean.getBoolean("maple.idleTest")) {
+            long idleEnd = System.currentTimeMillis() + 50000;
+            while (System.currentTimeMillis() < idleEnd) {
+                c.update();
+                assertNotEquals(c.error, GameClient.State.FAILED, c.state);
+                Thread.sleep(100);
+            }
+        }
         c.checkName("Mapler");
         while (c.nameAvailable == null) { c.update(); Thread.sleep(20); }
         assertTrue(c.nameAvailable);
