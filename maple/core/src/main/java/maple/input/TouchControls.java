@@ -290,9 +290,10 @@ public final class TouchControls {
     private String[] toolbar() {
         if (selected >= 0) {
             boolean stick = items.get(selected).stick;
-            return stick ? new String[]{"Bigger", "Smaller", "Fade", "Done"} : new String[]{"Key", "Bigger", "Smaller", "Fade", "Delete", "Done"};
+            return stick ? new String[]{"Bigger", "Smaller", "Fade", "Delete", "Done"} : new String[]{"Key", "Bigger", "Smaller", "Fade", "Delete", "Done"};
         }
-        return new String[]{"Add button", "Reset", "Done"};
+        for (Item it : items) if (it.stick) return new String[]{"Add button", "Reset", "Done"};
+        return new String[]{"Add button", "Add stick", "Reset", "Done"};
     }
 
     private static final float TOOL_W = 92, TOOL_H = 30;
@@ -358,11 +359,19 @@ public final class TouchControls {
                 break;
             case "Delete":
                 if (it != null) items.remove(it);
+                if (it != null && it.stick) {
+                    stickX = stickY = 0;
+                    stickPointer = -1;
+                }
                 selected = -1;
                 break;
             case "Add button":
                 picker = true;
                 addAfterPick = true;
+                break;
+            case "Add stick":
+                items.add(0, new Item(true, false, 0.19f, 0.64f, 0.30f, -1));
+                selected = 0;
                 break;
             case "Reset":
                 defaults();
@@ -377,6 +386,36 @@ public final class TouchControls {
                 break;
         }
     }
+
+    // ---- for tests and tools: where things are (UI units) ----
+
+    /** Centre of an editor toolbar button, or null if it is not shown. */
+    public float[] toolCenter(String name) {
+        String[] tools = toolbar();
+        for (int i = 0; i < tools.length; i++) {
+            if (tools[i].equals(name)) return new float[]{toolX(i, tools.length) + TOOL_W / 2, toolY() + TOOL_H / 2};
+        }
+        return null;
+    }
+
+    public float[] center(Item it) { return new float[]{x(it), y(it)}; }
+
+    public float radius(Item it) { return r(it); }
+
+    /** Centre of a key in the key picker. */
+    public float[] pickerCenter(int slot) {
+        for (int i = 0; i < PICK.length; i++) {
+            if (PICK[i] == slot) {
+                float[] c = pickCell(i);
+                return new float[]{c[0] + c[2] / 2, c[1] + c[2] / 2};
+            }
+        }
+        return null;
+    }
+
+    public boolean pickerOpen() { return picker; }
+
+    public Item selectedItem() { return selected >= 0 && selected < items.size() ? items.get(selected) : null; }
 
     // The key picker shows the Key Config keyboard (cells 32px at its recovered coordinates).
     private static final int[] PICK = {1, 59, 60, 61, 62, 63, 64, 65, 66, 67, 68, 87, 88, 41, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14,
