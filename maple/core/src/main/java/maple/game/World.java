@@ -191,6 +191,12 @@ public final class World {
             else if (op == SendOpcode.STORAGE.getValue()) storagePacket(r);
             else if (op == SendOpcode.KEYMAP.getValue()) keymap(r);
             else if (op == SendOpcode.BUDDYLIST.getValue()) buddyPacket(r);
+            else if (op == SendOpcode.QUERY_CASH_RESULT.getValue()) {
+                cash.nxCredit = r.readInt();
+                cash.maplePoints = r.readInt();
+                cash.nxPrepaid = r.readInt();
+                events.refresh();
+            } else if (op == SendOpcode.CASHSHOP_OPERATION.getValue()) cashPacket(r);
             else if (op == SendOpcode.WHISPER.getValue()) {
                 int flag = r.readUByte();
                 if (flag == 0x0A) { // result
@@ -1764,6 +1770,156 @@ public final class World {
         w.writeString(data().stats.name + " : " + text);
         client.send(w);
         social.messengerLog.add(data().stats.name + " : " + text);
+    }
+
+    // ------------------------------------------------------------------ cash shop
+
+    public final CashShopState cash = new CashShopState();
+
+    private CashShopState.Entry cashEntry(PacketReader r, boolean gift) {
+        CashShopState.Entry e = new CashShopState.Entry();
+        e.cashId = r.readLong();
+        if (!gift) {
+            r.readInt();
+            r.readInt();
+        }
+        e.itemId = r.readInt();
+        if (!gift) {
+            e.sn = r.readInt();
+            e.quantity = r.readShort();
+        } else e.quantity = 1;
+        e.giftFrom = fixed(r, 13);
+        if (gift) {
+            fixed(r, 73);
+            return e;
+        }
+        e.expiration = r.readLong();
+        r.readLong();
+        return e;
+    }
+
+    private void cashPacket(PacketReader r) {
+        int mode = r.readUByte();
+        switch (mode) {
+            case 0x4B: {
+                cash.locker.clear();
+                int n = r.readShort();
+                for (int i = 0; i < n; i++) cash.locker.add(cashEntry(r, false));
+                break;
+            }
+            case 0x4D: {
+                cash.gifts.clear();
+                int n = r.readShort();
+                for (int i = 0; i < n; i++) cash.gifts.add(cashEntry(r, true));
+                break;
+            }
+            case 0x4F:
+            case 0x55:
+                for (int i = 0; i < 10; i++) cash.wishlist[i] = r.readInt();
+                break;
+            case 0x57:
+                cash.locker.add(cashEntry(r, false));
+                cash.message = "The item has been moved to your Cash Inventory.";
+                break;
+            case 0x89: {
+                int n = r.readUByte();
+                for (int i = 0; i < n; i++) cash.locker.add(cashEntry(r, false));
+                cash.message = "The package has been moved to your Cash Inventory.";
+                break;
+            }
+            case 0x68: { // taken out into the inventory
+                int pos = r.readShort();
+                Item it = Decode.item(r, pos);
+                int type = ItemInfo.inventoryType(it.itemId);
+                data().inventory(type).put(pos, it);
+                cash.locker.removeIf(e -> e.cashId == it.cashId);
+                break;
+            }
+            case 0x6A: { // put back into the locker
+                CashShopState.Entry e = cashEntry(r, false);
+                cash.locker.add(e);
+                for (int t = 1; t <= 5; t++) data().inventory(t).values().removeIf(it -> it.cashId == e.cashId);
+                break;
+            }
+            case 0x60: {
+                int type = r.readUByte();
+                int slots = r.readShort();
+                if (type >= 1 && type <= 5) data().slotLimits[type] = slots;
+                cash.message = "Your inventory has been expanded.";
+                break;
+            }
+            case 0x5C: {
+                int code = r.readUByte();
+                cash.message = cashError(code);
+                break;
+            }
+            default:
+                break;
+        }
+        events.refresh();
+    }
+
+    private static String cashError(int code) {
+        switch (code) {
+            case 0xA3: return "Request timed out. Please try again.";
+            case 0xA5: return "You don't have enough cash.";
+            case 0xA8: return "You cannot send a gift to your own account.";
+            case 0xAA: return "Gender restriction.";
+            case 0xAC: return "You have exceeded the number of cash items you can have.";
+            case 0xBB: return "Your inventory is full.";
+            case 0xBF: return "This item is not available for purchase at this time.";
+            case 0xC0: return "This item is out of stock.";
+            default: return "Due to an unknown error, the request failed.";
+        }
+    }
+
+    /** Buys a commodity (an item, or a package for 9xxxxxx ids) with NX Credit (1), Maple Points (2) or NX Prepaid (4). */
+    public void cashBuy(int sn, int itemId, int currency) {
+        PacketWriter w = new PacketWriter(RecvOpcode.CASHSHOP_OPERATION.getValue());
+        w.writeByte(itemId / 1000000 == 9 ? 0x1E : 0x03);
+        w.writeByte(0);
+        w.writeInt(currency);
+        w.writeInt(sn);
+        client.send(w);
+    }
+
+    public void cashTakeOut(long cashId) {
+        PacketWriter w = new PacketWriter(RecvOpcode.CASHSHOP_OPERATION.getValue());
+        w.writeByte(0x0D);
+        w.writeInt((int) cashId);
+        client.send(w);
+    }
+
+    public void cashPutBack(Item it) {
+        PacketWriter w = new PacketWriter(RecvOpcode.CASHSHOP_OPERATION.getValue());
+        w.writeByte(0x0E);
+        w.writeInt((int) it.cashId);
+        w.writeInt(0);
+        w.writeByte(ItemInfo.inventoryType(it.itemId));
+        client.send(w);
+    }
+
+    /** Adds 4 slots to an inventory (type 1..4) for 4,000 NX. */
+    public void cashExpand(int type, int currency) {
+        PacketWriter w = new PacketWriter(RecvOpcode.CASHSHOP_OPERATION.getValue());
+        w.writeByte(0x06);
+        w.writeByte(0);
+        w.writeInt(currency);
+        w.writeByte(0);
+        w.writeByte(type);
+        client.send(w);
+    }
+
+    /** Saves the wish list (up to 10 SNs). */
+    public void cashWishlist(int[] sns) {
+        PacketWriter w = new PacketWriter(RecvOpcode.CASHSHOP_OPERATION.getValue());
+        w.writeByte(0x05);
+        for (int i = 0; i < 10; i++) w.writeInt(i < sns.length ? sns[i] : 0);
+        client.send(w);
+    }
+
+    public void cashCheck() {
+        client.send(new PacketWriter(RecvOpcode.CHECK_CASH.getValue()));
     }
 
     /** Registers a card as the Monster Book cover (0 releases it). */

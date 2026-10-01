@@ -95,8 +95,8 @@ public final class GameClient {
         }
         if (channel != null) {
             PacketReader r;
-            while ((r = channel.poll()) != null) handleChannel(r);
-            if (channel.isClosed() && state == State.IN_GAME) {
+            while (channel != null && (r = channel.poll()) != null) handleChannel(r);
+            if (channel != null && channel.isClosed() && state == State.IN_GAME) {
                 fail("Lost connection to the game server" + (channel.error() == null ? "" : ": " + channel.error()));
             }
         }
@@ -185,13 +185,53 @@ public final class GameClient {
                 fail("Could not join the channel: " + e.getMessage());
                 return;
             }
+            playerId = cid;
             channel.send(new PacketWriter(RecvOpcode.PLAYER_LOGGEDIN.getValue()).writeInt(cid));
         } else if (r.opcode == SendOpcode.LOGIN_STATUS.getValue() || r.opcode == SendOpcode.SELECT_CHARACTER_BY_VAC.getValue()) {
             // handled above / unused
         }
     }
 
+    /** In the Cash Shop (SET_CASH_SHOP received, until we change channel back into the game). */
+    public boolean inCashShop;
+    /** Called when the Cash Shop opens. */
+    public Runnable cashShopHandler;
+    private int playerId;
+
+    public void enterCashShop() {
+        send(new PacketWriter(RecvOpcode.ENTER_CASHSHOP.getValue()));
+    }
+
+    /** CHANGE_MAP with no data leaves the Cash Shop; the server answers with CHANGE_CHANNEL. */
+    public void leaveCashShop() {
+        send(new PacketWriter(RecvOpcode.CHANGE_MAP.getValue()));
+    }
+
     private void handleChannel(PacketReader r) {
+        if (r.opcode == SendOpcode.SET_CASH_SHOP.getValue()) {
+            player = Decode.characterInfo(r, player == null ? 0 : player.channel);
+            inCashShop = true;
+            if (cashShopHandler != null) cashShopHandler.run();
+            return;
+        }
+        if (r.opcode == SendOpcode.CHANGE_CHANNEL.getValue()) {
+            r.readByte();
+            byte[] ip = r.readBytes(4);
+            int port = r.readUShort();
+            String host = (ip[0] & 0xFF) + "." + (ip[1] & 0xFF) + "." + (ip[2] & 0xFF) + "." + (ip[3] & 0xFF);
+            Session old = channel;
+            channel = null;
+            if (old != null) old.close();
+            try {
+                channel = new Session("channel", host, port);
+            } catch (IOException e) {
+                fail("Could not rejoin the channel: " + e.getMessage());
+                return;
+            }
+            inCashShop = false;
+            channel.send(new PacketWriter(RecvOpcode.PLAYER_LOGGEDIN.getValue()).writeInt(player != null ? player.stats.id : playerId));
+            return;
+        }
         if (r.opcode == SendOpcode.SET_FIELD.getValue()) {
             int ch = r.readInt();
             int kind = r.readUByte();

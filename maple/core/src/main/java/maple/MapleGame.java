@@ -79,7 +79,7 @@ import java.util.List;
  * 800x600 (or wider) screen scaled uniformly to the device, with touch controls in the side bars.
  */
 public class MapleGame extends ApplicationAdapter {
-    public enum Screen { BOOT, LOGIN, LOADING, GAME }
+    public enum Screen { BOOT, LOGIN, LOADING, GAME, CASH_SHOP }
     private static final int TICK_MS = 8;
 
     private final Wz.Source source;
@@ -194,7 +194,7 @@ public class MapleGame extends ApplicationAdapter {
     }
 
     private boolean option(String key) {
-        boolean def = key.equals("music") || key.equals("sound") || key.equals("touch") && Gdx.app.getType() == com.badlogic.gdx.Application.ApplicationType.Android;
+        boolean def = key.equals("music") || key.equals("sound") || key.equals("freeCashShop") || key.equals("touch") && Gdx.app.getType() == com.badlogic.gdx.Application.ApplicationType.Android;
         return prefs.getBoolean("opt." + key, def);
     }
 
@@ -202,6 +202,7 @@ public class MapleGame extends ApplicationAdapter {
         LoginScreen.allStyles = option("allStyles");
         offline.OfflineOptions.allStyles = option("allStyles");
         offline.OfflineOptions.cashDrops = option("cashDrops");
+        offline.OfflineOptions.freeCashShop = option("freeCashShop");
         bgm.volume = option("music") ? 0.6f : 0f;
         bgm.applyVolume();
         UiSounds.volume = option("sound") ? 0.7f : 0f;
@@ -240,6 +241,7 @@ public class MapleGame extends ApplicationAdapter {
                 case LOGIN: loginFrame(ms); break;
                 case LOADING: loadingFrame(); break;
                 case GAME: gameFrame(ms); break;
+                case CASH_SHOP: cashShopFrame(ms); break;
                 default: break;
             }
         } catch (RuntimeException e) {
@@ -363,12 +365,48 @@ public class MapleGame extends ApplicationAdapter {
         world.lookChanged = this::rebuildAvatar;
         world.bgmChange = path -> bgm.play(wz, path);
         client.inGameHandler = world::handle;
+        client.cashShopHandler = this::openCashShop;
         rebuildAvatar();
         world.recomputeStats();
         world.beginField();
         buildHud();
         screen = Screen.LOADING;
         loadingShown = false;
+    }
+
+    // ---- the Cash Shop
+
+    private maple.ui.CashShopScreen cashScreen;
+    private boolean backFromCashShop;
+
+    private void openCashShop() {
+        closeAllWindows();
+        ui.hud.clear();
+        ui.worldClick = null;
+        cashScreen = new maple.ui.CashShopScreen(ui, world, this::leaveCashShop);
+        ui.hud.add(cashScreen);
+        touch.releaseAll();
+        screen = Screen.CASH_SHOP;
+        bgm.play(wz, "BgmUI/ShopBgm");
+    }
+
+    private void leaveCashShop() {
+        if (screen != Screen.CASH_SHOP) return;
+        client.leaveCashShop();
+        closeAllWindows();
+        ui.hud.clear();
+        if (cashScreen != null) cashScreen.dispose();
+        cashScreen = null;
+        backFromCashShop = true;
+        screen = Screen.LOADING;
+        loadingShown = false;
+    }
+
+    private void cashShopFrame(long ms) {
+        ui.update(ms);
+        begin();
+        ui.draw();
+        end();
     }
 
     private void rebuildAvatar() {
@@ -438,6 +476,11 @@ public class MapleGame extends ApplicationAdapter {
         bgm.play(wz, field.bgm);
         portalCooldown = 60;
         client.mapLoaded();
+        if (backFromCashShop) {
+            backFromCashShop = false;
+            rebuildAvatar();
+            buildHud();
+        }
         if (ui.find(MiniMapWindow.class) == null && prefs.getBoolean("minimap", true)) ui.open(miniMap());
         screen = Screen.GAME;
     }
@@ -532,6 +575,9 @@ public class MapleGame extends ApplicationAdapter {
             case "Messenger": toggle(MessengerWindow.class, () -> new MessengerWindow(ui, world)); break;
             case "MonsterBook": toggle(MonsterBookWindow.class, () -> new MonsterBookWindow(ui, world)); break;
             case "WorldMap": toggle(WorldMapWindow.class, () -> new WorldMapWindow(ui, world)); break;
+            case "CashShop":
+                if (!client.inCashShop) client.enterCashShop();
+                break;
             case "Channel":
                 ui.open(new Dialogs.Notice(ui, "This world has a single channel.", false, null, null));
                 break;
@@ -1098,6 +1144,10 @@ public class MapleGame extends ApplicationAdapter {
             if (screen == Screen.LOGIN && login != null) {
                 if (ui.keyDown(keycode)) return true;
                 return login.keyDown(keycode);
+            }
+            if (screen == Screen.CASH_SHOP) {
+                if (ui.keyDown(keycode)) return true;
+                return cashScreen != null && cashScreen.keyDown(keycode);
             }
             if (screen != Screen.GAME) return false;
             if (chatBar != null && chatBar.keyDown(keycode)) return true;

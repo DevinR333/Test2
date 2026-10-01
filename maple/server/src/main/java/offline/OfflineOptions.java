@@ -6,6 +6,8 @@ public final class OfflineOptions {
     public static volatile boolean allStyles;
     /** Monsters sometimes drop Cash Shop equipment. */
     public static volatile boolean cashDrops;
+    /** Everything in the Cash Shop is free (offline there is no way to buy NX). */
+    public static volatile boolean freeCashShop = true;
 
     private OfflineOptions() {}
 }

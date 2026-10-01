@@ -190,23 +190,24 @@ public final class Channel {
 
             closeAllMerchants();
             disconnectAwayPlayers();
-            players.disconnectAll();
+            if (players != null) players.disconnectAll();
 
-            eventSM.dispose();
+            if (eventSM != null) eventSM.dispose();
             eventSM = null;
 
-            mapManager.dispose();
+            if (mapManager != null) mapManager.dispose();
             mapManager = null;
 
             closeChannelSchedules();
             players = null;
 
             channelServer.stop();
-
-            finishedShutdown = true;
             log.info("Successfully shut down channel {} in world {}", channel, world);
         } catch (Exception e) {
             log.error("Error while shutting down channel {} in world {}", channel, world, e);
+        } finally {
+            // never leave the server waiting forever for this channel (the app would hang on close)
+            finishedShutdown = true;
         }
     }
 

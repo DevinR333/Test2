@@ -53,6 +53,7 @@ public final class SettingsWindow extends Window {
         rows.add(new Object[]{"Extras (off = original game)", "header", null});
         rows.add(new Object[]{"All hairstyles and faces at creation", "opt", "allStyles"});
         rows.add(new Object[]{"Cash Shop items drop from monsters", "opt", "cashDrops"});
+        rows.add(new Object[]{"Free Cash Shop (no NX needed)", "opt", "freeCashShop"});
         rows.add(new Object[]{"Save data", "header", null});
         rows.add(new Object[]{"Export save...", "action", (Runnable) host::exportSave});
         rows.add(new Object[]{"Import save...", "action", (Runnable) host::importSave});

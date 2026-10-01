@@ -35,7 +35,7 @@ final class Screenshotter {
         final Pad pad = new Pad();
         game.afterFrame = new Runnable() {
             int n;
-            int gameFrames;
+            int gameFrames, lastF = -1;
             boolean created, selected;
 
             @Override
@@ -53,7 +53,9 @@ final class Screenshotter {
                         c.selectCharacter(c.characters.get(0).stats.id);
                     }
                 }
-                int f = autoPlay ? (game.screen() == MapleGame.Screen.GAME ? ++gameFrames : 0) : n;
+                int f = autoPlay ? (game.screen() == MapleGame.Screen.GAME || game.screen() == MapleGame.Screen.CASH_SHOP ? ++gameFrames : gameFrames) : n;
+                if (f == lastF) return; // paused (loading): act once per counted frame
+                lastF = f;
                 for (String[] a : actions) {
                     if (Integer.parseInt(a[0]) == f) act(game, a[1], pad);
                 }

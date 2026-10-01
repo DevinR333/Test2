@@ -317,7 +317,13 @@ public class CashShop {
     public record CashShopSurpriseResult(Item usedCashShopSurprise, Item reward) {
     }
 
+    /** What the "free Cash Shop" option reports as a balance: always enough for anything. */
+    public static final int FREE_BALANCE = 999_999_999;
+
     public int getCash(int type) {
+        if (offline.OfflineOptions.freeCashShop && (type == NX_CREDIT || type == MAPLE_POINT || type == NX_PREPAID)) {
+            return FREE_BALANCE;
+        }
         return switch (type) {
             case NX_CREDIT -> nxCredit;
             case MAPLE_POINT -> maplePoint;
@@ -328,6 +334,7 @@ public class CashShop {
     }
 
     public void gainCash(int type, int cash) {
+        if (cash < 0 && offline.OfflineOptions.freeCashShop) return; // offline option: nothing costs NX
         switch (type) {
             case NX_CREDIT -> nxCredit += cash;
             case MAPLE_POINT -> maplePoint += cash;
