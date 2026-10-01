@@ -43,7 +43,11 @@ public final class SkillWindow extends Window {
             int row = r;
             spUp[r] = add(new Button(ui.assets, "UIWindow.img/Skill/BtSpUp", 131, 119 + 40 * r, () -> learn(row)));
         }
-        add(new Button(ui.assets, "Basic.img/BtMacro", 120, 265, () -> {}));
+        add(new Button(ui.assets, "Basic.img/BtMacro", 120, 265, () -> {
+            SkillMacroWindow m = ui.find(SkillMacroWindow.class);
+            if (m != null) ui.close(m);
+            else ui.open(new SkillMacroWindow(ui, world));
+        }));
         addClose();
         refresh();
     }

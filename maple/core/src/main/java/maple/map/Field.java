@@ -24,6 +24,8 @@ public final class Field {
     public final FootholdTree footholds;
     public final List<Ladder> ladders = new ArrayList<>();
     public final List<Portal> portals = new ArrayList<>();
+    /** Map chairs (seat/<n>: x, y), sat on with the Sit key. Index = seat id sent to the server. */
+    public final List<int[]> seats = new ArrayList<>();
     public final List<Life> life = new ArrayList<>();
     public final SpriteBank bank = new SpriteBank();
     final List<Background> backs = new ArrayList<>();
@@ -101,6 +103,16 @@ public final class Field {
         }
         mapName = mn;
         streetName = sn;
+
+        for (WzNode st : src.get("seat").children()) {
+            WzNode v = st.resolve();
+            try {
+                int idx = Integer.parseInt(st.name);
+                while (seats.size() <= idx) seats.add(null);
+                seats.set(idx, new int[]{v.vx(), v.vy()});
+            } catch (NumberFormatException ignored) {
+            }
+        }
 
         for (WzNode b : src.get("back").children()) {
             Background bg = new Background(b.resolve(), wz, bank);

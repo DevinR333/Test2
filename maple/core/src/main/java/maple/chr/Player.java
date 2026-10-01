@@ -34,6 +34,31 @@ public final class Player {
     public boolean dead;
     private int knockTicks;
 
+    // Chairs: a portable chair item (Item.wz/Install/0301) or a map seat.
+    public int chairItem;
+    public int seat = -1;
+    public maple.gfx.Animation chairAnim;
+    private long chairTime;
+
+    public boolean sitting() { return chairItem != 0 || seat >= 0; }
+
+    public void sit(int item, int seatId, maple.gfx.Animation anim) {
+        chairItem = item;
+        seat = seatId;
+        chairAnim = anim;
+        chairTime = 0;
+        action = null;
+        phys.walkDir = 0;
+        phys.hspeed = 0;
+        state = State.STAND;
+    }
+
+    public void standUp() {
+        chairItem = 0;
+        seat = -1;
+        chairAnim = null;
+    }
+
     public void setAvatar(Avatar a) { avatar = a; }
     public Avatar avatar() { return avatar; }
 
@@ -84,6 +109,7 @@ public final class Player {
         phys.mode = PhysicsObject.Mode.NORMAL;
         state = State.FALL;
         ladder = null;
+        standUp();
     }
 
     /** One 8 ms step. */
@@ -100,7 +126,8 @@ public final class Player {
             actionLeft -= 8;
             if (actionLeft <= 0) action = null;
         }
-        boolean locked = dead || knockTicks > 0 || (action != null && state != State.FALL);
+        if (sitting()) chairTime += 8;
+        boolean locked = dead || knockTicks > 0 || sitting() || (action != null && state != State.FALL);
         if (locked) {
             if (state != State.LADDER && state != State.ROPE) {
                 fht.move(phys);
@@ -275,6 +302,7 @@ public final class Player {
 
     private String stanceFor() {
         if (dead) return "dead";
+        if (sitting()) return avatar != null && avatar.has("sit") ? "sit" : "stand1";
         switch (state) {
             case WALK: return avatar != null ? avatar.walkStance() : "walk1";
             case FALL: return "jump";
@@ -292,6 +320,7 @@ public final class Player {
         float x = (float) Math.round(phys.drawX(alpha));
         float y = (float) Math.round(phys.drawY(alpha));
         boolean climbing = state == State.LADDER || state == State.ROPE;
+        if (chairAnim != null && !chairAnim.isEmpty()) chairAnim.draw(batch, x, y, facingRight, chairTime, 1f);
         if (invincibleMs > 0 && !dead && (invincibleMs / 100) % 2 == 1) batch.setColor(0.5f, 0.5f, 0.5f, 0.5f);
         if (action != null) avatar.draw(batch, action, actionFrame, x, y, facingRight);
         else avatar.draw(batch, stance, frame, x, y, !climbing && facingRight);
@@ -303,6 +332,7 @@ public final class Player {
     /** v83 movement stance byte: walk 2, stand 4, jump 6, prone 10, ladder 14, rope 16; +1 when facing left. */
     public int stanceByte() {
         int s;
+        if (sitting()) return 20 + (facingRight ? 0 : 1);
         switch (state) {
             case WALK: s = 2; break;
             case FALL: s = 6; break;

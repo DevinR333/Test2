@@ -71,6 +71,8 @@ public final class QuickSlots extends Widget implements Ui.DropTarget {
             case KeyMap.ACTION:
             case KeyMap.FACE:
                 return ui.assets.sprite("UIWindow.img/KeyConfig/icon/" + action);
+            case KeyMap.MACRO:
+                return ui.assets.sprite("UIWindow.img/SkillMacro/Macroicon/" + action + "/icon");
             default:
                 return null;
         }

@@ -190,6 +190,28 @@ public final class World {
             else if (op == SendOpcode.CONFIRM_SHOP_TRANSACTION.getValue()) events.shopResult(r.readUByte());
             else if (op == SendOpcode.STORAGE.getValue()) storagePacket(r);
             else if (op == SendOpcode.KEYMAP.getValue()) keymap(r);
+            else if (op == SendOpcode.CANCEL_CHAIR.getValue()) {
+                if (r.readByte() == 0) player.standUp();
+                else {
+                    int id = r.readShort();
+                    int[] st = field != null && id >= 0 && id < field.seats.size() ? field.seats.get(id) : null;
+                    if (st != null) {
+                        player.phys.setPosition(st[0], st[1]);
+                        player.sit(0, id, null);
+                    }
+                }
+            } else if (op == SendOpcode.MACRO_SYS_DATA_INIT.getValue()) {
+                int n = r.readUByte();
+                for (int i = 0; i < 5; i++) macros[i] = null;
+                for (int i = 0; i < n && i < 5; i++) {
+                    SkillMacro m = new SkillMacro();
+                    m.name = r.readString();
+                    m.shout = r.readByte() != 0;
+                    for (int k = 0; k < 3; k++) m.skills[k] = r.readInt();
+                    macros[i] = m;
+                }
+                events.refresh();
+            }
             else if (op == SendOpcode.QUEST_CLEAR.getValue()) {
                 int q = r.readUShort();
                 showPlayerEffect("Effect/BasicEff.img/QuestClear");
@@ -867,6 +889,7 @@ public final class World {
         if (screenEffect != null && timeMs - screenEffect.start >= screenEffect.anim.durationMs()) screenEffect = null;
         touchDamage();
         naturalHealing();
+        stepMacro();
     }
 
     private void reportMobMove(Mob m) {
@@ -1230,6 +1253,107 @@ public final class World {
         }
     }
 
+    // ------------------------------------------------------------------ chairs
+
+    /** Portable chair (Setup items 301xxxx): USE_CHAIR, then sit with the chair's effect animation. */
+    public boolean useChair(int itemId) {
+        if (!canAct() || player.sitting() || player.inAction() || !player.phys.onGround) return false;
+        if (player.state == Player.State.LADDER || player.state == Player.State.ROPE) return false;
+        boolean have = false;
+        for (Item it : data().inventory(3).values()) if (it.itemId == itemId) have = true;
+        if (!have) return false;
+        PacketWriter w = new PacketWriter(RecvOpcode.USE_CHAIR.getValue());
+        w.writeInt(itemId);
+        client.send(w);
+        WzNode eff = wz.get("Item/Install/" + String.format("%04d", itemId / 10000) + ".img/" + String.format("%08d", itemId) + "/effect");
+        Animation a = eff.exists() ? Animation.of(eff, bank) : null;
+        player.sit(itemId, -1, a);
+        return true;
+    }
+
+    /** Sit key: the nearest map seat in reach (CANCEL_CHAIR with the seat id; the server confirms). */
+    public boolean sitOnSeat() {
+        if (!canAct() || player.sitting() || field == null || !player.phys.onGround) return false;
+        int best = -1;
+        double bestD = Double.MAX_VALUE;
+        for (int i = 0; i < field.seats.size(); i++) {
+            int[] st = field.seats.get(i);
+            if (st == null) continue;
+            double dx = Math.abs(st[0] - player.phys.x), dy = Math.abs(st[1] - player.phys.y);
+            if (dx > 40 || dy > 40) continue;
+            if (dx + dy < bestD) {
+                bestD = dx + dy;
+                best = i;
+            }
+        }
+        if (best < 0) return false;
+        PacketWriter w = new PacketWriter(RecvOpcode.CANCEL_CHAIR.getValue());
+        w.writeShort(best);
+        client.send(w);
+        return true;
+    }
+
+    /** Getting up (any movement key while sitting). */
+    public void standUp() {
+        if (!player.sitting()) return;
+        player.standUp();
+        PacketWriter w = new PacketWriter(RecvOpcode.CANCEL_CHAIR.getValue());
+        w.writeShort(-1);
+        client.send(w);
+    }
+
+    // ------------------------------------------------------------------ skill macros
+
+    /** One of the five skill macros (UIWindow.img/SkillMacro): a name, a shout flag and three skills. */
+    public static final class SkillMacro {
+        public String name = "";
+        public boolean shout;
+        public final int[] skills = new int[3];
+    }
+
+    public final SkillMacro[] macros = new SkillMacro[5];
+    private int macroIndex = -1, macroStep;
+
+    /** Saves all five macros (SKILL_MACRO). */
+    public void saveMacros() {
+        PacketWriter w = new PacketWriter(RecvOpcode.SKILL_MACRO.getValue());
+        int n = 0;
+        for (SkillMacro m : macros) if (m != null) n++;
+        // the server stores them by position, so empty ones in between are sent blank
+        int last = -1;
+        for (int i = 0; i < 5; i++) if (macros[i] != null) last = i;
+        w.writeByte(last + 1);
+        for (int i = 0; i <= last; i++) {
+            SkillMacro m = macros[i] != null ? macros[i] : new SkillMacro();
+            w.writeString(m.name);
+            w.writeByte(m.shout ? 1 : 0);
+            for (int k = 0; k < 3; k++) w.writeInt(m.skills[k]);
+        }
+        client.send(w);
+    }
+
+    /** Runs a macro: its skills one after another as each finishes; the name is shouted if set. */
+    public void runMacro(int index) {
+        if (index < 0 || index >= 5 || macros[index] == null || macroIndex >= 0) return;
+        SkillMacro m = macros[index];
+        if (m.shout && !m.name.isEmpty()) chat(m.name);
+        macroIndex = index;
+        macroStep = 0;
+    }
+
+    private void stepMacro() {
+        if (macroIndex < 0) return;
+        if (player.inAction() || attackCooldown > 0) return;
+        SkillMacro m = macros[macroIndex];
+        while (m != null && macroStep < 3 && m.skills[macroStep] == 0) macroStep++;
+        if (m == null || macroStep >= 3) {
+            macroIndex = -1;
+            return;
+        }
+        int id = m.skills[macroStep++];
+        useSkill(id);
+    }
+
     /** Pick up the nearest drop in reach (Z). */
     public boolean pickup() {
         if (!canAct()) return false;
@@ -1338,6 +1462,11 @@ public final class World {
 
     /** Uses the first item with this id (key bindings, quick slots). */
     public void useItemId(int itemId) {
+        if (itemId / 10000 == 301) {
+            if (player.chairItem == itemId) standUp();
+            else useChair(itemId);
+            return;
+        }
         for (Item it : data().inventory(ItemInfo.inventoryType(itemId)).values()) {
             if (it.itemId == itemId) {
                 if (ItemInfo.inventoryType(itemId) == 2) useItem(it.position);

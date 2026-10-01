@@ -149,6 +149,8 @@ public final class KeyConfigWindow extends Window implements Ui.DropTarget {
             case KeyMap.ACTION:
             case KeyMap.FACE:
                 return ui.assets.sprite("UIWindow.img/KeyConfig/icon/" + action);
+            case KeyMap.MACRO:
+                return ui.assets.sprite("UIWindow.img/SkillMacro/Macroicon/" + action + "/icon");
             default:
                 return null;
         }
@@ -301,6 +303,10 @@ public final class KeyConfigWindow extends Window implements Ui.DropTarget {
                 return Tooltip.text(KeyMap.actionName(action));
             case KeyMap.FACE:
                 return Tooltip.text("Facial Expression " + (action - 99));
+            case KeyMap.MACRO: {
+                maple.game.World.SkillMacro m = world.macros[Math.max(0, Math.min(4, action))];
+                return Tooltip.text(m == null || m.name.isEmpty() ? "Skill macro " + (action + 1) : m.name);
+            }
             default:
                 return null;
         }

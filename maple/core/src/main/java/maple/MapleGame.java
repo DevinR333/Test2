@@ -57,6 +57,7 @@ import maple.ui.windows.SettingsWindow;
 import maple.ui.windows.ShopWindow;
 import maple.ui.windows.SkillWindow;
 import maple.ui.windows.StatWindow;
+import maple.ui.windows.StyleDialog;
 import maple.ui.windows.StorageWindow;
 import maple.wz.Wz;
 import net.opcodes.RecvOpcode;
@@ -624,6 +625,10 @@ public class MapleGame extends ApplicationAdapter {
             if (keySlots[s] && type == KeyMap.ACTION && action == KeyMap.JUMP) jump = true;
         }
         if (scriptedPad != null) jump = scriptedPad.jump;
+        if (player.sitting() && (left || right || jump)) {
+            world.standUp();
+            jump = false; // the press that gets you up does not also jump
+        }
         pad.left = left;
         pad.right = right;
         pad.up = up;
@@ -661,9 +666,16 @@ public class MapleGame extends ApplicationAdapter {
                 if (action == KeyMap.ATTACK) world.attack();
                 else if (action == KeyMap.PICKUP) world.pickup();
                 else if (action == KeyMap.TALK) talkToNearest();
+                else if (action == KeyMap.SIT) {
+                    if (player.sitting()) world.standUp();
+                    else world.sitOnSeat();
+                }
                 break;
             case KeyMap.FACE:
                 world.faceExpression(action - 99);
+                break;
+            case KeyMap.MACRO:
+                world.runMacro(action);
                 break;
             default:
                 break;
@@ -840,6 +852,8 @@ public class MapleGame extends ApplicationAdapter {
                 case KeyMap.ACTION:
                 case KeyMap.FACE:
                     return assets.sprite("UIWindow.img/KeyConfig/icon/" + action);
+                case KeyMap.MACRO:
+                    return assets.sprite("UIWindow.img/SkillMacro/Macroicon/" + action + "/icon");
                 default:
                     return null;
             }
@@ -907,7 +921,11 @@ public class MapleGame extends ApplicationAdapter {
         public void npcTalk(NpcTalk talk) {
             NpcDialog old = ui.find(NpcDialog.class);
             if (old != null) ui.close(old);
-            if (talk != null) ui.open(new NpcDialog(ui, world, talk));
+            StyleDialog oldStyle = ui.find(StyleDialog.class);
+            if (oldStyle != null) ui.close(oldStyle);
+            if (talk == null) return;
+            if (talk.type == 7 && talk.styles.length > 0) ui.open(new StyleDialog(ui, world, talk));
+            else ui.open(new NpcDialog(ui, world, talk));
         }
 
         @Override
