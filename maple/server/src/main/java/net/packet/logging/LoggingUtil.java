@@ -6,7 +6,7 @@ import net.opcodes.RecvOpcode;
 import java.util.Set;
 
 public class LoggingUtil {
-    private static final Set<Short> ignoredDebugRecvPackets = Set.of(
+    private static final Set<Short> ignoredDebugRecvPackets = new java.util.HashSet<>(java.util.Arrays.asList(
             (short) RecvOpcode.MOVE_PLAYER.getValue(), // 41
             (short) RecvOpcode.HEAL_OVER_TIME.getValue(), // 89
             (short) RecvOpcode.SPECIAL_MOVE.getValue(), // 91
@@ -14,7 +14,7 @@ public class LoggingUtil {
             (short) RecvOpcode.MOVE_PET.getValue(), // 167
             (short) RecvOpcode.MOVE_LIFE.getValue(), // 188
             (short) RecvOpcode.NPC_ACTION.getValue() // 197
-    );
+    ));
 
     public static short readFirstShort(byte[] bytes) {
         return Unpooled.wrappedBuffer(bytes).readShortLE();

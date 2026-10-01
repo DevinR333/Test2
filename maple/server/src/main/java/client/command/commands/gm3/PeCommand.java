@@ -52,7 +52,7 @@ public class PeCommand extends Command {
     public void execute(Client c, String[] params) {
         Character player = c.getPlayer();
         String packet = "";
-        try (BufferedReader br = Files.newBufferedReader(Path.of("pe.txt"))) {
+        try (BufferedReader br = Files.newBufferedReader(java.nio.file.Paths.get("pe.txt"))) {
             Properties packetProps = new Properties();
             packetProps.load(br);
             packet = packetProps.getProperty("pe");

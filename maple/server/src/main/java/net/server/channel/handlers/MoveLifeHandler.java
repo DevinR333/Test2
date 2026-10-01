@@ -92,7 +92,7 @@ public final class MoveLifeHandler extends AbstractMovementPacketHandler {
             useSkillLevel = skillLv;
 
             if (monster.hasSkill(useSkillId, useSkillLevel)) {
-                MobSkillType mobSkillType = MobSkillType.from(useSkillId).orElseThrow();
+                MobSkillType mobSkillType = MobSkillType.from(useSkillId).get();
                 MobSkill toUse = MobSkillFactory.getMobSkillOrThrow(mobSkillType, useSkillLevel);
 
                 if (monster.canUseSkill(toUse, true)) {

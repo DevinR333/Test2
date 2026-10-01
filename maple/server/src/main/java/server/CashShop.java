@@ -518,7 +518,7 @@ public class CashShop {
         lock.lock();
         try {
             Optional<Item> maybeCashShopSurprise = getItemByCashId(cashId);
-            if (maybeCashShopSurprise.isEmpty() ||
+            if (!maybeCashShopSurprise.isPresent() ||
                     maybeCashShopSurprise.get().getItemId() != ItemId.CASH_SHOP_SURPRISE) {
                 return Optional.empty();
             }
@@ -533,7 +533,7 @@ public class CashShop {
             }
 
             Optional<CashItem> cashItemReward = CashItemFactory.getRandomCashItem();
-            if (cashItemReward.isEmpty()) {
+            if (!cashItemReward.isPresent()) {
                 return Optional.empty();
             }
 

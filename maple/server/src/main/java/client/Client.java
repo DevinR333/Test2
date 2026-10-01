@@ -740,7 +740,7 @@ public class Client extends ChannelInboundHandlerAdapter {
                 }
 
                 tempban = rs.getTimestamp("tempban");
-                if (tempban.toLocalDateTime().equals(DefaultDates.getTempban())) {
+                if (tools.SqlTime.toLocalDateTime(tempban).equals(DefaultDates.getTempban())) {
                     return null;
                 }
             }

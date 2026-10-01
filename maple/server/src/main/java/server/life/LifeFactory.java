@@ -196,7 +196,7 @@ public class LifeFactory {
             while (monsterSkillInfoData.getChildByPath(Integer.toString(i)) != null) {
                 int skillId = DataTool.getInt(i + "/skill", monsterSkillInfoData, 0);
                 int skillLv = DataTool.getInt(i + "/level", monsterSkillInfoData, 0);
-                MobSkillType type = MobSkillType.from(skillId).orElseThrow();
+                MobSkillType type = MobSkillType.from(skillId).get();
                 skills.add(new MobSkillId(type, skillLv));
 
                 Data monsterSkillData = monsterData.getChildByPath("skill" + (i + 1));

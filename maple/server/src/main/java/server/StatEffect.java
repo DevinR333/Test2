@@ -1127,7 +1127,7 @@ public class StatEffect {
                 applyfrom.dispelDebuff(debuff);
             }
         } else if (mobSkill > 0 && mobSkillLevel > 0) {
-            MobSkillType mobSkillType = MobSkillType.from(mobSkill).orElseThrow();
+            MobSkillType mobSkillType = MobSkillType.from(mobSkill).get();
             MobSkill ms = MobSkillFactory.getMobSkillOrThrow(mobSkillType, mobSkillLevel);
             Disease dis = Disease.getBySkill(mobSkillType);
 

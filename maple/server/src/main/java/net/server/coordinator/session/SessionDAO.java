@@ -53,7 +53,7 @@ public class SessionDAO {
         try (PreparedStatement ps = con.prepareStatement(query)) {
             ps.setInt(1, accountId);
             ps.setString(2, hwid.hwid());
-            ps.setTimestamp(3, Timestamp.from(expiry));
+            ps.setTimestamp(3, tools.SqlTime.timestamp(expiry));
 
             ps.executeUpdate();
         }
@@ -83,7 +83,7 @@ public class SessionDAO {
         final String query = "UPDATE hwidaccounts SET relevance = ?, expiresat = ? WHERE accountid = ? AND hwid LIKE ?";
         try (PreparedStatement ps = con.prepareStatement(query)) {
             ps.setInt(1, loginRelevance);
-            ps.setTimestamp(2, Timestamp.from(expiry));
+            ps.setTimestamp(2, tools.SqlTime.timestamp(expiry));
             ps.setInt(3, accountId);
             ps.setString(4, hwid.hwid());
 

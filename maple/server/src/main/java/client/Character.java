@@ -7235,7 +7235,7 @@ public class Character extends AbstractCharacterObject {
                             final int skilllv = rs.getInt("mobskilllv");
                             final long length = rs.getInt("length");
 
-                            MobSkillType type = MobSkillType.from(skillid).orElseThrow();
+                            MobSkillType type = MobSkillType.from(skillid).get();
                             MobSkill ms = MobSkillFactory.getMobSkillOrThrow(type, skilllv);
                             loadedDiseases.put(disease, new Pair<>(length, ms));
                         }
@@ -10568,7 +10568,7 @@ public class Character extends AbstractCharacterObject {
             if (!rs.next()) {
                 return "Account does not exist.";
             }
-            LocalDateTime tempban = rs.getTimestamp("tempban").toLocalDateTime();
+            LocalDateTime tempban = tools.SqlTime.toLocalDateTime(rs.getTimestamp("tempban"));
             if (!tempban.equals(DefaultDates.getTempban())) {
                 return "Account has been banned.";
             }

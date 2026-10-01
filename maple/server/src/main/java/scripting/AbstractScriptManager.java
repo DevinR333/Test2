@@ -58,7 +58,7 @@ public abstract class AbstractScriptManager {
 
     /** Desktop default: the "scripts" folder. The Android app replaces this to read from the APK. */
     public static volatile ScriptLoader loader = path -> {
-        Path scriptFile = Path.of("scripts", path);
+        Path scriptFile = java.nio.file.Paths.get("scripts", path);
         if (!Files.exists(scriptFile)) {
             return null;
         }

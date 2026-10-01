@@ -29,13 +29,15 @@ public class IdCommand extends Command {
     private final Map<String, HandbookFileItems> typeItems = new ConcurrentHashMap<>();
 
     private Map<String, String> typeFilePaths() {
-        return Map.ofEntries(
-                Map.entry("map", "handbook/Map.txt"),
-                Map.entry("etc", "handbook/Etc.txt"),
-                Map.entry("npc", "handbook/NPC.txt"),
-                Map.entry("use", "handbook/Use.txt"),
-                Map.entry("weapon", "handbook/Equip/Weapon.txt") // TODO add more into this
-        );
+        Map<String, String> m = new java.util.HashMap<>();
+        for (String[] e : new String[][]{
+                {"map", "handbook/Map.txt"},
+                {"etc", "handbook/Etc.txt"},
+                {"npc", "handbook/NPC.txt"},
+                {"use", "handbook/Use.txt"},
+                {"weapon", "handbook/Equip/Weapon.txt"} // TODO add more into this
+        }) m.put(e[0], e[1]);
+        return Collections.unmodifiableMap(m);
     }
 
     private static class HandbookFileItems {
@@ -44,7 +46,7 @@ public class IdCommand extends Command {
         public HandbookFileItems(List<String> fileLines) {
             this.items = fileLines.stream()
                     .map(this::parseLine)
-                    .filter(Predicate.not(Objects::isNull))
+                    .filter(Objects::nonNull)
                     .collect(java.util.stream.Collectors.toList());
         }
 
@@ -137,7 +139,7 @@ public class IdCommand extends Command {
             return;
         }
 
-        final List<String> fileLines = Files.readAllLines(Path.of(filePath));
+        final List<String> fileLines = Files.readAllLines(java.nio.file.Paths.get(filePath));
         typeItems.put(type, new HandbookFileItems(fileLines));
     }
 }

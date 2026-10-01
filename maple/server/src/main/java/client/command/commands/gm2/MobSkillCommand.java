@@ -27,7 +27,7 @@ public class MobSkillCommand extends Command {
         Optional<MobSkill> possibleSkill = possibleType.map(
                 type -> MobSkillFactory.getMobSkillOrThrow(type, Integer.parseInt(skillLevel))
         );
-        if (possibleSkill.isEmpty()) {
+        if (!possibleSkill.isPresent()) {
             return;
         }
 

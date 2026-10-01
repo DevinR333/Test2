@@ -188,7 +188,7 @@ public class SkillbookInformationProvider {
     }
 
     private static void listFiles(String directoryName, ArrayList<Path> files) {
-        Path directory = Path.of(directoryName);
+        Path directory = java.nio.file.Paths.get(directoryName);
 
         // get all the files from a directory
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(directory)) {

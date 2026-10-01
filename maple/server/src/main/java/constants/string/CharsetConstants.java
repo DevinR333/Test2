@@ -51,7 +51,7 @@ public class CharsetConstants {
             Optional<Language> language = Arrays.stream(values())
                     .filter(l -> l.charset.equals(charset))
                     .findAny();
-            if (language.isEmpty()) {
+            if (!language.isPresent()) {
                 log.warn("Charset {} was not found, defaulting to US-ASCII", charset);
                 return LANGUAGE_US;
             }
@@ -63,8 +63,8 @@ public class CharsetConstants {
     private static String loadCharsetFromConfig() {
         try {
             java.io.Reader source;
-            if (Files.exists(Path.of(YamlConfig.CONFIG_FILE_NAME))) {
-                source = Files.newBufferedReader(Path.of(YamlConfig.CONFIG_FILE_NAME), StandardCharsets.US_ASCII);
+            if (Files.exists(java.nio.file.Paths.get(YamlConfig.CONFIG_FILE_NAME))) {
+                source = Files.newBufferedReader(java.nio.file.Paths.get(YamlConfig.CONFIG_FILE_NAME), StandardCharsets.US_ASCII);
             } else {
                 java.io.InputStream in = CharsetConstants.class.getClassLoader().getResourceAsStream(YamlConfig.CONFIG_FILE_NAME);
                 if (in == null) throw new FileNotFoundException(YamlConfig.CONFIG_FILE_NAME);

@@ -23,7 +23,6 @@ package tools;
 
 import constants.string.CharsetConstants;
 
-import java.util.HexFormat;
 
 /**
  * Handles converting back and forth from byte arrays to hex strings.
@@ -39,7 +38,7 @@ public class HexTool {
      * @return The hex string
      */
     public static String toHexString(byte[] bytes) {
-        return HexFormat.ofDelimiter(" ").withUpperCase().formatHex(bytes);
+        return hex(bytes, true);
     }
 
     /**
@@ -49,7 +48,7 @@ public class HexTool {
      * @return The compact hex string
      */
     public static String toCompactHexString(byte[] bytes) {
-        return HexFormat.of().withUpperCase().formatHex(bytes);
+        return hex(bytes, false);
     }
 
     /**
@@ -63,7 +62,26 @@ public class HexTool {
      * @return The byte array
      */
     public static byte[] toBytes(String hexString) {
-        return HexFormat.of().parseHex(removeAllSpaces(hexString));
+        String s = removeAllSpaces(hexString);
+        if (s.length() % 2 != 0) throw new IllegalArgumentException("odd hex length");
+        byte[] out = new byte[s.length() / 2];
+        for (int i = 0; i < out.length; i++) {
+            int hi = Character.digit(s.charAt(2 * i), 16), lo = Character.digit(s.charAt(2 * i + 1), 16);
+            if (hi < 0 || lo < 0) throw new IllegalArgumentException("not hex: " + hexString);
+            out[i] = (byte) (hi << 4 | lo);
+        }
+        return out;
+    }
+
+    // java.util.HexFormat is Java 17 only and missing on Android.
+    private static String hex(byte[] bytes, boolean spaced) {
+        final String digits = "0123456789ABCDEF";
+        StringBuilder sb = new StringBuilder(bytes.length * 3);
+        for (int i = 0; i < bytes.length; i++) {
+            if (spaced && i > 0) sb.append(' ');
+            sb.append(digits.charAt(bytes[i] >> 4 & 0xF)).append(digits.charAt(bytes[i] & 0xF));
+        }
+        return sb.toString();
     }
 
     private static String removeAllSpaces(String input) {

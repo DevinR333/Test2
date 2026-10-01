@@ -20,8 +20,8 @@ public class YamlConfig {
     private static YamlConfig loadConfig() {
         try {
             java.io.Reader source;
-            if (Files.exists(Path.of(CONFIG_FILE_NAME))) {
-                source = Files.newBufferedReader(Path.of(CONFIG_FILE_NAME), CharsetConstants.CHARSET);
+            if (Files.exists(java.nio.file.Paths.get(CONFIG_FILE_NAME))) {
+                source = Files.newBufferedReader(java.nio.file.Paths.get(CONFIG_FILE_NAME), CharsetConstants.CHARSET);
             } else {
                 // Offline build: the config ships inside the app.
                 java.io.InputStream in = YamlConfig.class.getClassLoader().getResourceAsStream(CONFIG_FILE_NAME);

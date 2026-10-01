@@ -95,7 +95,7 @@ public class DebuffCommand extends Command {
             }
         }
 
-        if (disease == null || skill.isEmpty()) {
+        if (disease == null || !skill.isPresent()) {
             player.yellowMessage("Syntax: !debuff SLOW|SEDUCE|ZOMBIFY|CONFUSE|STUN|POISON|SEAL|DARKNESS|WEAKEN|CURSE");
             return;
         }
