@@ -242,7 +242,7 @@ public class MapleGame extends ApplicationAdapter {
         if (client != null) client.update();
         if (mode == Mode.BOOT) {
             if (OfflineServer.failure() != null) {
-                fatal = "The game server could not start:\n\n" + Log.details(OfflineServer.failure());
+                fatal = "[" + Log.build() + "]  The game server could not start:\n\n" + Log.details(OfflineServer.failure());
             } else if (client == null && OfflineServer.isOnline()) {
                 startClient();
             } else if (client != null && client.state == GameClient.State.FAILED) {
