@@ -296,7 +296,7 @@ public final class TouchControls {
         return new String[]{"Add button", "Add stick", "Reset", "Done"};
     }
 
-    private static final float TOOL_W = 92, TOOL_H = 30;
+    private static final float TOOL_W = 100, TOOL_H = 36;
 
     private float toolX(int i, int n) {
         float total = n * TOOL_W + (n - 1) * 6;
@@ -422,12 +422,19 @@ public final class TouchControls {
             15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 43, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 28, 42, 44, 45, 46, 47,
             48, 49, 50, 51, 52, 53, 29, 56, 57, 82, 71, 73, 83, 79, 81, LEFT_CLICK, RIGHT_CLICK, MIDDLE_CLICK, WHEEL_UP, WHEEL_DOWN};
 
+    private static final int PICK_COLS = 14;
+
+    /** Keys as big as the screen allows (rows of 14 under the title). */
+    private float pickSize() {
+        int rows = (PICK.length + PICK_COLS - 1) / PICK_COLS;
+        return Math.min((width - 24) / PICK_COLS, (height - 70) / rows);
+    }
+
     private float[] pickCell(int i) {
-        int cols = 14;
-        float cell = 40;
-        float total = cols * cell;
-        float px = left + (width - total) / 2 + (i % cols) * cell;
-        float py = top + 60 + (i / cols) * cell;
+        float cell = pickSize();
+        float total = PICK_COLS * cell;
+        float px = left + (width - total) / 2 + (i % PICK_COLS) * cell;
+        float py = top + 56 + (i / PICK_COLS) * cell;
         return new float[]{px, py, cell - 4};
     }
 
@@ -519,25 +526,33 @@ public final class TouchControls {
             float tx = toolX(i, tools.length);
             g.fill(tx, toolY(), TOOL_W, TOOL_H, 0xE0203040);
             g.outline(tx, toolY(), TOOL_W, TOOL_H, 0xFFC0D0E0);
-            g.text(tools[i], tx, toolY() + 8, TOOL_W, Align.center, false, 12, true, 0xFFFFFFFF);
+            g.text(tools[i], tx, toolY() + 10, TOOL_W, Align.center, false, 14, true, 0xFFFFFFFF);
         }
         if (selected < 0 && !picker) {
-            g.text("Drag a control to move it. Tap one to change its key, size or fade.", left, toolY() + TOOL_H + 8, width, Align.center, false, 12, false, 0xFFFFFFFF);
+            g.text("Drag a control to move it. Tap one to change its key, size or fade.", left, toolY() + TOOL_H + 8, width, Align.center, false, 14, false, 0xFFFFFFFF);
         }
         if (picker) {
             g.fill(left, top, width, height, 0xC0000000);
-            g.text(addAfterPick ? "Choose the key for the new button" : "Choose a key", left, top + 30, width, Align.center, false, 12, true, 0xFFFFFFFF);
+            g.text(addAfterPick ? "Choose the key for the new button" : "Choose a key", left, top + 26, width, Align.center, false, 16, true, 0xFFFFFFFF);
             for (int i = 0; i < PICK.length; i++) {
                 float[] c = pickCell(i);
                 int slot = PICK[i];
                 g.fill(c[0], c[1], c[2], c[2], 0xE0303A48);
                 g.outline(c[0], c[1], c[2], c[2], 0xFF8090A0);
                 Sprite icon = bindings == null ? null : bindings.icon(slot);
+                int font = c[2] >= 60 ? 16 : c[2] >= 46 ? 14 : 12;
+                String label = KeyMap.slotName(slot);
                 if (icon != null) {
-                    float s = Math.min(1f, (c[2] - 6) / Math.max(icon.w, icon.h));
-                    g.stretched(icon, c[0] + (c[2] - icon.w * s) / 2, c[1] + (c[2] - icon.h * s) / 2, icon.w * s, icon.h * s);
+                    // icon above, label below
+                    float room = c[2] - font - 8;
+                    float s = Math.min(room / 32f, room / Math.max(icon.w, icon.h));
+                    g.stretched(icon, c[0] + (c[2] - icon.w * s) / 2, c[1] + 3 + (room - icon.h * s) / 2, icon.w * s, icon.h * s);
+                    g.text(label, c[0], c[1] + c[2] - font - 3, c[2], Align.center, false, font, true, 0xFFFFFFFF);
+                } else {
+                    // mouse actions are two words: smaller so they fit
+                    int f = label.length() > 5 ? Math.max(11, font - 3) : font + 2;
+                    g.text(label, c[0], c[1] + (c[2] - f) / 2 - 1, c[2], Align.center, false, f, true, 0xFFFFFFFF);
                 }
-                g.text(KeyMap.slotName(slot), c[0], c[1] + c[2] - 12, c[2], Align.center, false, 9, true, 0xFFFFFFFF);
             }
         }
     }

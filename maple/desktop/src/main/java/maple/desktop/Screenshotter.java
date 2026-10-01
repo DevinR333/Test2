@@ -174,6 +174,14 @@ final class Screenshotter {
                 game.touch.enabled = true;
                 game.touch.editing = true;
                 break;
+            case "toucheditor": { // open the touch editor's key picker (Add button)
+                game.touch.enabled = true;
+                game.touch.editing = true;
+                float[] t = game.touch.toolCenter("Add button");
+                game.touch.touchDown(0, t[0], t[1]);
+                game.touch.touchUp(0, t[0], t[1]);
+                break;
+            }
             case "touch": // behave like a phone
                 game.touch.enabled = true;
                 game.ui().touchDevice = true;
