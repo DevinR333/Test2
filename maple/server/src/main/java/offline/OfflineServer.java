@@ -25,6 +25,23 @@ public final class OfflineServer {
         return Server.getInstance().isOnline();
     }
 
+    /** Puts OfflineOptions' rates into effect now (characters in game get them at once). */
+    public static void applyRates() {
+        for (config.WorldConfig w : YamlConfig.config.worlds) {
+            w.exp_rate = OfflineOptions.expRate;
+            w.meso_rate = OfflineOptions.mesoRate;
+            w.drop_rate = OfflineOptions.dropRate;
+            w.boss_drop_rate = OfflineOptions.dropRate;
+        }
+        if (!isOnline()) return;
+        for (net.server.world.World w : Server.getInstance().getWorlds()) {
+            w.setExpRate(OfflineOptions.expRate);
+            w.setMesoRate(OfflineOptions.mesoRate);
+            w.setDropRate(OfflineOptions.dropRate);
+            w.setBossDropRate(OfflineOptions.dropRate);
+        }
+    }
+
     public static Throwable failure() {
         return failure;
     }
@@ -38,6 +55,12 @@ public final class OfflineServer {
         if (scripts != null) AbstractScriptManager.loader = scripts;
         Server.exitOnShutdown = false;
         YamlConfig.config.server.SHUTDOWNHOOK = false;
+        for (config.WorldConfig w : YamlConfig.config.worlds) {
+            w.exp_rate = OfflineOptions.expRate;
+            w.meso_rate = OfflineOptions.mesoRate;
+            w.drop_rate = OfflineOptions.dropRate;
+            w.boss_drop_rate = OfflineOptions.dropRate;
+        }
         thread = new Thread(() -> {
             try {
                 Server.getInstance().init();

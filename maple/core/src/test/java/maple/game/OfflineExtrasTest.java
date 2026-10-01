@@ -255,6 +255,22 @@ public class OfflineExtrasTest {
         enterMap(warp[0]);
     }
 
+    @Test(timeout = 60000)
+    public void ratesChangeWhilePlaying() {
+        client.Character chr = server();
+        assertEquals("default EXP", 3, chr.getExpRate());
+        offline.OfflineOptions.expRate = 10;
+        offline.OfflineOptions.mesoRate = 2;
+        OfflineServer.applyRates();
+        assertEquals(10, chr.getExpRate());
+        assertEquals(2, chr.getMesoRate());
+        offline.OfflineOptions.expRate = 3;
+        offline.OfflineOptions.mesoRate = 5;
+        OfflineServer.applyRates();
+        assertEquals(3, chr.getExpRate());
+        assertEquals(5, chr.getMesoRate());
+    }
+
     @Test(timeout = 120000)
     public void holidaysAllYear() throws Exception {
         // turkeys roam The Forest of Wisdom, sharing the Slimes' drops

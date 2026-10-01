@@ -207,6 +207,12 @@ public class MapleGame extends ApplicationAdapter {
         return prefs.getBoolean("opt." + key, def);
     }
 
+    /** EXP / meso / drop rate (defaults: 3x EXP, 5x meso, 1x drops). */
+    private int rate(String key) {
+        int def = key.equals("exp") ? 3 : key.equals("meso") ? 5 : 1;
+        return prefs == null ? def : Math.max(1, prefs.getInteger("rate." + key, def));
+    }
+
     private void applyOptions() {
         LoginScreen.allStyles = option("allStyles");
         offline.OfflineOptions.allStyles = option("allStyles");
@@ -215,6 +221,10 @@ public class MapleGame extends ApplicationAdapter {
         offline.OfflineOptions.permanentCash = option("permanentCash");
         offline.OfflineOptions.limitedCash = option("limitedCash");
         offline.OfflineOptions.holidays = option("holidays");
+        offline.OfflineOptions.expRate = rate("exp");
+        offline.OfflineOptions.mesoRate = rate("meso");
+        offline.OfflineOptions.dropRate = rate("drop");
+        OfflineServer.applyRates();
         bgm.volume = option("music") ? 0.6f : 0f;
         bgm.applyVolume();
         UiSounds.volume = option("sound") ? 0.7f : 0f;
@@ -1141,6 +1151,17 @@ public class MapleGame extends ApplicationAdapter {
         @Override
         public boolean option(String key) {
             return MapleGame.this.option(key);
+        }
+
+        @Override
+        public int rate(String key) {
+            return MapleGame.this.rate(key);
+        }
+
+        @Override
+        public void setRate(String key, int value) {
+            prefs.putInteger("rate." + key, value).flush();
+            applyOptions();
         }
 
         @Override

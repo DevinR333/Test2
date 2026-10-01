@@ -24,6 +24,8 @@ public final class SettingsWindow extends Window {
         void setAspect(Ui.Aspect a);
         boolean option(String key);
         void setOption(String key, boolean on);
+        int rate(String key);
+        void setRate(String key, int value);
         void editTouch();
         void exportSave();
         void importSave();
@@ -33,6 +35,18 @@ public final class SettingsWindow extends Window {
     private final Host host;
     private final List<Object[]> rows = new ArrayList<>(); // label, kind ("aspect"/"opt"/"action"/"header"), value
     private static final int ROW = 18, TOP = 30;
+    /** Rate steps for the - / + buttons. */
+    private static final int[] RATES = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100};
+    private static final int MINUS_X = 150, PLUS_X = 226, STEP_W = 22; // the - and + boxes
+
+    static int step(int rate, int dir) {
+        if (dir > 0) {
+            for (int r : RATES) if (r > rate) return r;
+            return RATES[RATES.length - 1];
+        }
+        for (int i = RATES.length - 1; i >= 0; i--) if (RATES[i] < rate) return RATES[i];
+        return RATES[0];
+    }
 
     public SettingsWindow(Ui ui, Host host) {
         super(ui, "SysOpt", null);
@@ -44,6 +58,10 @@ public final class SettingsWindow extends Window {
         rows.add(new Object[]{"Sound", "header", null});
         rows.add(new Object[]{"Background music", "opt", "music"});
         rows.add(new Object[]{"Sound effects", "opt", "sound"});
+        rows.add(new Object[]{"Rates (change any time)", "header", null});
+        rows.add(new Object[]{"EXP", "rate", "exp"});
+        rows.add(new Object[]{"Meso", "rate", "meso"});
+        rows.add(new Object[]{"Drops", "rate", "drop"});
         rows.add(new Object[]{"Controls", "header", null});
         rows.add(new Object[]{"Show touch controls", "opt", "touch"});
         rows.add(new Object[]{"Edit touch controls...", "action", (Runnable) () -> {
@@ -90,6 +108,14 @@ public final class SettingsWindow extends Window {
                 g.text((String) r[0], 16, ry + 2, 240, Align.left, false, 12, true, 0xFF3060A0);
                 continue;
             }
+            if (kind.equals("rate")) {
+                int v = host.rate((String) r[2]);
+                g.text((String) r[0] + " rate", 32, ry + 2, 110, Align.left, false, 12, false, 0xFF000000);
+                stepBox(g, MINUS_X, ry + 1, "-", v > RATES[0]);
+                g.text(v + "x", MINUS_X + STEP_W, ry + 2, PLUS_X - MINUS_X - STEP_W, Align.center, false, 12, true, 0xFF000000);
+                stepBox(g, PLUS_X, ry + 1, "+", v < RATES[RATES.length - 1]);
+                continue;
+            }
             if (kind.equals("action")) {
                 g.text((String) r[0], 32, ry + 2, 220, Align.left, false, 12, false, 0xFF0000C0);
                 continue;
@@ -103,6 +129,12 @@ public final class SettingsWindow extends Window {
             }
             g.text((String) r[0], 36, ry + 2, 220, Align.left, false, 12, false, 0xFF000000);
         }
+    }
+
+    private void stepBox(UiDraw g, float bx, float by, String label, boolean enabled) {
+        g.fill(bx, by, STEP_W, ROW - 2, enabled ? 0xFFE8EEF8 : 0xFFD8D8D8);
+        g.outline(bx, by, STEP_W, ROW - 2, 0xFF7088A8);
+        g.text(label, bx, by + 1, STEP_W, Align.center, false, 13, true, enabled ? 0xFF203050 : 0xFF909090);
     }
 
     @Override
@@ -119,6 +151,13 @@ public final class SettingsWindow extends Window {
             case "opt":
                 host.setOption((String) r[2], !host.option((String) r[2]));
                 break;
+            case "rate": {
+                // generous tap areas: the left half of the value steps down, the right half up
+                int dir = lx >= MINUS_X - 8 && lx < MINUS_X + STEP_W + 18 ? -1 : lx >= PLUS_X - 18 && lx < PLUS_X + STEP_W + 8 ? 1 : 0;
+                if (dir == 0) return false;
+                host.setRate((String) r[2], step(host.rate((String) r[2]), dir));
+                break;
+            }
             case "action":
                 ((Runnable) r[2]).run();
                 break;

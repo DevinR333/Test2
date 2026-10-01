@@ -14,6 +14,8 @@ public final class OfflineOptions {
     public static volatile boolean limitedCash = true;
     /** Holiday events all year: dated event quests stay open and holiday monsters roam (map changes need a restart). */
     public static volatile boolean holidays = true;
+    /** World rates, changeable while playing (OfflineServer.applyRates). */
+    public static volatile int expRate = 3, mesoRate = 5, dropRate = 1;
 
     private OfflineOptions() {}
 }
