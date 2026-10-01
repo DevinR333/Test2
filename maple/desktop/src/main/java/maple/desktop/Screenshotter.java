@@ -145,6 +145,9 @@ final class Screenshotter {
                 else chr.getStorage().sendStorage(chr.getClient(), 1012009);
                 break;
             }
+            case "closeall":
+                invoke(game, "closeAllWindows", null);
+                break;
             case "appswitch": // what Android does when you leave the app and come back
                 game.pause();
                 game.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
