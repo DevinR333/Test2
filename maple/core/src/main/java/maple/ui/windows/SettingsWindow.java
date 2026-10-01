@@ -75,6 +75,7 @@ public final class SettingsWindow extends Window {
         rows.add(new Object[]{"Cash items never expire", "opt", "permanentCash"});
         rows.add(new Object[]{"Seasonal and limited Cash Shop items", "opt", "limitedCash"});
         rows.add(new Object[]{"Holiday events all year (restart)", "opt", "holidays"});
+        rows.add(new Object[]{"Pets loot without Meso Magnet/Item Pouch", "opt", "petLoot"});
         rows.add(new Object[]{"Save data", "header", null});
         rows.add(new Object[]{"Export save...", "action", (Runnable) host::exportSave});
         rows.add(new Object[]{"Import save...", "action", (Runnable) host::importSave});

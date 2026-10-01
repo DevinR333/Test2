@@ -203,7 +203,7 @@ public class MapleGame extends ApplicationAdapter {
     }
 
     private boolean option(String key) {
-        boolean def = key.equals("music") || key.equals("sound") || key.equals("freeCashShop") || key.equals("permanentCash") || key.equals("limitedCash") || key.equals("holidays") || key.equals("touch") && Gdx.app.getType() == com.badlogic.gdx.Application.ApplicationType.Android;
+        boolean def = key.equals("music") || key.equals("sound") || key.equals("freeCashShop") || key.equals("permanentCash") || key.equals("limitedCash") || key.equals("holidays") || key.equals("petLoot") || key.equals("touch") && Gdx.app.getType() == com.badlogic.gdx.Application.ApplicationType.Android;
         return prefs.getBoolean("opt." + key, def);
     }
 
@@ -221,6 +221,7 @@ public class MapleGame extends ApplicationAdapter {
         offline.OfflineOptions.permanentCash = option("permanentCash");
         offline.OfflineOptions.limitedCash = option("limitedCash");
         offline.OfflineOptions.holidays = option("holidays");
+        offline.OfflineOptions.petLoot = option("petLoot");
         offline.OfflineOptions.expRate = rate("exp");
         offline.OfflineOptions.mesoRate = rate("meso");
         offline.OfflineOptions.dropRate = rate("drop");

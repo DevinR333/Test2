@@ -441,7 +441,12 @@ public final class World {
         if (d == null) return;
         if (anim >= 2) {
             int chr = r.readInt();
-            d.expire(2, chr == data().stats.id ? player.phys : null);
+            maple.map.PhysicsObject to = chr == data().stats.id ? player.phys : null;
+            if (anim == 5 && r.available() >= 1) { // a pet picked it up: it flies to the pet
+                int slot = r.readUByte();
+                if (to != null && slot < 3 && pets[slot] != null) to = pets[slot].phys;
+            }
+            d.expire(2, to);
             if (chr == data().stats.id) UiSounds.game("PickUpItem");
         } else {
             d.expire(anim, null);
@@ -909,6 +914,7 @@ public final class World {
                         (int) player.phys.x, (int) player.phys.y - 5);
             }
             pets[i].update(field, player.phys.x, player.phys.y, player.facingRight, timeMs);
+            petLoot(pets[i]);
         }
         for (Iterator<Drop> it = drops.values().iterator(); it.hasNext(); ) {
             Drop d = it.next();
@@ -2304,6 +2310,21 @@ public final class World {
             pets[slot] = null;
         }
         events.refresh();
+    }
+
+    /** PET_LOOT: the pet touches a drop (the server decides whether it may take it). */
+    private void petLoot(Pet p) {
+        if (data() == null || player.dead) return;
+        for (Drop d : drops.values()) {
+            if (!d.inReach(p.phys.x, p.phys.y) || timeMs - d.pickupRequested < 500) continue;
+            d.pickupRequested = timeMs;
+            PacketWriter w = new PacketWriter(RecvOpcode.PET_LOOT.getValue());
+            w.writeInt((int) p.uniqueId);
+            w.writeBytes(new byte[13]);
+            w.writeInt(d.oid);
+            client.send(w);
+            return; // one at a time
+        }
     }
 
     /** SPAWN_PET request: summon or put away the pet in a Cash inventory slot. */

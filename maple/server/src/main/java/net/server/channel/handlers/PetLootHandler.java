@@ -54,7 +54,7 @@ public final class PetLootHandler extends AbstractPacketHandler {
         try {
             MapItem mapitem = (MapItem) ob;
             if (mapitem.getMeso() > 0) {
-                if (!chr.isEquippedMesoMagnet()) {
+                if (!chr.isEquippedMesoMagnet() && !offline.OfflineOptions.petLoot) {
                     c.sendPacket(PacketCreator.enableActions());
                     return;
                 }
@@ -67,7 +67,7 @@ public final class PetLootHandler extends AbstractPacketHandler {
                     }
                 }
             } else {
-                if (!chr.isEquippedItemPouch()) {
+                if (!chr.isEquippedItemPouch() && !offline.OfflineOptions.petLoot) {
                     c.sendPacket(PacketCreator.enableActions());
                     return;
                 }

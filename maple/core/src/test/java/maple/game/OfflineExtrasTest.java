@@ -373,6 +373,17 @@ public class OfflineExtrasTest {
         // it stays with its owner
         for (int i = 0; i < 300; i++) step();
         assertTrue("pet near its owner", Math.abs(world.pets[0].phys.x - player.phys.x) < 200);
+        // it loots mesos and items it touches (no Meso Magnet / Item Pouch needed with the offline option)
+        int mesoBefore = chr.getMeso();
+        compat.awt.Point at = new compat.awt.Point((int) world.pets[0].phys.x, (int) world.pets[0].phys.y - 10);
+        chr.getMap().spawnMesoDrop(77, at, chr, chr, false, (byte) 2, (short) 0);
+        stepUntil(() -> chr.getMeso() == mesoBefore + 77, 8000);
+        assertEquals("pet looted the mesos", mesoBefore + 77, chr.getMeso());
+        int potions = chr.getInventory(client.inventory.InventoryType.USE).countById(2000000);
+        chr.getMap().spawnItemDrop(chr, chr, new client.inventory.Item(2000000, (short) 0, (short) 3),
+                new compat.awt.Point((int) world.pets[0].phys.x, (int) world.pets[0].phys.y - 10), (byte) 2, false);
+        stepUntil(() -> chr.getInventory(client.inventory.InventoryType.USE).countById(2000000) == potions + 3, 8000);
+        assertEquals("pet looted the item", potions + 3, chr.getInventory(client.inventory.InventoryType.USE).countById(2000000));
         // and is put away again
         world.spawnPet(pet.position);
         stepUntil(() -> world.pets[0] == null, 5000);
