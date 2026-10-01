@@ -33,6 +33,7 @@ public final class CashShopScreen extends Widget implements Ui.Refreshable {
     private static final class Offer {
         int sn, itemId, count, price, period, priority, gender;
         int category, sub;
+        boolean limited; // retired (seasonal, limited): offered while the option is on
     }
 
     private static List<Offer> offers;
@@ -92,8 +93,14 @@ public final class CashShopScreen extends Widget implements Ui.Refreshable {
     private static synchronized void loadCatalog(maple.wz.Wz wz) {
         if (offers != null) return;
         offers = new ArrayList<>();
+        List<int[]> entries = new ArrayList<>();
         for (WzNode n : wz.get("Etc/Commodity.img").children()) {
-            if (n.getInt("OnSale", 0) == 0) continue;
+            entries.add(new int[]{n.getInt("SN", 0), n.getInt("ItemId", 0), n.getInt("OnSale", 0)});
+        }
+        java.util.Set<Integer> limited = offline.OfflineItems.limitedOffers(entries);
+        for (WzNode n : wz.get("Etc/Commodity.img").children()) {
+            boolean retired = n.getInt("OnSale", 0) == 0;
+            if (retired && !limited.contains(n.getInt("SN", 0))) continue;
             Offer o = new Offer();
             o.sn = n.getInt("SN", 0);
             o.itemId = n.getInt("ItemId", 0);
@@ -104,7 +111,8 @@ public final class CashShopScreen extends Widget implements Ui.Refreshable {
             o.gender = n.getInt("Gender", 2);
             o.category = o.sn / 10000000;
             o.sub = (o.sn / 100000) % 100;
-            if (o.itemId != 0) offers.add(o);
+            o.limited = retired;
+            if (o.itemId != 0 && (!retired || ItemInfo.named(o.itemId))) offers.add(o);
         }
         offers.sort((a, b) -> a.priority != b.priority ? Integer.compare(b.priority, a.priority) : Integer.compare(a.sn, b.sn));
         for (WzNode n : wz.get("Etc/Category.img").children()) {
@@ -128,6 +136,7 @@ public final class CashShopScreen extends Widget implements Ui.Refreshable {
         java.util.Set<Integer> wish = new java.util.HashSet<>();
         for (int sn : world.cash.wishlist) if (sn != 0) wish.add(sn);
         for (Offer o : offers) {
+            if (o.limited && !offline.OfflineOptions.limitedCash) continue;
             if (!q.isEmpty()) {
                 if (ItemInfo.get(o.itemId).name.toLowerCase(Locale.ROOT).contains(q)) out.add(o);
                 continue;

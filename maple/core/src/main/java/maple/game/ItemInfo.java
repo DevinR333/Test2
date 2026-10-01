@@ -90,6 +90,11 @@ public final class ItemInfo {
         }
     }
 
+    /** The item has a name in String.wz (cheap: does not read the item itself). */
+    public static boolean named(int id) {
+        return !stringNode(id).getString("name", "").isEmpty();
+    }
+
     private static WzNode stringNode(int id) {
         String s = Integer.toString(id);
         switch (id / 1000000) {

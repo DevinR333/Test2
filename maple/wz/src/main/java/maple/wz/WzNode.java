@@ -29,7 +29,8 @@ public class WzNode {
     int offset;
     int length;
     int width, height, format;
-    boolean parsed = true;
+    volatile boolean parsed = true;
+    private Thread patching;
 
     WzNode(WzNode parent, String name, Type type) {
         this.parent = parent;
@@ -44,11 +45,48 @@ public class WzNode {
         children.put(child.name, child);
     }
 
+    // ---- building (for WzPatches) ----
+
+    /** Adds a sub-property (replacing one of the same name) and returns it. */
+    public WzNode addProp(String name) {
+        WzNode n = new WzNode(this, name, Type.PROP);
+        n.file = file;
+        add(n);
+        return n;
+    }
+
+    public WzNode addInt(String name, long value) {
+        WzNode n = new WzNode(this, name, Type.INT);
+        n.lvalue = value;
+        add(n);
+        return this;
+    }
+
+    public WzNode addString(String name, String value) {
+        WzNode n = new WzNode(this, name, Type.STRING);
+        n.svalue = value;
+        add(n);
+        return this;
+    }
+
+    /** Puts an existing node (e.g. another item's icon) here as well, under its own name. */
+    public WzNode addExisting(WzNode node) {
+        if (node != null && node != MISSING) add(node);
+        return this;
+    }
+
     private void ensureParsed() {
         if (!parsed) {
             synchronized (this) {
                 if (!parsed) {
+                    if (patching == Thread.currentThread()) return; // a patch reading its own image
                     file.parseImage(this);
+                    patching = Thread.currentThread();
+                    try {
+                        WzPatches.apply(this);
+                    } finally {
+                        patching = null;
+                    }
                     parsed = true;
                 }
             }

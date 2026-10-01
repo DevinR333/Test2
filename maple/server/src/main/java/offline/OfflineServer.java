@@ -31,6 +31,7 @@ public final class OfflineServer {
 
     /** Starts the server in the background. Safe to call more than once. */
     public static synchronized void start(Wz wz, File saveDir, AbstractScriptManager.ScriptLoader scripts) {
+        OfflineItems.install();
         if (thread != null) return;
         if (wz != null) DataProviderFactory.wz = wz;
         DatabaseConnection.saveDir = saveDir;

@@ -161,7 +161,7 @@ public class CashShop {
         }
 
         public boolean isOnSale() {
-            return onSale;
+            return onSale || offline.OfflineOptions.limitedCash && CashItemFactory.limited.contains(sn);
         }
 
         public Item toItem() {
@@ -196,7 +196,7 @@ public class CashShop {
                             item.setExpiration(Server.getInstance().getCurrentTime() + DAYS.toMillis(1));
                             break;
                     }
-                } else {
+                } else if (period > 0) { // 0: permanent
                     item.setExpiration(Server.getInstance().getCurrentTime() + DAYS.toMillis(period));
                 }
             }
@@ -232,6 +232,8 @@ public class CashShop {
 
     public static class CashItemFactory {
         private static volatile Map<Integer, CashItem> items = new HashMap<>();
+        /** Retired (seasonal, limited) entries offered while OfflineOptions.limitedCash is on. */
+        static volatile java.util.Set<Integer> limited = java.util.Collections.emptySet();
         private static volatile Map<Integer, List<Integer>> packages = new HashMap<>();
         private static volatile List<SpecialCashItem> specialcashitems = new ArrayList<>();
 
@@ -239,6 +241,7 @@ public class CashShop {
             DataProvider etc = DataProviderFactory.getDataProvider(WZFiles.ETC);
 
             Map<Integer, CashItem> loadedItems = new HashMap<>();
+            List<int[]> entries = new ArrayList<>();
             for (Data item : etc.getData("Commodity.img").getChildren()) {
                 int sn = DataTool.getIntConvert("SN", item);
                 int itemId = DataTool.getIntConvert("ItemId", item);
@@ -247,7 +250,9 @@ public class CashShop {
                 short count = (short) DataTool.getIntConvert("Count", item, 1);
                 boolean onSale = DataTool.getIntConvert("OnSale", item, 0) == 1;
                 loadedItems.put(sn, new CashItem(sn, itemId, price, period, count, onSale));
+                entries.add(new int[]{sn, itemId, onSale ? 1 : 0});
             }
+            CashItemFactory.limited = offline.OfflineItems.limitedOffers(entries);
             CashItemFactory.items = loadedItems;
 
             Map<Integer, List<Integer>> loadedPackages = new HashMap<>();

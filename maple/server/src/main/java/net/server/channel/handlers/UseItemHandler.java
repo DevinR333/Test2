@@ -53,7 +53,15 @@ public final class UseItemHandler extends AbstractPacketHandler {
         int itemId = p.readInt();
         Item toUse = chr.getInventory(InventoryType.USE).getItem(slot);
         if (toUse != null && toUse.getQuantity() > 0 && toUse.getItemId() == itemId) {
-            if (itemId == ItemId.ALL_CURE_POTION) {
+            if (itemId == offline.OfflineItems.LEVEL_POTION) {
+                if (chr.getLevel() < chr.getMaxLevel()) {
+                    remove(c, slot);
+                    chr.levelUp(false);
+                } else {
+                    c.sendPacket(PacketCreator.enableActions());
+                }
+                return;
+            } else if (itemId == ItemId.ALL_CURE_POTION) {
                 chr.dispelDebuffs();
                 remove(c, slot);
                 return;

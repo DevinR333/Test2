@@ -94,7 +94,7 @@ public class Shop {
             return;
         }
         ItemInformationProvider ii = ItemInformationProvider.getInstance();
-        if (item.getPrice() > 0) {
+        if (item.getPrice() > 0 || itemId == offline.OfflineItems.LEVEL_POTION) { // offline: the potion is free
             int amount = (int) Math.min((float) item.getPrice() * quantity, Integer.MAX_VALUE);
             if (c.getPlayer().getMeso() >= amount) {
                 if (InventoryManipulator.checkSpace(c, itemId, quantity, "")) {
@@ -281,6 +281,7 @@ public class Shop {
                             ret.addItem(new ShopItem((short) 1000, rs.getInt("itemid"), rs.getInt("price"), rs.getInt("pitch")));
                         }
                     }
+                    ret.addItem(new ShopItem((short) 1000, offline.OfflineItems.LEVEL_POTION, 0, 0)); // offline: in every shop
                     for (Integer recharge : recharges) {
                         ret.addItem(new ShopItem((short) 1000, recharge, 0, 0));
                     }

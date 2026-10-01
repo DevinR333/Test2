@@ -10,6 +10,8 @@ public final class OfflineOptions {
     public static volatile boolean freeCashShop = true;
     /** Cash items (rentals, pets) never expire. */
     public static volatile boolean permanentCash = true;
+    /** The Cash Shop also sells its retired seasonal and limited items. */
+    public static volatile boolean limitedCash = true;
 
     private OfflineOptions() {}
 }
