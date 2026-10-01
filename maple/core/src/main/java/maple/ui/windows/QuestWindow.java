@@ -72,6 +72,7 @@ public final class QuestWindow extends Window {
         PlayerData d = world.data();
         WzNode qi = info(world, id);
         if (qi.getInt("blocked", 0) != 0) return false;
+        if (maple.game.QuestBook.korean(qi.getString("name", ""))) return false;
         WzNode c = world.wz.get("Quest/Check.img/" + id + "/0");
         if (!c.exists()) return false;
         if (c.getInt("npc", 0) == 0) return false;

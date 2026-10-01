@@ -528,6 +528,11 @@ public class MapleGame extends ApplicationAdapter {
         ChatBar old = chatBar;
         chatBar = new ChatBar(ui, this::sendChat);
         if (old != null) chatBar.copyLog(old);
+        // wider screens: the 800-wide bottom HUD sits in the middle (the bar extends to both edges)
+        float side = (Ui.W - 800) / 2f;
+        statusBar.x = side;
+        quickSlots.x += side;
+        chatBar.x += side;
         ui.hud.add(statusBar);
         ui.hud.add(quickSlots);
         ui.hud.add(chatBar);
@@ -651,7 +656,7 @@ public class MapleGame extends ApplicationAdapter {
             ui.close(w);
             return;
         }
-        ui.open(new MenuWindow(ui, name, entries, x + (Ui.W - 800), y, this::openWindow));
+        ui.open(new MenuWindow(ui, name, entries, x + (Ui.W - 800) / 2f, y, this::openWindow));
     }
 
     private void closeAllWindows() {

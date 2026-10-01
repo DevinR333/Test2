@@ -56,10 +56,20 @@ public final class QuestBook {
         return 0;
     }
 
+    /** Korean-only quests left in the v83 data never ran in GMS (and the font has no Korean). */
+    public static boolean korean(String s) {
+        for (int i = 0; i < s.length(); i++) {
+            char c = s.charAt(i);
+            if (c >= 0x1100 && c <= 0x11FF || c >= 0x3130 && c <= 0x318F || c >= 0xAC00 && c <= 0xD7A3) return true;
+        }
+        return false;
+    }
+
     /** The start conditions hold (00a2a0be): level, job, earlier quests, dates, items. */
     public boolean canStart(int id) {
         PlayerData d = world.data();
         if (d == null || state(id) != 0) return false;
+        if (korean(name(id))) return false;
         WzNode qi = world.wz.get("Quest/QuestInfo.img/" + id);
         if (qi.getInt("blocked", 0) != 0) return false;
         WzNode c = check(id, 0);

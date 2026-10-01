@@ -128,8 +128,10 @@ public final class FootholdTree {
         switch (p.mode) {
             case NORMAL:
                 moveNormal(p);
-                limitMovement(p);
-                break;
+                limitHorizontal(p);
+                if (p.onGround && p.vspeed >= 0 && p.fhid != 0 && !get(p.fhid).isWall()) groundStep(p);
+                else airStep(p);
+                return; // position already applied
             case FLYING:
                 moveFlying(p);
                 limitMovement(p);
@@ -147,13 +149,21 @@ public final class FootholdTree {
         int d = p.walkDir;
         double max = Physics.walkSpeed * p.speedMul;
         if (p.onGround) {
+            // v83 ground branch (009b23f2): on a slope the walk force and the speed limit change with
+            // the slope's steepness (ty = vertical part of the slope's direction); downhill is faster.
+            double slope = p.fhid != 0 ? get(p.fhid).slope() : 0;
+            double ty = slope / Math.sqrt(1 + slope * slope), sq = ty * ty;
+            int uphill = ty > 0 ? -1 : ty < 0 ? 1 : 0;
+            double force = Physics.walkForce * (ty < 0 ? 1 - sq : 1 + sq);
+            double limit = d != 0 && d * uphill > 0 ? max : max * (1 + sq);
+            double brakeLimit = uphill * p.hspeed > 0 ? max : max * (1 + sq);
+            if (Math.abs(p.hspeed) > brakeLimit) p.hspeed = toward(p.hspeed, Math.signum(p.hspeed) * brakeLimit, Physics.walkDrag);
             if (d != 0) {
-                double acc = Physics.walkForce;
+                double acc = force;
                 if (p.hspeed * d < 0) acc += Physics.walkDrag;
-                p.hspeed += d * acc;
-                if (p.hspeed * d > max) p.hspeed = d * max;
+                if (p.hspeed * d < limit) p.hspeed = d * Math.min(limit, p.hspeed * d + acc);
             } else {
-                p.hspeed = toward(p.hspeed, 0, Physics.walkDrag);
+                p.hspeed = toward(p.hspeed, 0, Physics.walkDrag); // standing: no sliding on walkable slopes
             }
             if (p.jumpRequest) {
                 p.vspeed = -Physics.jumpSpeed * p.jumpMul;
@@ -192,6 +202,127 @@ public final class FootholdTree {
         p.vspeed += p.vacc;
         if (Math.abs(p.hspeed) < 0.001) p.hspeed = 0;
         if (Math.abs(p.vspeed) < 0.001) p.vspeed = 0;
+    }
+
+    /** Walls (and, for monsters that turn, platform edges) stop horizontal movement. */
+    private void limitHorizontal(PhysicsObject p) {
+        if (!p.hmobile()) return;
+        double cx = p.x, nx = p.nextX();
+        boolean left = p.hspeed < 0;
+        double wall = wall(p.fhid, left, p.y);
+        boolean collision = left ? cx >= wall && nx <= wall : cx <= wall && nx >= wall;
+        if (!collision && (p.flags & PhysicsObject.TURN_AT_EDGES) != 0) {
+            wall = edge(p.fhid, left);
+            collision = left ? cx >= wall && nx <= wall : cx <= wall && nx >= wall;
+        }
+        if (collision) {
+            p.limitX(wall);
+            p.flags &= ~PhysicsObject.TURN_AT_EDGES;
+        }
+    }
+
+    /** The segment joined to fh at its right (or left) end point, or null. */
+    private Foothold neighbour(Foothold fh, boolean right) {
+        int ex = right ? fh.r() : fh.l();
+        int ey = (fh.x1 == ex) ? fh.y1 : fh.y2;
+        for (int id : new int[]{fh.next, fh.prev}) {
+            if (id == 0) continue;
+            Foothold n = get(id);
+            if ((n.x1 == ex && n.y1 == ey) || (n.x2 == ex && n.y2 == ey)) return n;
+        }
+        return null;
+    }
+
+    /**
+     * Walking (v83 ground movement): the object stays on the platform's line. Past a segment's end it
+     * continues on the joined segment, stops at a wall that rises, or steps off a real edge.
+     */
+    private void groundStep(PhysicsObject p) {
+        Foothold fh = get(p.fhid);
+        double nx = p.x + p.hspeed;
+        for (int i = 0; i < 16; i++) {
+            boolean right = nx > fh.r();
+            if (!right && nx >= fh.l()) break;
+            double ex = right ? fh.r() : fh.l();
+            Foothold n = neighbour(fh, right);
+            if (n != null && !n.isWall()) {
+                fh = n;
+                continue;
+            }
+            if (n != null && n.t() < fh.groundBelow(ex) - 0.5) { // a wall going up: stop at it
+                nx = ex;
+                p.hspeed = 0;
+                break;
+            }
+            // a real edge: step off into the air
+            p.x = nx;
+            p.y = fh.groundBelow(ex);
+            p.onGround = false;
+            p.vspeed = 0;
+            p.fhid = fhBelow(p.x, p.y + 1);
+            if (p.fhid == 0) p.fhid = fh.id;
+            return;
+        }
+        land(p, fh, nx);
+    }
+
+    /** Standing on fh at x: position, slope, layer and what is below (for dropping down). */
+    private void land(PhysicsObject p, Foothold fh, double x) {
+        double ground = fh.groundBelow(x);
+        p.x = x;
+        p.y = ground;
+        p.vspeed = 0;
+        p.onGround = true;
+        p.fhid = fh.id;
+        p.fhslope = fh.slope();
+        p.fhlayer = fh.layer;
+        int below = fhBelow(x, ground + 1.0);
+        if (below > 0) {
+            p.enableJumpDown = get(below).groundBelow(x) - ground < 600.0;
+            p.groundBelow = ground + 1.0;
+        } else {
+            p.enableJumpDown = false;
+        }
+        p.flags &= ~PhysicsObject.CHECK_BELOW;
+    }
+
+    /**
+     * Falling or jumping: rising passes through platforms (as in v83); falling lands on the first
+     * platform the path crosses, whichever one it is (so fast falls cannot skip through).
+     */
+    private void airStep(PhysicsObject p) {
+        double x0 = p.x, y0 = p.y, nx = p.nextX(), ny = p.nextY();
+        if (p.vspeed > 0) {
+            Foothold best = null;
+            double bestT = 2, bestX = 0;
+            int c0 = Math.floorDiv((int) Math.floor(Math.min(x0, nx)), COLUMN), c1 = Math.floorDiv((int) Math.floor(Math.max(x0, nx)), COLUMN);
+            for (int c = c0; c <= c1; c++) {
+                List<Foothold> col = byColumn.get(c);
+                if (col == null) continue;
+                for (Foothold fh : col) {
+                    if (fh.isWall()) continue;
+                    double f0 = y0 - fh.groundBelow(x0), f1 = ny - fh.groundBelow(nx);
+                    if (f0 > 0.5 || f1 < 0) continue; // must start on/above it and end below it
+                    double t = f0 >= 0 ? 0 : f0 / (f0 - f1);
+                    double cx = x0 + t * (nx - x0);
+                    if (cx < fh.l() || cx > fh.r() || t >= bestT) continue;
+                    bestT = t;
+                    best = fh;
+                    bestX = cx;
+                }
+            }
+            if (best != null) {
+                land(p, best, bestX);
+                return;
+            }
+        }
+        p.x = nx;
+        p.y = ny;
+        p.onGround = false;
+        if (p.y < borderTop) p.limitY(borderTop);
+        else if (p.y > borderBottom) p.limitY(borderBottom);
+        int below = fhBelow(p.x, p.y);
+        if (below != 0) p.fhid = below;
     }
 
     private void limitMovement(PhysicsObject p) {
