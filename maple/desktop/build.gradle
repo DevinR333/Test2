@@ -26,6 +26,7 @@ tasks.named('run') {
     workingDir = rootProject.file('.')
     jvmArgs '-Xmx2g', '-XX:ErrorFile=' + rootProject.file('crash-report.log').absolutePath
     if (project.hasProperty('safe')) jvmArgs '-Dmaple.safe=true'
+    if (project.hasProperty('gl')) jvmArgs "-Dmaple.gl=${project.property('gl')}"
     if (System.getProperty('os.name').toLowerCase().contains('mac')) jvmArgs '-XstartOnFirstThread'
 }
 
