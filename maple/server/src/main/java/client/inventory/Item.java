@@ -165,6 +165,10 @@ public class Item implements Comparable<Item> {
     }
 
     public long getExpiration() {
+        if (expiration > -1 && expiration != Long.MAX_VALUE && offline.OfflineOptions.permanentCash
+                && ItemInformationProvider.getInstance().isCash(id)) {
+            return ItemConstants.isPet(id) ? Long.MAX_VALUE : -1; // offline option: cash items never expire
+        }
         return expiration;
     }
 

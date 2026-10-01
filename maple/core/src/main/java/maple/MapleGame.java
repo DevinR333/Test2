@@ -202,7 +202,7 @@ public class MapleGame extends ApplicationAdapter {
     }
 
     private boolean option(String key) {
-        boolean def = key.equals("music") || key.equals("sound") || key.equals("freeCashShop") || key.equals("touch") && Gdx.app.getType() == com.badlogic.gdx.Application.ApplicationType.Android;
+        boolean def = key.equals("music") || key.equals("sound") || key.equals("freeCashShop") || key.equals("permanentCash") || key.equals("touch") && Gdx.app.getType() == com.badlogic.gdx.Application.ApplicationType.Android;
         return prefs.getBoolean("opt." + key, def);
     }
 
@@ -211,6 +211,7 @@ public class MapleGame extends ApplicationAdapter {
         offline.OfflineOptions.allStyles = option("allStyles");
         offline.OfflineOptions.cashDrops = option("cashDrops");
         offline.OfflineOptions.freeCashShop = option("freeCashShop");
+        offline.OfflineOptions.permanentCash = option("permanentCash");
         bgm.volume = option("music") ? 0.6f : 0f;
         bgm.applyVolume();
         UiSounds.volume = option("sound") ? 0.7f : 0f;
