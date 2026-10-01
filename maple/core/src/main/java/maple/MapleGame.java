@@ -227,7 +227,12 @@ public class MapleGame extends ApplicationAdapter {
         cam.position.set(width / s / 2f - ui.offsetX / s, height / s / 2f - ui.offsetY / s, 0);
         cam.update();
         touch.layout(-ui.offsetX / s, -ui.offsetY / s, width / s, height / s);
-        if (statusBar != null) buildHud();
+        if (screen == Screen.CASH_SHOP) {
+            // the Cash Shop replaces the HUD: keep it (Android resizes on every return to the app)
+            if (cashScreen != null) cashScreen.x = (Ui.W - cashScreen.w) / 2f;
+        } else if (statusBar != null) {
+            buildHud();
+        }
     }
 
     // ------------------------------------------------------------------ frame

@@ -124,10 +124,17 @@ final class Screenshotter {
                     throw new RuntimeException(e);
                 }
                 break;
+            case "appswitch": // what Android does when you leave the app and come back
+                game.pause();
+                game.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                game.resume();
+                break;
             case "report": {
                 StringBuilder sb = new StringBuilder("REPORT windows=");
                 for (maple.ui.Window w : game.ui().windows()) sb.append(w.name).append(' ');
                 sb.append(" npcTalk=").append(game.world() != null && game.world().talk != null);
+                sb.append(" screen=").append(game.screen()).append(" hud=");
+                for (maple.ui.Widget w : game.ui().hud.children) sb.append(w.getClass().getSimpleName()).append(' ');
                 System.out.println(sb);
                 break;
             }
