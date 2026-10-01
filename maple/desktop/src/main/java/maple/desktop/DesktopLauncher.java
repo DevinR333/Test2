@@ -24,7 +24,9 @@ public final class DesktopLauncher {
         File dir = new File(args.length > 0 ? args[0] : "C:\\msclassicv83\\MapleStory");
         Lwjgl3ApplicationConfiguration cfg = new Lwjgl3ApplicationConfiguration();
         cfg.setTitle("MapleStory v83 Offline");
-        cfg.setWindowedMode(1280, 720);
+        String size = System.getProperty("maple.size", "1280x720");
+        String[] wh = size.split("x");
+        cfg.setWindowedMode(Integer.parseInt(wh[0]), Integer.parseInt(wh[1]));
         boolean safe = Boolean.getBoolean("maple.safe");
         cfg.useVsync(!safe);
         cfg.setForegroundFPS(60);

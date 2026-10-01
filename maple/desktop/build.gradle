@@ -13,6 +13,7 @@ dependencies {
     // ANGLE: OpenGL ES on top of DirectX, for Windows PCs without usable OpenGL (e.g. Remote Desktop).
     implementation "com.badlogicgames.gdx:gdx-lwjgl3-angle:$gdxVersion"
     implementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+    implementation "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
     implementation "com.badlogicgames.gdx:gdx-backend-headless:$gdxVersion"
 }
 

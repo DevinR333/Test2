@@ -77,8 +77,15 @@ public final class GameClient {
         state = State.FAILED;
     }
 
+    private int relogTries;
+    private long retryLoginAt;
+
     /** Process everything received since the last call. Call once per frame. */
     public void update() {
+        if (retryLoginAt != 0 && System.currentTimeMillis() >= retryLoginAt && login != null) {
+            retryLoginAt = 0;
+            sendLogin();
+        }
         if (login != null) {
             PacketReader r;
             while (login != null && (r = login.poll()) != null) handleLogin(r);
@@ -103,10 +110,17 @@ public final class GameClient {
                 login.send(new PacketWriter(RecvOpcode.ACCEPT_TOS.getValue()).writeByte(1));
                 return;
             }
+            if (reason == 7 && relogTries < 40) {
+                // still logged in from the character we just left: the server is saving it; try again
+                relogTries++;
+                retryLoginAt = System.currentTimeMillis() + 500;
+                return;
+            }
             if (reason != 0) {
                 fail("Login failed (code " + reason + ")");
                 return;
             }
+            relogTries = 0;
             r.readByte();
             r.readShort();
             accountId = r.readInt();
@@ -154,6 +168,8 @@ public final class GameClient {
                 state = State.CHARACTER_SELECT;
             } else if (status == 0) {
                 characters.removeIf(c -> c.stats.id == cid);
+            } else {
+                error = "This character cannot be deleted (" + status + ").";
             }
         } else if (r.opcode == SendOpcode.SERVER_IP.getValue()) {
             r.readShort();
@@ -233,6 +249,37 @@ public final class GameClient {
         state = State.ENTERING;
         login.send(new PacketWriter(RecvOpcode.CHAR_SELECT.getValue())
                 .writeInt(charId).writeString("0A-1B-2C-3D-4E-5F").writeString(HOST_STRING));
+    }
+
+    /**
+     * Tells the server the map finished loading (the v83 client sends this after every map change and
+     * on login). Until then the server refuses portals and NPC/mob actions.
+     */
+    public void mapLoaded() {
+        send(new PacketWriter(RecvOpcode.PLAYER_MAP_TRANSFER.getValue()));
+    }
+
+    /** Deletes a character (no PIC offline). The answer updates {@link #characters}. */
+    public void deleteCharacter(int charId) {
+        if (login != null) login.send(new PacketWriter(RecvOpcode.DELETE_CHAR.getValue()).writeString("").writeInt(charId));
+    }
+
+    /**
+     * Leaves the game and goes back to character select (the server saves the character when the
+     * connection closes), logging in again automatically.
+     */
+    public void logout() {
+        if (channel != null) {
+            channel.close();
+            channel = null;
+        }
+        player = null;
+        characters.clear();
+        steps.clear();
+        state = State.CONNECTING;
+        error = null;
+        relogTries = 0;
+        start();
     }
 
     /** Send a packet on the game channel. */

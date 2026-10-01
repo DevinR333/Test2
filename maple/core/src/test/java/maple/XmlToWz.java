@@ -33,6 +33,8 @@ public final class XmlToWz {
         }
     }
 
+    static void fillDir(File dir, Dir d) { fill(dir, d); }
+
     private static void fill(File dir, Dir d) {
         File[] kids = dir.listFiles();
         if (kids == null) return;

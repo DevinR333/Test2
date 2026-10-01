@@ -101,7 +101,7 @@ public class WzReaderTest {
                         (proxy, m, a) -> m.getReturnType() == int.class ? 1 : m.getReturnType() == boolean.class ? false : null);
                 com.badlogic.gdx.Gdx.gl = com.badlogic.gdx.Gdx.gl20 = gl;
                 try {
-                    out[0] = new Field(wz, 100000000);
+                    out[0] = new Field(wz, wz.get(Field.imgPath(100000000)), 100000000, true);
                 } catch (Throwable t) {
                     err[0] = t;
                 }

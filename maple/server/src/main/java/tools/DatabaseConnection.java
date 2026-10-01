@@ -65,7 +65,23 @@ public class DatabaseConnection {
         }
     }
 
-    /** Closes the database cleanly (used before exporting or importing a save). */
+    /** Writes a consistent copy of the whole save (a zip holding maple.mv.db) while the game runs. */
+    public static synchronized void backupTo(File zip) throws SQLException {
+        if (keepAlive == null) throw new SQLException("The save database is not open");
+        keepAlive.createStatement().execute("CHECKPOINT SYNC");
+        keepAlive.createStatement().execute("BACKUP TO '" + zip.getAbsolutePath().replace("'", "''") + "'");
+    }
+
+    /** Forces everything written so far onto disk (survives the app being killed). */
+    public static synchronized void checkpoint() {
+        if (keepAlive == null) return;
+        try {
+            keepAlive.createStatement().execute("CHECKPOINT SYNC");
+        } catch (SQLException ignored) {
+            // best effort
+        }
+    }
+
     public static synchronized void shutdown() {
         if (!ready) return;
         ready = false;

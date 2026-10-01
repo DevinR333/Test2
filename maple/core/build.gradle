@@ -15,13 +15,16 @@ dependencies {
     api project(':wz')
     api project(':server')
     api "com.badlogicgames.gdx:gdx:$gdxVersion"
+    api "com.badlogicgames.gdx:gdx-freetype:$gdxVersion"
     testImplementation 'junit:junit:4.13.2'
     testImplementation files(project(':server').sourceSets.test.output)
     testImplementation "com.badlogicgames.gdx:gdx-backend-headless:$gdxVersion"
     testImplementation "com.badlogicgames.gdx:gdx-platform:$gdxVersion:natives-desktop"
+    testImplementation "com.badlogicgames.gdx:gdx-freetype-platform:$gdxVersion:natives-desktop"
 }
 
 test {
+    forkEvery = 1 // each test class gets its own in-process server
     workingDir = project(':server').projectDir // server scripts live there
     maxHeapSize = '2g'
     systemProperty 'maple.idleTest', System.getProperty('maple.idleTest') ?: 'false'
@@ -45,3 +48,8 @@ tasks.register('buildStamp') {
 }
 sourceSets.main.resources.srcDir(buildStampDir)
 processResources.dependsOn 'buildStamp'
+
+// Test tools (DumpToWz, XmlToWz) need this classpath:  gradlew -q :core:printTestCp
+tasks.register('printTestCp') {
+    doLast { println sourceSets.test.runtimeClasspath.asPath }
+}

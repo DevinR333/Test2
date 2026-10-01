@@ -3,88 +3,129 @@ package maple.desktop;
 import com.badlogic.gdx.Gdx;
 import com.badlogic.gdx.graphics.Pixmap;
 import com.badlogic.gdx.graphics.PixmapIO;
-import com.badlogic.gdx.utils.ScreenUtils;
 import maple.MapleGame;
-import maple.ui.Controls;
+import maple.input.Pad;
+import maple.net.GameClient;
+
+import java.util.ArrayList;
+import java.util.List;
 
 /**
- * Testing aid: --screenshot=out.png [--map=ID] [--frames=N] [--hold=right|left|jump|up|down,...]
- * Runs the game for N frames with the given buttons held, saves a PNG and exits.
+ * Testing aid. --screenshot=out.png [--frames=N] [--play] [--do=FRAME:ACTION,...] [--shot=FRAME:file.png,...]
+ * --play creates a character if needed and enters the game. Actions: open:Item, key:SLOT, tap:X:Y (UI
+ * coords), hold:right|left|jump..., edit (touch editor), talk (nearest NPC).
  */
 final class Screenshotter {
     static void attach(MapleGame game, String[] args) {
         String out = "screenshot.png";
         int frames = 180;
         boolean play = false;
-        String hold = "";
-        String script = "";
+        List<String[]> actions = new ArrayList<>();
+        List<String[]> shots = new ArrayList<>();
         for (String a : args) {
             if (a.startsWith("--screenshot=")) out = a.substring(13);
             else if (a.startsWith("--frames=")) frames = Integer.parseInt(a.substring(9));
             else if (a.equals("--play")) play = true;
-            else if (a.startsWith("--hold=")) hold = a.substring(7);
-            else if (a.startsWith("--script=")) script = a.substring(9);
+            else if (a.startsWith("--do=")) for (String s : a.substring(5).split(",")) actions.add(s.split(":", 2));
+            else if (a.startsWith("--shot=")) for (String s : a.substring(7).split(",")) shots.add(s.split(":", 2));
         }
         final String file = out;
         final int total = frames;
         final boolean autoPlay = play;
-        final boolean edit = java.util.Arrays.asList(args).contains("--edit");
-        final Controls input = new Controls();
-        input.left = hold.contains("left");
-        input.right = hold.contains("right");
-        input.jump = hold.contains("jump");
-        input.up = hold.contains("up");
-        input.down = hold.contains("down");
-        if (!hold.isEmpty() || !script.isEmpty()) game.scriptedInput = input;
-        // --script=right:60,up+right:10,up:120  (buttons held for N frames, in order)
-        final java.util.List<String[]> steps = new java.util.ArrayList<>();
-        if (!script.isEmpty()) for (String s : script.split(",")) steps.add(s.split(":"));
+        final Pad pad = new Pad();
         game.afterFrame = new Runnable() {
             int n;
-            boolean created;
+            int gameFrames;
+            boolean created, selected;
 
             @Override
             public void run() {
                 n++;
-                // --play: create a character if there is none, then enter the game with the first one
-                if (autoPlay && game.client() != null && game.client().state == maple.net.GameClient.State.CHARACTER_SELECT) {
-                    if (game.client().characters.isEmpty()) {
+                GameClient c = game.client();
+                if (autoPlay && c != null && c.state == GameClient.State.CHARACTER_SELECT && game.screen() == MapleGame.Screen.LOGIN) {
+                    if (c.characters.isEmpty()) {
                         if (!created) {
                             created = true;
-                            game.charSelect().setName("Mapler");
-                            game.charSelect().create();
+                            c.createCharacter("Mapler", 1, 20000, 30030, 0, 0, 1040002, 1060002, 1072001, 1302000, 0);
                         }
-                    } else {
-                        game.client().selectCharacter(game.client().characters.get(0).stats.id);
+                    } else if (!selected) {
+                        selected = true;
+                        c.selectCharacter(c.characters.get(0).stats.id);
                     }
                 }
-                if (n == 5 && edit) game.controls().editing = true;
-                if (!steps.isEmpty()) {
-                    int f = n, idx = 0;
-                    while (idx < steps.size() && f > Integer.parseInt(steps.get(idx)[1])) {
-                        f -= Integer.parseInt(steps.get(idx)[1]);
-                        idx++;
-                    }
-                    String b = idx < steps.size() ? steps.get(idx)[0] : "";
-                    boolean wasUp = input.up, wasJump = input.jump, wasDown = input.down;
-                    input.left = b.contains("left");
-                    input.right = b.contains("right");
-                    input.up = b.contains("up");
-                    input.down = b.contains("down");
-                    input.jump = b.contains("jump");
-                    input.upPressed = input.up && !wasUp;
-                    input.jumpPressed = input.jump && !wasJump;
-                    input.downPressed = input.down && !wasDown;
+                int f = autoPlay ? (game.screen() == MapleGame.Screen.GAME ? ++gameFrames : 0) : n;
+                for (String[] a : actions) {
+                    if (Integer.parseInt(a[0]) == f) act(game, a[1], pad);
                 }
-                if (n >= total) {
-                    Pixmap pm = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
-                    PixmapIO.writePNG(Gdx.files.absolute(new java.io.File(file).getAbsolutePath()), pm, -1, true);
-                    pm.dispose();
-                    System.out.println("screenshot " + file + " player=" + (int) game.player().phys.x + "," + (int) game.player().phys.y
-                            + " state=" + game.player().state + (game.fatalError() != null ? " FATAL=" + game.fatalError() : ""));
+                for (String[] s : shots) {
+                    if (Integer.parseInt(s[0]) == f) save(s[1]);
+                }
+                if (f >= total) {
+                    save(file);
+                    System.out.println("screenshot " + file + " screen=" + game.screen()
+                            + (game.player() != null ? " player=" + (int) game.player().phys.x + "," + (int) game.player().phys.y + " state=" + game.player().state : "")
+                            + (game.fatalError() != null ? " FATAL=" + game.fatalError() : ""));
                     Gdx.app.exit();
                 }
             }
         };
+    }
+
+    private static void act(MapleGame game, String action, Pad pad) {
+        String[] p = action.split(":");
+        switch (p[0]) {
+            case "open":
+                try {
+                    java.lang.reflect.Method m = MapleGame.class.getDeclaredMethod("openWindow", String.class);
+                    m.setAccessible(true);
+                    m.invoke(game, p[1]);
+                } catch (ReflectiveOperationException e) {
+                    throw new RuntimeException(e);
+                }
+                break;
+            case "key":
+                try {
+                    java.lang.reflect.Method m = MapleGame.class.getDeclaredMethod("pressSlot", int.class);
+                    m.setAccessible(true);
+                    m.invoke(game, Integer.parseInt(p[1]));
+                } catch (ReflectiveOperationException e) {
+                    throw new RuntimeException(e);
+                }
+                break;
+            case "tap": {
+                float x = Float.parseFloat(p[1]), y = Float.parseFloat(p[2]);
+                float sx = game.ui().offsetX + x * game.ui().scale, sy = game.ui().offsetY + y * game.ui().scale;
+                Gdx.input.getInputProcessor().touchDown((int) sx, (int) sy, 0, 0);
+                Gdx.input.getInputProcessor().touchUp((int) sx, (int) sy, 0, 0);
+                break;
+            }
+            case "hold":
+                pad.left = action.contains("left");
+                pad.right = action.contains("right");
+                pad.up = action.contains("up");
+                pad.down = action.contains("down");
+                pad.jump = action.contains("jump");
+                game.scriptedPad = pad;
+                break;
+            case "release":
+                game.scriptedPad = null;
+                break;
+            case "edit":
+                game.touch.enabled = true;
+                game.touch.editing = true;
+                break;
+            case "touch":
+                game.touch.enabled = true;
+                break;
+            default:
+                System.out.println("unknown action " + action);
+        }
+    }
+
+    private static void save(String file) {
+        Pixmap pm = Pixmap.createFromFrameBuffer(0, 0, Gdx.graphics.getBackBufferWidth(), Gdx.graphics.getBackBufferHeight());
+        PixmapIO.writePNG(Gdx.files.absolute(new java.io.File(file).getAbsolutePath()), pm, -1, true);
+        pm.dispose();
+        System.out.println("saved " + file);
     }
 }

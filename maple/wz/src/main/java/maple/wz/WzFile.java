@@ -324,6 +324,8 @@ public final class WzFile {
                 int headerStart = r.pos();
                 r.seek(headerStart + 51);
                 int wavLen = r.u8();
+                n.x = headerStart + 52; // WAVEFORMATEX
+                n.y = wavLen;
                 r.seek(headerStart + 51 + 1 + wavLen);
                 n.offset = r.pos();
                 n.length = dataLen;

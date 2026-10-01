@@ -63,7 +63,7 @@ public final class CreateCharHandler extends AbstractPacketHandler {
             return;
         }
 
-        if (status == -2) {
+        if (status < 0) { // offline: always answer, so the client never waits forever
             c.sendPacket(PacketCreator.deleteCharResponse(0, 9));
         }
     }

@@ -115,9 +115,11 @@ public class MakeCharInfo {
     }
 
     public boolean verifyCharacter(Character character) {
-        if (!verifyFaceId(character.getFace())) return false;
-        if (!verifyHairId(character.getHair())) return false;
-        if (!verifyHairColorId(character.getHair())) return false;
+        if (!offline.OfflineOptions.allStyles) { // option: any hairstyle/face from Character.wz
+            if (!verifyFaceId(character.getFace())) return false;
+            if (!verifyHairId(character.getHair())) return false;
+            if (!verifyHairColorId(character.getHair())) return false;
+        }
         if (!verifySkinId(character.getSkinColor().getId())) return false;
 
         // Here we only verify the equipment if the character that's being created is of type 'Beginner'

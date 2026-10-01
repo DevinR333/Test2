@@ -1798,6 +1798,7 @@ public class Character extends AbstractCharacterObject {
             // if this map has obstacle components moving, make it do so for this client
             sendPacket(PacketCreator.environmentMoveList(map.getEnvironment().entrySet()));
         }
+        saveCharToDB(); // offline: save on every map change (queued on the save service, off this thread)
     }
 
     public boolean isChangingMaps() {
@@ -8468,7 +8469,7 @@ public class Character extends AbstractCharacterObject {
                 ItemFactory.INVENTORY.saveItems(itemsWithType, id, con);
 
                 // Skills
-                try (PreparedStatement psSkill = con.prepareStatement("REPLACE INTO skills (characterid, skillid, skilllevel, masterlevel, expiration) VALUES (?, ?, ?, ?, ?)")) {
+                try (PreparedStatement psSkill = con.prepareStatement("MERGE INTO skills (characterid, skillid, skilllevel, masterlevel, expiration) KEY (characterid, skillid) VALUES (?, ?, ?, ?, ?)")) {
                     psSkill.setInt(1, id);
                     for (Entry<Skill, SkillEntry> skill : skills.entrySet()) {
                         psSkill.setInt(2, skill.getKey().getId());

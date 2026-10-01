@@ -774,7 +774,39 @@ public class MapleMap {
 
         // Quest Drops
         index = dropItemsFromMonsterOnMap(visibleQuestEntry, pos, index, chRate, droptype, mobpos, chr, mob, delay);
-        dropItemsFromMonsterOnMap(otherQuestEntry, pos, index, chRate, droptype, mobpos, chr, mob, delay);
+        index = dropItemsFromMonsterOnMap(otherQuestEntry, pos, index, chRate, droptype, mobpos, chr, mob, delay);
+
+        // Offline option: Cash Shop equipment as rare monster drops.
+        if (offline.OfflineOptions.cashDrops && Randomizer.nextInt(100) < 3) {
+            List<Integer> cash = cashEquips();
+            if (!cash.isEmpty()) {
+                int id = cash.get(Randomizer.nextInt(cash.size()));
+                Item drop = ItemInformationProvider.getInstance().getEquipById(id);
+                if (drop != null) {
+                    pos.x = mobpos + ((index % 2 == 0) ? (25 * (index + 1) / 2) : -(25 * (index / 2)));
+                    spawnDrop(drop, calcDropPos(pos, mob.getPosition()), mob, chr, droptype, (short) 0, delay);
+                }
+            }
+        }
+    }
+
+    private static volatile List<Integer> cashEquipIds;
+
+    private static List<Integer> cashEquips() {
+        List<Integer> ids = cashEquipIds;
+        if (ids != null) return ids;
+        List<Integer> found = new ArrayList<>();
+        ItemInformationProvider ii = ItemInformationProvider.getInstance();
+        try {
+            for (tools.Pair<Integer, String> p : ii.getAllItems()) {
+                int id = p.getLeft();
+                if (id / 1000000 == 1 && ii.isCash(id)) found.add(id);
+            }
+        } catch (RuntimeException e) {
+            // no names: no cash drops
+        }
+        cashEquipIds = found;
+        return found;
     }
 
     public void dropItemsFromMonster(List<MonsterDropEntry> list, final Character chr, final Monster mob, short delay) {

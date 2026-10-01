@@ -36,6 +36,18 @@ public class AndroidApiTest {
         assertTrue("Methods missing on Android:\n" + String.join("\n", found), found.isEmpty());
     }
 
+    /** The client (core) and the WZ reader run on the phone too. */
+    @Test
+    public void clientUsesOnlyApisAndroidHas() throws IOException {
+        List<String> found = new ArrayList<>();
+        for (String dir : new String[]{"../core/build/classes/java/main", "../wz/build/classes/java/main"}) {
+            File d = new File(dir);
+            assertTrue("compiled classes missing: " + d.getAbsolutePath(), d.isDirectory());
+            scan(d, found);
+        }
+        assertTrue("Methods missing on Android:\n" + String.join("\n", found), found.isEmpty());
+    }
+
     private static void scan(File f, List<String> found) throws IOException {
         File[] kids = f.listFiles();
         if (kids != null) {

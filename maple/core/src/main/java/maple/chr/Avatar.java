@@ -18,7 +18,18 @@ import java.util.Map;
  * decides which part is drawn over which.
  */
 public final class Avatar {
-    public static final String[] STANCES = {"stand1", "walk1", "jump", "ladder", "rope", "prone", "alert", "sit", "stand2", "walk2"};
+    /** Every standard v83 body action (Character.wz/0000200x.img). */
+    public static final String[] STANCES = {"stand1", "stand2", "walk1", "walk2", "jump", "ladder", "rope", "prone", "alert",
+            "sit", "fly", "heal", "dead", "proneStab", "shoot1", "shoot2", "shootF", "shot",
+            "swingO1", "swingO2", "swingO3", "swingOF", "swingT1", "swingT2", "swingT3", "swingTF",
+            "swingP1", "swingP2", "swingPF", "stabO1", "stabO2", "stabOF", "stabT1", "stabT2", "stabTF"};
+
+    // Weapon behaviour (Character.wz/Weapon/xxx.img/info)
+    public int weaponId, attackType, attackSpeed = 6;
+    public String afterImage = "", weaponSound = "";
+    public boolean twoHanded;
+    private String standStance = "stand1", walkStance = "walk1";
+    private final Map<String, String> smap = new HashMap<>();
 
     public static final class Part {
         final Sprite sprite;
@@ -45,15 +56,34 @@ public final class Avatar {
 
     public Avatar(Wz wz, int skin, int face, int hair, int[] equips) {
         loadZmap(wz);
+        for (WzNode n : wz.get("Base/smap.img").children()) smap.put(n.name, n.asString(""));
         WzNode body = wz.get(String.format("Character/%08d.img", 2000 + skin));
         WzNode head = wz.get(String.format("Character/%08d.img", 12000 + skin));
         WzNode faceImg = wz.get(String.format("Character/Face/%08d.img", face));
         WzNode hairImg = wz.get(String.format("Character/Hair/%08d.img", hair));
         List<WzNode> equipImgs = new ArrayList<>();
+        // Slots claimed by equips (info/vslot, two letters each): a cap claiming H1 hides "hairOverHead".
+        Map<String, WzNode> occupied = new HashMap<>();
         for (int e : equips) {
             WzNode n = wz.get("Character/" + equipFolder(e) + "/" + String.format("%08d.img", e));
-            if (n.exists()) equipImgs.add(n);
+            if (!n.exists()) continue;
+            equipImgs.add(n);
+            String vslot = n.get("info").getString("vslot", "");
+            for (int i = 0; i + 2 <= vslot.length(); i += 2) occupied.put(vslot.substring(i, i + 2), n);
+            if (equipFolder(e).equals("Weapon")) {
+                WzNode info = n.get("info");
+                weaponId = e;
+                attackType = info.getInt("attack", 1);
+                attackSpeed = info.getInt("attackSpeed", 6);
+                afterImage = info.getString("afterImage", "");
+                weaponSound = info.getString("sfx", "");
+                int prefix = e / 10000;
+                twoHanded = prefix == 138 || (prefix >= 140 && prefix <= 144) || prefix == 146;
+                standStance = info.getInt("stand", twoHanded ? 2 : 1) == 2 ? "stand2" : "stand1";
+                walkStance = info.getInt("walk", twoHanded ? 2 : 1) == 2 ? "walk2" : "walk1";
+            }
         }
+        this.occupied = occupied;
         if (!body.exists()) problems += "body missing; ";
         if (!head.exists()) problems += "head missing; ";
 
@@ -70,13 +100,19 @@ public final class Avatar {
                 if (fr.delay == 0) fr.delay = 200;
 
                 List<WzNode> parts = new ArrayList<>();
-                addCanvases(bf, parts);
+                // A body frame may borrow another action's frame ("action" + "frame").
+                WzNode src = bf;
+                if (!hasCanvas(bf) && bf.get("action").exists()) {
+                    src = body.get(bf.getString("action", "")).get(bf.getInt("frame", 0));
+                    if (!bf.get("delay").exists()) fr.delay = Math.abs(src.getInt("delay", 200));
+                }
+                addCanvases(src, parts);
                 addCanvases(frameOf(head.get(stance), i), parts);
                 boolean back = stance.equals("ladder") || stance.equals("rope");
                 boolean showFace = bf.get("face").exists() ? bf.getInt("face", 1) != 0 : !back;
                 if (showFace && faceCanvas.isCanvas()) parts.add(faceCanvas);
-                addCanvases(frameOf(hairImg.get(stance), i), parts);
-                for (WzNode eq : equipImgs) addCanvases(frameOf(eq.get(stance), i), parts);
+                addVisible(frameOf(hairImg.get(stance), i), parts, hairImg);
+                for (WzNode eq : equipImgs) addVisible(frameOf(eq.get(stance), i), parts, eq);
                 assemble(fr, parts);
                 frames.add(fr);
             }
@@ -107,6 +143,60 @@ public final class Avatar {
             case 111: return "Ring";
             default: return id / 10000 >= 130 && id / 10000 < 170 ? "Weapon" : "Accessory";
         }
+    }
+
+    private Map<String, WzNode> occupied = new HashMap<>();
+
+    private static boolean hasCanvas(WzNode frame) {
+        for (WzNode c : frame.children()) if (c.resolve().isCanvas()) return true;
+        return false;
+    }
+
+    /** Adds the frame's canvases except those in a slot another item claims (smap + vslot). */
+    private void addVisible(WzNode frame, List<WzNode> out, WzNode owner) {
+        if (!frame.exists()) return;
+        for (WzNode c : frame.children()) {
+            WzNode r = c.resolve();
+            if (!r.isCanvas()) continue;
+            String slot = smap.get(r.getString("z", ""));
+            if (slot != null && slot.length() >= 2) {
+                WzNode by = occupied.get(slot.substring(0, 2));
+                if (by != null && by != owner) continue;
+            }
+            out.add(r);
+        }
+    }
+
+    public String standStance() { return has(standStance) ? standStance : "stand1"; }
+    public String walkStance() { return has(walkStance) ? walkStance : "walk1"; }
+
+    private static final java.util.Random RNG = new java.util.Random();
+
+    /** A random attack action for the weapon (HeavenClient's v83 table); prone gives proneStab. */
+    public String attackStance(boolean prone, boolean degenerate) {
+        if (prone) return "proneStab";
+        String[][] normal = {
+                {}, {"stabO1", "stabO2", "swingO1", "swingO2", "swingO3"}, {"stabT1", "swingP1"}, {"shoot1"}, {"shoot2"},
+                {"stabO1", "stabO2", "swingT1", "swingT2", "swingT3"}, {"swingO1", "swingO2"}, {"swingO1", "swingO2"}, {}, {"shot"}};
+        String[][] degen = {
+                {}, {}, {}, {"swingT1", "swingT3"}, {"swingT1", "stabT1"}, {}, {}, {"swingT1", "stabT1"}, {}, {"swingP1", "stabT2"}};
+        int t = Math.max(0, Math.min(9, attackType));
+        String[] opts = degenerate && degen[t].length > 0 ? degen[t] : normal[t];
+        if (opts.length == 0) opts = new String[]{"swingO1", "swingO2", "swingO3"};
+        for (int tries = 0; tries < 4; tries++) {
+            String s = opts[RNG.nextInt(opts.length)];
+            if (has(s)) return s;
+        }
+        for (String s : opts) if (has(s)) return s;
+        return has("swingO1") ? "swingO1" : standStance();
+    }
+
+    /** Total duration of an action in ms. */
+    public int duration(String stance) {
+        Frame[] f = frames(stance);
+        int t = 0;
+        if (f != null) for (Frame fr : f) t += fr.delay;
+        return Math.max(1, t);
     }
 
     private static void addCanvases(WzNode frame, List<WzNode> out) {

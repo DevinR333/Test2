@@ -22,12 +22,9 @@ final class Bgm {
             if (slash < 0) return;
             WzNode snd = wz.get("Sound/" + path.substring(0, slash) + ".img/" + path.substring(slash + 1));
             if (snd.type != WzNode.Type.SOUND) return;
-            FileHandle f = Gdx.files.local("bgm/" + path.replace('/', '_').replace(' ', '_') + ".mp3");
-            byte[] data = null;
-            if (!f.exists() || f.length() == 0) {
-                data = snd.soundData();
-                f.writeBytes(data, false);
-            }
+            WzNode.SoundFile sf = snd.soundFile();
+            FileHandle f = Gdx.files.local("bgm/" + path.replace('/', '_').replace(' ', '_') + "." + sf.extension);
+            if (!f.exists() || f.length() == 0) f.writeBytes(sf.bytes, false);
             music = Gdx.audio.newMusic(f);
             music.setLooping(true);
             music.setVolume(volume);
@@ -36,6 +33,10 @@ final class Bgm {
             Log.error("music " + path, t);
             music = null;
         }
+    }
+
+    void applyVolume() {
+        if (music != null) music.setVolume(volume);
     }
 
     void pause() { if (music != null) music.pause(); }

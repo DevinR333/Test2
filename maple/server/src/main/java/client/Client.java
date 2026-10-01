@@ -666,7 +666,7 @@ public class Client extends ChannelInboundHandlerAdapter {
                     pin = rs.getString("pin");
                     pic = rs.getString("pic");
                     gender = rs.getByte("gender");
-                    characterSlots = rs.getByte("characterslots");
+                    characterSlots = (byte) Math.max(15, rs.getByte("characterslots")); // offline: 15 slots (5 pages of 3)
                     lang = rs.getInt("language");
                     String passhash = rs.getString("password");
                     byte tos = rs.getByte("tos");

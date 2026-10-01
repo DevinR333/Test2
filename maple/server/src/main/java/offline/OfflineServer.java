@@ -49,6 +49,23 @@ public final class OfflineServer {
         thread.start();
     }
 
+    /**
+     * Saves every logged-in character now (app going to the background, before switching characters).
+     * Runs on the caller's thread; safe to call any time.
+     */
+    public static void saveNow() {
+        try {
+            for (net.server.world.World w : Server.getInstance().getWorlds()) {
+                for (client.Character chr : w.getPlayerStorage().getAllCharacters()) {
+                    if (chr != null && chr.isLoggedin()) chr.saveCharToDB(false);
+                }
+            }
+            DatabaseConnection.checkpoint();
+        } catch (Throwable t) {
+            org.slf4j.LoggerFactory.getLogger(OfflineServer.class).warn("Save failed", t);
+        }
+    }
+
     /** Saves everyone and stops (e.g. when the app closes, or before exporting the save). */
     public static synchronized void stop() {
         if (thread == null) return;

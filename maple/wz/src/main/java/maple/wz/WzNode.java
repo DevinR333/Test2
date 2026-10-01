@@ -177,6 +177,44 @@ public class WzNode {
         return file.readRaw(offset, length);
     }
 
+    /**
+     * The sound as a playable file: MP3 data as-is, PCM wrapped in a WAV header.
+     * Returns {"mp3"|"wav", bytes} via {@link SoundFile}.
+     */
+    public SoundFile soundFile() {
+        byte[] data = soundData();
+        int tag = 0;
+        byte[] fmt = null;
+        if (y >= 16 && file != null) {
+            fmt = file.readRaw(x, y);
+            tag = (fmt[0] & 0xFF) | (fmt[1] & 0xFF) << 8;
+        }
+        if (tag != 1 || fmt == null) return new SoundFile("mp3", data);
+        java.io.ByteArrayOutputStream b = new java.io.ByteArrayOutputStream(data.length + 64);
+        int fmtLen = 16;
+        b.write('R'); b.write('I'); b.write('F'); b.write('F');
+        le32(b, 4 + 8 + fmtLen + 8 + data.length);
+        b.write('W'); b.write('A'); b.write('V'); b.write('E');
+        b.write('f'); b.write('m'); b.write('t'); b.write(' ');
+        le32(b, fmtLen);
+        b.write(fmt, 0, fmtLen);
+        b.write('d'); b.write('a'); b.write('t'); b.write('a');
+        le32(b, data.length);
+        b.write(data, 0, data.length);
+        return new SoundFile("wav", b.toByteArray());
+    }
+
+    private static void le32(java.io.ByteArrayOutputStream b, int v) {
+        b.write(v); b.write(v >> 8); b.write(v >> 16); b.write(v >> 24);
+    }
+
+    /** A sound ready to save and play. */
+    public static final class SoundFile {
+        public final String extension;
+        public final byte[] bytes;
+        SoundFile(String extension, byte[] bytes) { this.extension = extension; this.bytes = bytes; }
+    }
+
     /** Stable key for caches. */
     public String key() {
         return (file == null ? "?" : file.name) + ":" + offset + ":" + fullPath();

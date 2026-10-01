@@ -48,3 +48,10 @@ GL: 4.5 (Compatibility Profile) Mesa 25.2.8-0ubuntu0.24.04.1 / llvmpipe (LLVM 20
 defaults: walk 125.0 px/s, jump 555.0 px/s, gravity 2000.0, fall 670.0
 Frame 1: BOOT, 0 fps, 1280x720
 Frame 587: CHAR_SELECT, 61 fps, 1280x720, client CHARACTER_SELECT
+WZ source: /tmp/uitest, build v0.4.9 (built 2026-10-01 04:51)
+WZ source: /tmp/uitest, build v0.4.9 (built 2026-10-01 04:51)
+WZ source: /tmp/uitest, build v0.4.9 (built 2026-10-01 04:57)
+Logos: Nexon 13700 ms, Wizet 6100 ms
+WZ source: /tmp/uitest, build v0.4.9 (built 2026-10-01 04:57)
+Logos: Nexon 13700 ms, Wizet 6100 ms
+Loaded map 10000 (Mushroom Town) in 75 ms

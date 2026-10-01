@@ -38,6 +38,7 @@ dependencies {
     testImplementation 'junit:junit:4.13.2'
 }
 test {
+    dependsOn ':core:classes', ':wz:classes' // AndroidApiTest also scans the client
     workingDir = projectDir
     maxHeapSize = '2g'
     testLogging { events 'failed'; exceptionFormat 'full' }

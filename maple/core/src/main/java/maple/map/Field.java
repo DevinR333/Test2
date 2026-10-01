@@ -54,8 +54,15 @@ public final class Field {
     }
 
     public Field(Wz wz, int mapId) {
+        this(wz, wz.get(imgPath(mapId)), mapId, false);
+    }
+
+    /**
+     * A map from any map-shaped image (UI.wz/MapLogin.img for the login screens).
+     * withLife adds the NPCs/mobs listed in the map itself (the server spawns them in game).
+     */
+    public Field(Wz wz, WzNode src, int mapId, boolean withLife) {
         this.id = mapId;
-        WzNode src = wz.get(imgPath(mapId));
         if (!src.exists()) throw new WzException("Map " + mapId + " does not exist");
         WzNode info = src.get("info");
         WzNode link = info.get("link");
@@ -152,7 +159,7 @@ public final class Field {
         }
         portalAnim = Animation.of(wz.get("Map/MapHelper.img/portal/game/pv"), bank);
 
-        for (WzNode n : src.get("life").children()) {
+        for (WzNode n : withLife ? src.get("life").children() : java.util.Collections.<WzNode>emptyList()) {
             n = n.resolve();
             try {
                 Life lf = new Life(n, wz, bank, footholds);
