@@ -184,6 +184,13 @@ final class Screenshotter {
                 StringBuilder sb = new StringBuilder("REPORT windows=");
                 for (maple.ui.Window w : game.ui().windows()) sb.append(w.name).append(' ');
                 sb.append(" npcTalk=").append(game.world() != null && game.world().talk != null);
+                try {
+                    java.lang.reflect.Method ib = MapleGame.class.getDeclaredMethod("inputBlocked");
+                    ib.setAccessible(true);
+                    sb.append(" blocked=").append(ib.invoke(game)); // movement and keys locked
+                } catch (ReflectiveOperationException e) {
+                    sb.append(" blocked=?");
+                }
                 sb.append(" x=").append(game.player() == null ? -1 : (int) game.player().phys.x);
                 sb.append(" focus=").append(maple.ui.Widgets.Focus.get() == null ? "none" : maple.ui.Widgets.Focus.get().getClass().getSimpleName());
                 sb.append(" meso=").append(game.world() == null || game.world().data() == null ? -1 : game.world().data().meso);
