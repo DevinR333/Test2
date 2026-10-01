@@ -255,6 +255,44 @@ public class OfflineExtrasTest {
         enterMap(warp[0]);
     }
 
+    static Npc npc(int id) {
+        for (Npc n : world.npcs.values()) if (n.id == id) return n;
+        return null;
+    }
+
+    /** Taps through a client-side quest conversation: picks menu entry `choice`, then Next/Accept/OK. */
+    static void talkThrough(Npc n, String questName) throws InterruptedException {
+        world.talkTo(n);
+        NpcTalk menu = world.talk;
+        assertNotNull("quest menu shown", menu);
+        assertNotNull("answered on the client", menu.local);
+        assertEquals(4, menu.type);
+        // the menu entry for the quest: "#L<n>##b<name>"
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("#L(\\d+)##b" + java.util.regex.Pattern.quote(questName)).matcher(menu.text);
+        assertTrue("quest listed: " + menu.text, m.find());
+        world.answer(1, Integer.parseInt(m.group(1)), null);
+        for (int i = 0; i < 30 && world.talk != null && world.talk.local != null; i++) world.answer(1, 0, null);
+    }
+
+    @Test(timeout = 120000)
+    public void questBulbsStartAndComplete() throws Exception {
+        int q = 4437, starter = 9250052, rooney = 1022101;
+        stepUntil(() -> npc(starter) != null && npc(rooney) != null, 5000);
+        assertTrue("quest offered", world.quests.startable(starter).contains(q));
+        assertEquals("bulb over the NPC", 0, world.quests.marker(starter));
+        talkThrough(npc(starter), world.quests.name(q));
+        stepUntil(() -> world.quests.state(q) == 1, 5000);
+        assertEquals("the server started it", 1, world.quests.state(q));
+        Thread.sleep(600); // markers refresh twice a second
+        assertTrue("marker over Rooney", world.quests.marker(rooney) >= 1);
+        assertTrue(world.quests.finishing(rooney).contains(q));
+        if (world.quests.ready(q)) {
+            talkThrough(npc(rooney), world.quests.name(q));
+            stepUntil(() -> world.quests.state(q) == 2, 5000);
+            assertEquals("the server completed it", 2, world.quests.state(q));
+        }
+    }
+
     @Test(timeout = 60000)
     public void ratesChangeWhilePlaying() {
         client.Character chr = server();

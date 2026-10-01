@@ -15,4 +15,11 @@ public final class NpcTalk {
     public int def, min, max;
     /** Type 7: selectable style ids (hair/face). */
     public int[] styles = new int[0];
+
+    /** Answered on the client (quest conversations from Quest.wz) instead of by the server. */
+    public interface LocalAnswer {
+        void answer(int action, int selection, String text);
+    }
+
+    public LocalAnswer local;
 }

@@ -1953,8 +1953,137 @@ public final class World {
         return null;
     }
 
+    /**
+     * Clicking an NPC. One with quests for the character first offers them (like the original client):
+     * quests to complete, in progress, and to start, then its own conversation.
+     */
+    public final QuestBook quests = new QuestBook(this);
+
     public void talkTo(Npc n) {
         if (!canAct() || n == null) return;
+        List<Integer> start = quests.startable(n.id), finish = quests.finishing(n.id);
+        if (start.isEmpty() && finish.isEmpty()) {
+            serverTalk(n);
+            return;
+        }
+        StringBuilder sb = new StringBuilder();
+        List<Runnable> choices = new ArrayList<>();
+        List<Integer> ready = new ArrayList<>(), busy = new ArrayList<>();
+        for (int q : finish) (quests.ready(q) ? ready : busy).add(q);
+        if (!ready.isEmpty()) {
+            sb.append("#r#eQuests you can complete#n#k");
+            for (int q : ready) {
+                sb.append("\r\n#L").append(choices.size()).append("##b").append(quests.name(q)).append("#k#l");
+                choices.add(() -> finishQuest(n, q));
+            }
+            sb.append("\r\n");
+        }
+        if (!busy.isEmpty()) {
+            sb.append("#e#dQuests in progress#n#k");
+            for (int q : busy) {
+                sb.append("\r\n#L").append(choices.size()).append("##b").append(quests.name(q)).append("#k#l");
+                choices.add(() -> finishQuest(n, q));
+            }
+            sb.append("\r\n");
+        }
+        if (!start.isEmpty()) {
+            sb.append("#e#gQuests available#n#k");
+            for (int q : start) {
+                sb.append("\r\n#L").append(choices.size()).append("##b").append(quests.name(q)).append("#k#l");
+                choices.add(() -> startQuest(n, q));
+            }
+            sb.append("\r\n");
+        }
+        sb.append("\r\n#L").append(choices.size()).append("#Talk to ").append(n.name).append("#l");
+        choices.add(() -> serverTalk(n));
+        NpcTalk menu = localTalk(n.id, 4, sb.toString(), false, false);
+        menu.local = (action, selection, text) -> {
+            if (action == 1 && selection >= 0 && selection < choices.size()) choices.get(selection).run();
+        };
+        showLocal(menu);
+    }
+
+    private NpcTalk localTalk(int npcId, int type, String text, boolean prev, boolean next) {
+        NpcTalk t = new NpcTalk();
+        t.type = type;
+        t.npcId = npcId;
+        t.speaker = 0;
+        t.text = text;
+        t.prev = prev;
+        t.next = next;
+        return t;
+    }
+
+    private void showLocal(NpcTalk t) {
+        talk = t;
+        events.npcTalk(t);
+    }
+
+    /** Quest.wz pages one after another (Prev/Next); the last one asks (accept/decline) or just ends. */
+    private void questPages(int npcId, List<String> pages, int i, boolean ask, Runnable done, Runnable declined) {
+        if (pages.isEmpty()) {
+            if (done != null) done.run();
+            return;
+        }
+        boolean last = i == pages.size() - 1;
+        NpcTalk t = localTalk(npcId, last && ask ? 0x0C : 0, pages.get(i), i > 0, !last);
+        t.local = (action, selection, text) -> {
+            if (last && ask) {
+                if (action == 1) {
+                    if (done != null) done.run();
+                } else if (action == 0 && declined != null) {
+                    declined.run();
+                }
+                return;
+            }
+            if (action == 1) {
+                if (last) {
+                    if (done != null) done.run();
+                } else {
+                    questPages(npcId, pages, i + 1, ask, done, declined);
+                }
+            } else if (action == 0 && i > 0) {
+                questPages(npcId, pages, i - 1, ask, done, declined);
+            }
+        };
+        showLocal(t);
+    }
+
+    private void startQuest(Npc n, int q) {
+        if (quests.scriptedStart(q)) {
+            questAction(4, q, n.id, 0); // the server runs the quest's start script
+            return;
+        }
+        boolean ask = quests.asks(q);
+        questPages(n.id, quests.say(q, 0, ""), 0, ask, () -> {
+            questAction(1, q, n.id, 0);
+            List<String> yes = quests.say(q, 0, "yes");
+            if (!yes.isEmpty()) questPages(n.id, yes, 0, false, null, null);
+        }, () -> {
+            List<String> no = quests.say(q, 0, "no");
+            if (!no.isEmpty()) questPages(n.id, no, 0, false, null, null);
+        });
+    }
+
+    private void finishQuest(Npc n, int q) {
+        if (!quests.ready(q)) {
+            List<String> stop = quests.say(q, 1, "stop");
+            if (stop.isEmpty()) stop = List.of("You haven't finished #b" + quests.name(q) + "#k yet.");
+            questPages(n.id, stop, 0, false, null, null);
+            return;
+        }
+        if (quests.scriptedEnd(q)) {
+            questAction(5, q, n.id, 0); // the server runs the quest's end script
+            return;
+        }
+        List<String> pages = quests.say(q, 1, "");
+        Runnable complete = () -> questAction(2, q, n.id, -1);
+        if (pages.isEmpty()) complete.run();
+        else questPages(n.id, pages, 0, false, complete, null);
+    }
+
+    /** The NPC's own conversation (its server script, shop, storage...). */
+    private void serverTalk(Npc n) {
         lastNpcId = n.id;
         PacketWriter w = new PacketWriter(RecvOpcode.NPC_TALK.getValue());
         w.writeInt(n.oid);
@@ -1966,6 +2095,11 @@ public final class World {
     public void answer(int action, int selection, String text) {
         NpcTalk t = talk;
         if (t == null) return;
+        if (t.local != null) {
+            talk = null;
+            t.local.answer(action, selection, text);
+            return;
+        }
         PacketWriter w = new PacketWriter(RecvOpcode.NPC_TALK_MORE.getValue());
         w.writeByte(t.type);
         w.writeByte(action);

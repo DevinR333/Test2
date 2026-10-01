@@ -937,13 +937,24 @@ public class MapleGame extends ApplicationAdapter {
         end();
     }
 
-    /** Name tags, NPC names, monster HP bars and the chat balloon. */
+    private final Animation[] questIcons = new Animation[3];
+
+    /** Name tags, NPC names, monster HP bars, quest markers and the chat balloon. */
     private void drawLabels(float alpha, double viewX, double viewY) {
         for (Npc n : world.npcs.values()) {
             if (!n.visible || n.hideName) continue;
             float x = (float) (n.x + viewX), y = (float) (n.y + viewY);
             WorldLabels.nameTag(g, n.name, x, y + 2, 0xFFFFFF00, true);
             if (n.func != null && !n.func.isEmpty()) WorldLabels.nameTag(g, n.func, x, y + 24, 0xFFFFFF00, true);
+        }
+        // quest markers over NPC heads: 0 available, 1 in progress, 2 ready to complete
+        for (Npc n : world.npcs.values()) {
+            if (!n.visible) continue;
+            int m = world.quests.marker(n.id);
+            if (m < 0) continue;
+            Animation a = questIcons[m];
+            if (a == null) a = questIcons[m] = assets.animation("UIWindow.img/QuestIcon/" + m);
+            if (a != null) g.anim(a, (float) (n.x + viewX), (float) (n.y + viewY - n.height() - 8), timeMs);
         }
         for (Mob m : world.mobs.values()) {
             if (m.hpVisible(world.timeMs)) WorldLabels.hpBar(g, (float) (m.headX() + viewX), (float) (m.headY() + viewY), m.hpPercent);
