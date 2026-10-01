@@ -182,6 +182,10 @@ final class Screenshotter {
                 game.touch.touchUp(0, t[0], t[1]);
                 break;
             }
+            case "aspect": // ORIGINAL_4_3, WIDE_16_9 or FILL
+                game.ui().aspect = maple.ui.Ui.Aspect.valueOf(p[1]);
+                game.resize(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
+                break;
             case "touch": // behave like a phone
                 game.touch.enabled = true;
                 game.ui().touchDevice = true;
