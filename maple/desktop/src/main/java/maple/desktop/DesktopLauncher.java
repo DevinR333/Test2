@@ -25,8 +25,15 @@ public final class DesktopLauncher {
         Lwjgl3ApplicationConfiguration cfg = new Lwjgl3ApplicationConfiguration();
         cfg.setTitle("MapleStory v83 Offline");
         cfg.setWindowedMode(1280, 720);
-        cfg.useVsync(true);
+        boolean safe = Boolean.getBoolean("maple.safe");
+        cfg.useVsync(!safe);
         cfg.setForegroundFPS(60);
+        if (safe) {
+            // Safe mode: no audio device (OpenAL is the usual cause of native crashes on some Windows PCs).
+            cfg.disableAudio(true);
+        }
+        System.out.println("[maple] Desktop start: java " + System.getProperty("java.version") + " (" + System.getProperty("java.vendor")
+                + "), " + System.getProperty("os.name") + ", safe mode " + safe + ", WZ " + dir.getAbsolutePath());
 
         // Developer option: run the server on an XML export of the data instead of the .wz files.
         String xml = System.getProperty("maple.serverXml");

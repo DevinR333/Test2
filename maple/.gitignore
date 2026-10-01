@@ -11,3 +11,5 @@ android/libs/
 screenshots-local/
 wz-structure.txt
 wzcheck.txt
+crash-report.log
+play-log.txt
