@@ -195,7 +195,7 @@ public final class Decode {
         d.monsterBookCover = r.readInt();
         r.readByte();
         n = r.readShort();
-        for (int i = 0; i < n; i++) d.monsterCards.put((int) r.readShort(), r.readUByte());
+        for (int i = 0; i < n; i++) d.monsterCards.put(2380000 + r.readUShort() % 10000, r.readUByte());
         // new year cards
         n = r.readShort();
         for (int i = 0; i < n; i++) {

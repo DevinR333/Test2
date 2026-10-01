@@ -29,6 +29,8 @@ public final class MiniMapWindow extends Window {
     private String mapName = "", street = "";
     private Button btMap, btMax, btMin;
     private float viewX, viewY, viewW, viewH;
+    /** BtMap: opens the world map. */
+    public Runnable onWorldMap;
 
     public MiniMapWindow(Ui ui, World world) {
         super(ui, "MiniMap", null);
@@ -100,7 +102,9 @@ public final class MiniMapWindow extends Window {
         }
         boolean min = dm == 2;
         float bx = w - (min ? 44 : 42), by = min ? 4 : 6;
-        btMap = add(new Button(ui.assets, "UIWindow.img/MiniMap/BtMap", bx, by, () -> {}));
+        btMap = add(new Button(ui.assets, "UIWindow.img/MiniMap/BtMap", bx, by, () -> {
+            if (onWorldMap != null) onWorldMap.run();
+        }));
         btMax = add(new Button(ui.assets, "Basic.img/BtMax", bx - 14, by, () -> setMode(mode - 1)));
         btMin = add(new Button(ui.assets, "Basic.img/BtMin", bx - 27, by, () -> setMode(mode + 1)));
         btMax.disabled = canvas == null || dm == 0;

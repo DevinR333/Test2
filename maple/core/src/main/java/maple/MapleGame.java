@@ -58,6 +58,11 @@ import maple.ui.windows.ShopWindow;
 import maple.ui.windows.SkillWindow;
 import maple.ui.windows.StatWindow;
 import maple.ui.windows.StyleDialog;
+import maple.ui.windows.UserListWindow;
+import maple.ui.windows.MessengerWindow;
+import maple.ui.windows.TextPrompt;
+import maple.ui.windows.MonsterBookWindow;
+import maple.ui.windows.WorldMapWindow;
 import maple.ui.windows.StorageWindow;
 import maple.wz.Wz;
 import net.opcodes.RecvOpcode;
@@ -433,7 +438,7 @@ public class MapleGame extends ApplicationAdapter {
         bgm.play(wz, field.bgm);
         portalCooldown = 60;
         client.mapLoaded();
-        if (ui.find(MiniMapWindow.class) == null && prefs.getBoolean("minimap", true)) ui.open(new MiniMapWindow(ui, world));
+        if (ui.find(MiniMapWindow.class) == null && prefs.getBoolean("minimap", true)) ui.open(miniMap());
         screen = Screen.GAME;
     }
 
@@ -450,7 +455,7 @@ public class MapleGame extends ApplicationAdapter {
         quickSlots = new QuickSlots(ui, world, this::pressSlot);
         quickSlots.visible = quick;
         ChatBar old = chatBar;
-        chatBar = new ChatBar(ui, text -> world.chat(text));
+        chatBar = new ChatBar(ui, this::sendChat);
         if (old != null) chatBar.copyLog(old);
         ui.hud.add(statusBar);
         ui.hud.add(quickSlots);
@@ -474,6 +479,22 @@ public class MapleGame extends ApplicationAdapter {
         };
     }
 
+    /** Chat: "/w name text" whispers, otherwise the chat bar's target. */
+    private void sendChat(String text) {
+        if (world == null) return;
+        if (text.startsWith("/w ") || text.startsWith("/W ")) {
+            String rest = text.substring(3).trim();
+            int sp = rest.indexOf(' ');
+            if (sp > 0) {
+                chatBar.whisperTo = rest.substring(0, sp);
+                chatBar.target = 1;
+                world.chatTo(1, chatBar.whisperTo, rest.substring(sp + 1));
+            }
+            return;
+        }
+        world.chatTo(chatBar.target, chatBar.whisperTo, text);
+    }
+
     /** HUD buttons, the Menu/Shortcut popups and type-4 key bindings open windows by name. */
     private void openWindow(String name) {
         if (world == null) return;
@@ -487,7 +508,7 @@ public class MapleGame extends ApplicationAdapter {
             case "MiniMap": {
                 MiniMapWindow m = ui.find(MiniMapWindow.class);
                 if (m == null) {
-                    ui.open(new MiniMapWindow(ui, world));
+                    ui.open(miniMap());
                     prefs.putBoolean("minimap", true).flush();
                 } else m.cycle();
                 break;
@@ -505,6 +526,12 @@ public class MapleGame extends ApplicationAdapter {
             case "Quit":
                 ui.open(new Dialogs.Notice(ui, "Are you sure you want to quit the game?", true, this::logOut, null));
                 break;
+            case "Friends": userList(0); break;
+            case "Party": userList(1); break;
+            case "Guild": userList(2); break;
+            case "Messenger": toggle(MessengerWindow.class, () -> new MessengerWindow(ui, world)); break;
+            case "MonsterBook": toggle(MonsterBookWindow.class, () -> new MonsterBookWindow(ui, world)); break;
+            case "WorldMap": toggle(WorldMapWindow.class, () -> new WorldMapWindow(ui, world)); break;
             case "Channel":
                 ui.open(new Dialogs.Notice(ui, "This world has a single channel.", false, null, null));
                 break;
@@ -518,6 +545,21 @@ public class MapleGame extends ApplicationAdapter {
                 statusMessages.add("That is not available in the offline game.", 0xFFFFFFFF);
                 break;
         }
+    }
+
+    private void userList(int tab) {
+        UserListWindow w = ui.find(UserListWindow.class);
+        if (w != null) {
+            ui.close(w);
+            return;
+        }
+        ui.open(new UserListWindow(ui, world, tab, (t, name) -> chatBar.setTarget(t, name)));
+    }
+
+    private MiniMapWindow miniMap() {
+        MiniMapWindow m = new MiniMapWindow(ui, world);
+        m.onWorldMap = () -> openWindow("WorldMap");
+        return m;
     }
 
     private <T extends Window> void toggle(Class<T> type, java.util.function.Supplier<T> make) {
@@ -698,6 +740,12 @@ public class MapleGame extends ApplicationAdapter {
         String[] names = {"Equip", "Item", "Stat", "Skill", "Friends", "WorldMap", "Messenger", "MiniMap", "Quest", "KeyConfig",
                 "Chat", "Chat", "Chat", "Chat", "ShortCut", "QuickSlot", "ChatLog", "Guild", "Chat", "Party", "QuestAlarm", "Chat",
                 "MonsterBook", "CashShop", "Chat", "PartySearch", "Family", "Medal"};
+        // chat-target keys: 10 all, 11 whisper, 12 party, 13 buddy, 18 guild, 24 alliance
+        int chat = id == 10 ? 0 : id == 11 ? 1 : id == 12 ? 2 : id == 13 ? 3 : id == 18 ? 4 : id == 24 ? 5 : -1;
+        if (chat >= 0) {
+            chatBar.setTarget(chat, null);
+            return;
+        }
         if (id >= 0 && id < names.length) openWindow(names[id]);
     }
 
@@ -965,6 +1013,17 @@ public class MapleGame extends ApplicationAdapter {
 
         @Override
         public void keymap(int[] types, int[] actions) {
+        }
+
+        @Override
+        public void partyInvite(int partyId, String from) {
+            ui.open(new Dialogs.Notice(ui, from + " has invited you to a party. Would you like to join?", true,
+                    () -> world.partyJoin(partyId), null));
+        }
+
+        @Override
+        public void guildNamePrompt() {
+            ui.open(new TextPrompt(ui, "Enter the name of your guild.", "", 12, world::guildCreate));
         }
     }
 

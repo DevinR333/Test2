@@ -29,6 +29,12 @@ public interface GameEvents {
     /** The player died: show the revive notice. */
     void died();
 
+    /** Someone invited you to their party. */
+    default void partyInvite(int partyId, String from) {}
+
+    /** An NPC asked for the name of a new guild. */
+    default void guildNamePrompt() {}
+
     /** Key bindings arrived from the server. */
     void keymap(int[] types, int[] actions);
 }

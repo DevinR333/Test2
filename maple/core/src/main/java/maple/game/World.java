@@ -190,7 +190,39 @@ public final class World {
             else if (op == SendOpcode.CONFIRM_SHOP_TRANSACTION.getValue()) events.shopResult(r.readUByte());
             else if (op == SendOpcode.STORAGE.getValue()) storagePacket(r);
             else if (op == SendOpcode.KEYMAP.getValue()) keymap(r);
-            else if (op == SendOpcode.CANCEL_CHAIR.getValue()) {
+            else if (op == SendOpcode.BUDDYLIST.getValue()) buddyPacket(r);
+            else if (op == SendOpcode.WHISPER.getValue()) {
+                int flag = r.readUByte();
+                if (flag == 0x0A) { // result
+                    String target = r.readString();
+                    if (r.readByte() == 0) events.chat("Unable to find '" + target + "'", 0xFFFF0000);
+                } else if (flag == 0x12) { // received
+                    String from = r.readString();
+                    r.readByte();
+                    r.readByte();
+                    events.chat(from + "<< " + r.readString(), 0xFF00FF00);
+                } else if (flag == 0x09 || flag == 0x48) {
+                    events.chat("'" + r.readString() + "' is not online.", 0xFFFF0000);
+                }
+            } else if (op == SendOpcode.MULTICHAT.getValue()) {
+                int type = r.readUByte();
+                String from = r.readString(), text = r.readString();
+                int color = type == 1 ? 0xFFFF9EC7 : type == 2 ? 0xFFC2FBFB : 0xFFFFB64E;
+                events.chat(from + ": " + text, color);
+            }
+            else if (op == SendOpcode.PARTY_OPERATION.getValue()) partyPacket(r);
+            else if (op == SendOpcode.GUILD_OPERATION.getValue()) guildPacket(r);
+            else if (op == SendOpcode.MESSENGER.getValue()) messengerPacket(r);
+            else if (op == SendOpcode.MONSTER_BOOK_SET_CARD.getValue()) {
+                boolean full = r.readByte() == 0;
+                int card = r.readInt(), level = r.readInt();
+                if (!full) data().monsterCards.put(card, level);
+                else events.status("You cannot collect more of this card.", 0xFFFFFFFF);
+                events.refresh();
+            } else if (op == SendOpcode.MONSTER_BOOK_SET_COVER.getValue()) {
+                data().monsterBookCover = r.readInt();
+                events.refresh();
+            } else if (op == SendOpcode.CANCEL_CHAIR.getValue()) {
                 if (r.readByte() == 0) player.standUp();
                 else {
                     int id = r.readShort();
@@ -1352,6 +1384,393 @@ public final class World {
         }
         int id = m.skills[macroStep++];
         useSkill(id);
+    }
+
+    // ------------------------------------------------------------------ friends, party, guild, messenger
+
+    public final Social social = new Social();
+    /** Set when an NPC (Heracle) asks for a new guild's name. */
+    public boolean guildNamePrompt;
+
+    private static String fixed(PacketReader r, int n) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < n; i++) {
+            int c = r.readUByte();
+            if (c != 0 && sb.length() == i) sb.append((char) c);
+        }
+        return sb.toString();
+    }
+
+    private void buddyPacket(PacketReader r) {
+        int mode = r.readUByte();
+        switch (mode) {
+            case 7:
+            case 0x0A:
+            case 0x12: {
+                int n = r.readUByte();
+                social.buddies.clear();
+                for (int i = 0; i < n; i++) {
+                    Social.Buddy b = new Social.Buddy();
+                    b.id = r.readInt();
+                    b.name = fixed(r, 13);
+                    r.readByte();
+                    b.channel = r.readInt();
+                    b.group = fixed(r, 13);
+                    r.readInt();
+                    social.buddies.add(b);
+                }
+                break;
+            }
+            case 0x14: { // a buddy changed channel
+                int id = r.readInt();
+                r.readByte();
+                int ch = r.readInt();
+                for (Social.Buddy b : social.buddies) if (b.id == id) b.channel = ch;
+                break;
+            }
+            case 0x15:
+                social.buddyCapacity = r.readUByte();
+                break;
+            case 0x0B: events.popup("Your buddy list is full."); break;
+            case 0x0C: events.popup("The other character's buddy list is full."); break;
+            case 0x0D: events.popup("That character is already registered as your buddy."); break;
+            case 0x0E: events.popup("You cannot add a GM to your buddy list."); break;
+            case 0x0F: events.popup("That character is not registered."); break;
+            default: break;
+        }
+        events.refresh();
+    }
+
+    /** Chat to a target: 0 all, 1 whisper, 2 party, 3 buddies, 4 guild, 5 alliance. */
+    public void chatTo(int target, String whisperTo, String text) {
+        switch (target) {
+            case 1: {
+                if (whisperTo == null || whisperTo.isEmpty()) return;
+                PacketWriter w = new PacketWriter(RecvOpcode.WHISPER.getValue());
+                w.writeByte(6);
+                w.writeString(whisperTo);
+                w.writeString(text);
+                client.send(w);
+                events.chat(whisperTo + ">> " + text, 0xFF00FF00);
+                return;
+            }
+            case 2: case 3: case 4: case 5: {
+                int type = target == 2 ? 1 : target == 3 ? 0 : target == 4 ? 2 : 3;
+                java.util.List<Integer> ids = new java.util.ArrayList<>();
+                if (type == 1) for (Social.Member m : social.party) if (m.id != data().stats.id) ids.add(m.id);
+                if (type == 0) for (Social.Buddy b : social.buddies) ids.add(b.id);
+                if (type == 2) for (Social.Member m : social.guild) if (m.id != data().stats.id) ids.add(m.id);
+                if (type == 1 && social.partyId == 0) { events.chat("You are not in a party.", 0xFFFF0000); return; }
+                if (type == 2 && social.guildId == 0) { events.chat("You are not in a guild.", 0xFFFF0000); return; }
+                PacketWriter w = new PacketWriter(RecvOpcode.MULTI_CHAT.getValue());
+                w.writeByte(type);
+                w.writeByte(ids.size());
+                for (int id : ids) w.writeInt(id);
+                w.writeString(text);
+                client.send(w);
+                int color = type == 1 ? 0xFFFF9EC7 : type == 2 ? 0xFFC2FBFB : 0xFFFFB64E;
+                events.chat(data().stats.name + ": " + text, color);
+                return;
+            }
+            default:
+                chat(text);
+        }
+    }
+
+    public void buddyAdd(String name, String group) {
+        PacketWriter w = new PacketWriter(RecvOpcode.BUDDYLIST_MODIFY.getValue());
+        w.writeByte(1);
+        w.writeString(name);
+        w.writeString(group == null || group.isEmpty() ? "Default Group" : group);
+        client.send(w);
+    }
+
+    public void buddyDelete(int id) {
+        PacketWriter w = new PacketWriter(RecvOpcode.BUDDYLIST_MODIFY.getValue());
+        w.writeByte(3);
+        w.writeInt(id);
+        client.send(w);
+    }
+
+    private void readPartyStatus(PacketReader r) {
+        int[] ids = new int[6];
+        for (int i = 0; i < 6; i++) ids[i] = r.readInt();
+        String[] names = new String[6];
+        for (int i = 0; i < 6; i++) names[i] = fixed(r, 13);
+        int[] jobs = new int[6], levels = new int[6], channels = new int[6], maps = new int[6];
+        for (int i = 0; i < 6; i++) jobs[i] = r.readInt();
+        for (int i = 0; i < 6; i++) levels[i] = r.readInt();
+        for (int i = 0; i < 6; i++) channels[i] = r.readInt();
+        social.partyLeader = r.readInt();
+        for (int i = 0; i < 6; i++) maps[i] = r.readInt();
+        for (int i = 0; i < 6; i++) r.skip(16); // mystic doors
+        social.party.clear();
+        for (int i = 0; i < 6; i++) {
+            if (ids[i] == 0) continue;
+            Social.Member m = new Social.Member();
+            m.id = ids[i];
+            m.name = names[i];
+            m.job = jobs[i];
+            m.level = levels[i];
+            m.channel = channels[i];
+            m.online = channels[i] >= 0;
+            m.mapId = maps[i];
+            social.party.add(m);
+        }
+    }
+
+    private void selfInParty() {
+        social.party.clear();
+        Social.Member m = new Social.Member();
+        m.id = data().stats.id;
+        m.name = data().stats.name;
+        m.job = data().stats.job;
+        m.level = data().stats.level;
+        m.channel = 0;
+        m.online = true;
+        m.mapId = field == null ? 0 : field.id;
+        social.party.add(m);
+        social.partyLeader = m.id;
+    }
+
+    private void partyPacket(PacketReader r) {
+        int mode = r.readUByte();
+        switch (mode) {
+            case 8:
+                social.partyId = r.readInt();
+                selfInParty();
+                events.status("You have created a new party.", 0xFFFFFFFF);
+                break;
+            case 7:
+                social.partyId = r.readInt();
+                readPartyStatus(r);
+                break;
+            case 0x0F:
+                social.partyId = r.readInt();
+                events.status(r.readString() + " has joined the party.", 0xFFFFFFFF);
+                readPartyStatus(r);
+                break;
+            case 0x0C: {
+                r.readInt();
+                int target = r.readInt();
+                boolean disband = r.readByte() == 0;
+                if (disband || target == data().stats.id) {
+                    social.partyId = 0;
+                    social.party.clear();
+                    events.status(disband ? "The party has been disbanded." : "You have left the party.", 0xFFFFFFFF);
+                } else {
+                    boolean expel = r.readByte() == 1;
+                    String name = r.readString();
+                    events.status(name + (expel ? " has been expelled from the party." : " has left the party."), 0xFFFFFFFF);
+                    readPartyStatus(r);
+                }
+                break;
+            }
+            case 0x1B:
+                social.partyLeader = r.readInt();
+                break;
+            case 4: { // invitation
+                int pid = r.readInt();
+                String from = r.readString();
+                events.partyInvite(pid, from);
+                break;
+            }
+            case 10: events.popup("A beginner can't create a party."); break;
+            case 13: events.popup("You have yet to join a party."); break;
+            case 16: events.popup("You have already joined a party."); break;
+            case 17: events.popup("The party you're trying to join is already in full capacity."); break;
+            case 19: events.popup("Unable to find the requested character in this channel."); break;
+            case 21: case 22: case 23: {
+                String n = r.available() > 1 ? r.readString() : "";
+                events.popup(mode == 21 ? n + " is blocking party invitations." : mode == 22 ? n + " is taking care of another invitation." : n + " has denied the request to the party.");
+                break;
+            }
+            default:
+                if (mode == 1 || mode == 5 || mode == 6 || mode == 11 || mode == 14) events.popup("Your request for a party didn't work due to an unexpected error.");
+                break;
+        }
+        events.refresh();
+    }
+
+    public void partyCreate() { partyOp(1, null, 0); }
+    public void partyLeave() { partyOp(2, null, 0); }
+    public void partyInvite(String name) { partyOp(4, name, 0); }
+    public void partyExpel(int id) { partyOp(5, null, id); }
+    public void partyLeader(int id) { partyOp(6, null, id); }
+
+    /** Accepts (or declines) a party invitation (DENY_PARTY_REQUEST / join). */
+    public void partyJoin(int partyId) { partyOp(3, null, partyId); }
+
+    private void partyOp(int op, String name, int arg) {
+        PacketWriter w = new PacketWriter(RecvOpcode.PARTY_OPERATION.getValue());
+        w.writeByte(op);
+        if (name != null) w.writeString(name);
+        else if (op != 1 && op != 2) w.writeInt(arg);
+        client.send(w);
+    }
+
+    private void guildPacket(PacketReader r) {
+        int mode = r.readUByte();
+        switch (mode) {
+            case 0x01:
+                guildNamePrompt = true;
+                events.guildNamePrompt();
+                break;
+            case 0x1A: {
+                if (r.readByte() == 0) {
+                    social.guildId = 0;
+                    social.guild.clear();
+                    break;
+                }
+                social.guildId = r.readInt();
+                social.guildName = r.readString();
+                for (int i = 0; i < 5; i++) social.rankTitles[i] = r.readString();
+                int n = r.readUByte();
+                int[] ids = new int[n];
+                for (int i = 0; i < n; i++) ids[i] = r.readInt();
+                social.guild.clear();
+                for (int i = 0; i < n; i++) {
+                    Social.Member m = new Social.Member();
+                    m.id = ids[i];
+                    m.name = fixed(r, 13);
+                    m.job = r.readInt();
+                    m.level = r.readInt();
+                    m.rank = r.readInt();
+                    m.online = r.readInt() != 0;
+                    r.readInt();
+                    r.readInt();
+                    social.guild.add(m);
+                }
+                social.guildCapacity = r.readInt();
+                r.readShort();
+                r.readByte();
+                r.readShort();
+                r.readByte();
+                social.guildNotice = r.readString();
+                social.guildPoints = r.readInt();
+                break;
+            }
+            default:
+                break;
+        }
+        events.refresh();
+    }
+
+    public void guildCreate(String name) {
+        guildNamePrompt = false;
+        PacketWriter w = new PacketWriter(RecvOpcode.GUILD_OPERATION.getValue());
+        w.writeByte(0x02);
+        w.writeString(name);
+        client.send(w);
+    }
+
+    public void guildLeave() {
+        PacketWriter w = new PacketWriter(RecvOpcode.GUILD_OPERATION.getValue());
+        w.writeByte(0x07);
+        w.writeInt(data().stats.id);
+        w.writeString(data().stats.name);
+        client.send(w);
+    }
+
+    public void guildNotice(String text) {
+        PacketWriter w = new PacketWriter(RecvOpcode.GUILD_OPERATION.getValue());
+        w.writeByte(0x10);
+        w.writeString(text);
+        client.send(w);
+    }
+
+    private void messengerPacket(PacketReader r) {
+        int mode = r.readUByte();
+        switch (mode) {
+            case 0x00:
+            case 0x07: {
+                int pos = r.readUByte();
+                maple.net.model.CharLook look = new maple.net.model.CharLook();
+                Decode.charLook(r, look);
+                String name = r.readString();
+                if (pos < 3) {
+                    social.seatLooks[pos] = look;
+                    social.seatNames[pos] = name;
+                }
+                if (mode == 0 && pos != social.messengerSeat) social.messengerLog.add(name + " has joined.");
+                break;
+            }
+            case 0x01:
+                social.messengerSeat = r.readUByte();
+                social.messengerOpen = true;
+                break;
+            case 0x02: {
+                int pos = r.readUByte();
+                if (pos < 3) {
+                    if (social.seatNames[pos] != null) social.messengerLog.add(social.seatNames[pos] + " has left.");
+                    social.seatNames[pos] = null;
+                    social.seatLooks[pos] = null;
+                }
+                break;
+            }
+            case 0x06:
+                social.messengerLog.add(r.readString());
+                break;
+            default:
+                if (r.available() > 2) social.messengerLog.add(r.readString());
+                break;
+        }
+        events.refresh();
+    }
+
+    public void messengerOpen() {
+        PacketWriter w = new PacketWriter(RecvOpcode.MESSENGER.getValue());
+        w.writeByte(0x00);
+        w.writeInt(0);
+        client.send(w);
+        // a new messenger gets no answer: the client seats itself in the first place
+        social.messengerOpen = true;
+        social.messengerSeat = 0;
+        social.seatNames[0] = data().stats.name;
+        maple.net.model.CharLook look = new maple.net.model.CharLook();
+        look.gender = data().stats.gender;
+        look.skin = data().stats.skin;
+        look.face = data().stats.face;
+        look.hair = data().stats.hair;
+        for (Item it : data().inventory(-1).values()) {
+            int slot = -it.position;
+            if (slot > 100) look.equips.put(slot - 100, it.itemId);
+            else if (!look.equips.containsKey(slot)) look.equips.put(slot, it.itemId);
+        }
+        social.seatLooks[0] = look;
+    }
+
+    public void messengerLeave() {
+        if (!social.messengerOpen) return;
+        PacketWriter w = new PacketWriter(RecvOpcode.MESSENGER.getValue());
+        w.writeByte(0x02);
+        client.send(w);
+        social.messengerOpen = false;
+        social.messengerSeat = -1;
+        java.util.Arrays.fill(social.seatNames, null);
+        java.util.Arrays.fill(social.seatLooks, null);
+    }
+
+    public void messengerInvite(String name) {
+        PacketWriter w = new PacketWriter(RecvOpcode.MESSENGER.getValue());
+        w.writeByte(0x03);
+        w.writeString(name);
+        client.send(w);
+    }
+
+    public void messengerSay(String text) {
+        PacketWriter w = new PacketWriter(RecvOpcode.MESSENGER.getValue());
+        w.writeByte(0x06);
+        w.writeString(data().stats.name + " : " + text);
+        client.send(w);
+        social.messengerLog.add(data().stats.name + " : " + text);
+    }
+
+    /** Registers a card as the Monster Book cover (0 releases it). */
+    public void setBookCover(int cardId) {
+        PacketWriter w = new PacketWriter(RecvOpcode.MONSTER_BOOK_COVER.getValue());
+        w.writeInt(cardId);
+        client.send(w);
     }
 
     /** Pick up the nearest drop in reach (Z). */

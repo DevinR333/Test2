@@ -78,6 +78,8 @@ public class MatchCheckerCoordinator {
         private boolean active = true;
 
         private final String message;
+        /** Everyone (just the leader) had accepted as soon as it was created. */
+        private boolean completeOnCreation;
 
         private MatchCheckingElement(MatchCheckerType matchType, int leaderCid, int world, AbstractMatchCheckerListener leaderListener, Set<Integer> matchPlayers, String message) {
             this.leaderCid = leaderCid;
@@ -263,7 +265,7 @@ public class MatchCheckerCoordinator {
             matchEntries.put(cid, mmce);
         }
 
-        acceptMatchElement(mmce, leaderCid);
+        mmce.completeOnCreation = acceptMatchElement(mmce, leaderCid);
         return mmce;
     }
 
@@ -293,6 +295,8 @@ public class MatchCheckerCoordinator {
 
         if (mmce != null) {
             mmce.dispatchMatchCreated();
+            // offline: a match of one (the leader alone) is accepted at once
+            if (mmce.completeOnCreation) mmce.dispatchMatchResult(true);
             return true;
         } else {
             return false;

@@ -28,6 +28,11 @@ public final class ChatBar extends Widget {
     private final Button max, min;
     private final Consumer<String> send;
     public boolean typing;
+    /** Chat target: 0 all, 1 whisper, 2 party, 3 buddy, 4 guild, 5 alliance (the ComboBox2 list). */
+    public int target;
+    public String whisperTo = "";
+    private static final String[] TARGETS = {"To All", "Whisper", "To Party", "To Buddy", "To Guild", "To Alliance"};
+    private boolean listOpen;
 
     public ChatBar(Ui ui, Consumer<String> send) {
         this.ui = ui;
@@ -61,6 +66,13 @@ public final class ChatBar extends Widget {
         typing = false;
         Widgets.Focus.set(null);
         if (!text.isEmpty()) send.accept(text);
+    }
+
+    /** Picks the chat target (and opens the edit), e.g. from the Friends window or a chat key. */
+    public void setTarget(int t, String whisper) {
+        target = Math.max(0, Math.min(TARGETS.length - 1, t));
+        if (whisper != null) whisperTo = whisper;
+        beginTyping();
     }
 
     /** Enter opens the chat edit; pressing it again sends. */
@@ -112,6 +124,8 @@ public final class ChatBar extends Widget {
         if (h != null) return h;
         if (expanded && lx >= 4 && lx < 570 && ly >= logTop() && ly < 532) return this;
         if (lx >= 85 && lx < 525 && ly >= 538 && ly < 558) return input;
+        if (lx >= 1 && lx < 81 && ly >= 537 && ly < 557) return this;
+        if (listOpen && lx >= 1 && lx < 81 && ly >= 537 - TARGETS.length * 16 && ly < 537) return this;
         return null;
     }
 
@@ -133,6 +147,20 @@ public final class ChatBar extends Widget {
 
     @Override
     public boolean onPress(float lx, float ly) {
+        if (listOpen) {
+            listOpen = false;
+            int i = (int) ((ly - (537 - TARGETS.length * 16)) / 16);
+            if (lx >= 1 && lx < 81 && i >= 0 && i < TARGETS.length) {
+                target = i;
+                if (target == 1 && whisperTo.isEmpty()) whisperTo = "";
+                beginTyping();
+            }
+            return false;
+        }
+        if (lx >= 1 && lx < 81 && ly >= 537 && ly < 557) {
+            listOpen = true;
+            return false;
+        }
         dragStartY = ly;
         dragStartScroll = scroll;
         return true;
@@ -148,7 +176,15 @@ public final class ChatBar extends Widget {
     public void draw(UiDraw g) {
         // chat target (To All)
         g.image("Basic.img/ComboBox2/normal/0", 1, 515 + 22);
-        g.text("To All", 7, 515 + 22 + 3, 11, false, 0xFFFFFFFF);
+        String label = target == 1 && !whisperTo.isEmpty() ? whisperTo : TARGETS[target];
+        g.text(label, 7, 515 + 22 + 3, 11, false, 0xFFFFFFFF);
+        if (listOpen) {
+            for (int i = 0; i < TARGETS.length; i++) {
+                float ry = 537 - (TARGETS.length - i) * 16;
+                g.fill(1, ry, 80, 16, i == target ? 0xF0405A78 : 0xE0202838);
+                g.text(TARGETS[i], 7, ry + 2, 11, false, 0xFFFFFFFF);
+            }
+        }
         if (typing) g.fill(85, 541, 440, 14, 0xFFFFFFFF);
         int rows;
         float top;
