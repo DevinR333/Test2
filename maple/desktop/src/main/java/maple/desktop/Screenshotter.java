@@ -204,7 +204,7 @@ final class Screenshotter {
             int[] r = auditOpen(game, name);
             checked += r[0];
             bad += r[1];
-            invoke(game, "closeAllWindows", null);
+            if (!name.equals("-")) invoke(game, "closeAllWindows", null); // "-": audit what is open, leave it
         }
         // the HUD on its own
         int[] r = auditWidget(game, game.ui().hud, "HUD");
@@ -227,7 +227,8 @@ final class Screenshotter {
     private static int[] auditWidget(MapleGame game, maple.ui.Widget w, String where) {
         int checked = 0, bad = 0;
         if (!w.visible) return new int[]{0, 0};
-        if (w.interactive() && !(w instanceof maple.ui.Window) && !(w instanceof maple.ui.Button && ((maple.ui.Button) w).disabled)) {
+        boolean passThrough = w instanceof maple.ui.hud.StatusBar || w instanceof maple.ui.hud.ChatBar; // only their children take taps
+        if (w.interactive() && !passThrough && !(w instanceof maple.ui.Window) && !(w instanceof maple.ui.Button && ((maple.ui.Button) w).disabled)) {
             float cx = w.screenX() + w.w / 2, cy = w.screenY() + w.h / 2;
             maple.ui.Widget hit = game.ui().widgetAt(cx, cy);
             boolean onScreen = cx >= -game.ui().offsetX / game.ui().scale && cx <= maple.ui.Ui.W + game.ui().offsetX / game.ui().scale && cy >= 0 && cy <= maple.ui.Ui.H;
