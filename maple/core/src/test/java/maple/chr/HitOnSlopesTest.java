@@ -28,7 +28,7 @@ public class HitOnSlopesTest {
         StringBuilder problems = new StringBuilder();
         int cases = 0;
         java.util.Random rng = new java.util.Random(1);
-        for (int map : new int[]{102000000, 102010000, 102020000, 102030000, 102040000, 102050000, 101030000, 101030100}) {
+        for (int map : new int[]{101040000, 102000000, 102010000, 102020000, 102030000, 102040000, 102050000, 101030000, 101030100}) {
             Field f = new Field(wz, map);
             FootholdTree t = f.footholds;
             for (Foothold fh : t.all()) {
