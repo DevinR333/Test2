@@ -77,7 +77,14 @@ public final class Log {
     }
 
     /** Build stamp (commit + time), or "unknown". */
-    public static String build() {
+    private static String build;
+
+    public static synchronized String build() {
+        if (build == null) build = readBuild();
+        return build;
+    }
+
+    private static String readBuild() {
         try (java.io.InputStream in = Log.class.getClassLoader().getResourceAsStream("maple-build.txt")) {
             if (in == null) return "unknown";
             java.io.ByteArrayOutputStream out = new java.io.ByteArrayOutputStream();

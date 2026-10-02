@@ -99,7 +99,7 @@ public final class SettingsWindow extends Window {
         float bottom = h - (s == null ? 47 : s.h);
         if (c != null) for (float yy = top; yy < bottom; yy += c.h) g.image(c, 0, yy);
         if (s != null) g.image(s, 0, bottom);
-        g.text("Options", 0, 6, w, Align.center, false, 12, true, 0xFF000000);
+        g.text("Options  (build " + maple.Log.build() + ")", 0, 6, w, Align.center, false, 12, true, 0xFF000000);
         Sprite off = ui.assets.sprite("Basic.img/CheckBox/0"), on = ui.assets.sprite("Basic.img/CheckBox/1");
         for (int i = 0; i < rows.size(); i++) {
             Object[] r = rows.get(i);

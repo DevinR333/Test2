@@ -251,4 +251,51 @@ public class FootholdPhysicsTest {
         assertTrue(maps > 200);
         assertEquals("problems:\n" + (problems.length() > 3000 ? problems.substring(0, 3000) : problems), 0, problems.length());
     }
+
+    /** A monster's knockback (up and sideways) on every slope of every map never ends below the ground. */
+    @Test
+    public void knockbackOnSlopesEverywhere() {
+        Wz wz = wz();
+        int hits = 0;
+        StringBuilder problems = new StringBuilder();
+        for (int folder = 0; folder <= 9; folder++) {
+            for (maple.wz.WzNode img : wz.get("Map/Map/Map" + folder).children()) {
+                maple.wz.WzNode fhNode = img.get("foothold");
+                if (!fhNode.exists() || fhNode.childCount() == 0) continue;
+                FootholdTree t = new FootholdTree(fhNode);
+                for (Foothold fh : t.all()) {
+                    if (fh.isWall() || fh.r() - fh.l() < 20) continue;
+                    for (double kx : new double[]{-1.5, 1.5}) {
+                        PhysicsObject p = new PhysicsObject();
+                        double mx = (fh.l() + fh.r()) / 2.0;
+                        if (mx < t.wallLeft + 40 || mx > t.wallRight - 40) continue; // outside the playable area
+                        p.setPosition(mx, fh.groundBelow(mx) - 3);
+                        for (int i = 0; i < 20 && !p.onGround; i++) t.move(p);
+                        if (!p.onGround || p.fhid != fh.id) continue;
+                        // Player.knockback
+                        p.hspeed = kx;
+                        p.vspeed = -3.5 * 0.5;
+                        p.onGround = false;
+                        double under = fh.groundBelow(mx);
+                        for (int i = 0; i < 3000 && !p.onGround; i++) {
+                            double below = groundUnder(t, p);
+                            t.move(p);
+                            if (!p.onGround && p.vspeed > 0 && p.y > below + 0.01 && groundUnder(t, p) < p.y) {
+                                problems.append(img.name).append(" fh ").append(fh.id).append(" knocked ").append(kx > 0 ? "right" : "left").append(" fell through\n");
+                                break;
+                            }
+                        }
+                        // still airborne: only wrong if there is a floor under it (an open gap in the map is not)
+                        if (!p.onGround && !Double.isInfinite(groundUnder(t, p))) {
+                            problems.append(img.name).append(" fh ").append(fh.id).append(" never landed\n");
+                        }
+                        hits++;
+                    }
+                }
+            }
+        }
+        System.out.println("knockback: " + hits + " hits");
+        assertTrue(hits > 1000);
+        assertEquals("problems:\n" + (problems.length() > 2000 ? problems.substring(0, 2000) : problems), 0, problems.length());
+    }
 }

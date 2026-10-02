@@ -287,12 +287,14 @@ public final class FootholdTree {
     }
 
     /**
-     * Falling or jumping: rising passes through platforms (as in v83); falling lands on the first
-     * platform the path crosses, whichever one it is (so fast falls cannot skip through).
+     * Falling, jumping or knocked back: lands on the first floor the step crosses from above (so fast
+     * falls cannot skip through, and a knockback into a slope lands on it); floors are passed from below.
      */
     private void airStep(PhysicsObject p) {
         double x0 = p.x, y0 = p.y, nx = p.nextX(), ny = p.nextY();
-        if (p.vspeed > 0) {
+        // A floor stops anything whose path crosses it from its top side to its underside, whichever
+        // way it is moving (a knockback uphill runs into the rising slope); from below it passes through.
+        {
             Foothold best = null;
             double bestT = 2, bestX = 0;
             int c0 = Math.floorDiv((int) Math.floor(Math.min(x0, nx)), COLUMN), c1 = Math.floorDiv((int) Math.floor(Math.max(x0, nx)), COLUMN);
