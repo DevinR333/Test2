@@ -53,6 +53,8 @@ public final class Avatar {
     private final Map<String, Integer> zOrder = new HashMap<>();
     public final SpriteBank bank = new SpriteBank();
     public String problems = "";
+    /** The weapon cover drawn over the weapon, 0 if none. */
+    public int coverDrawn;
 
     public Avatar(Wz wz, int skin, int face, int hair, int[] equips) {
         loadZmap(wz);
@@ -64,12 +66,26 @@ public final class Avatar {
         List<WzNode> equipImgs = new ArrayList<>();
         // Slots claimed by equips (info/vslot, two letters each): a cap claiming H1 hides "hairOverHead".
         Map<String, WzNode> occupied = new HashMap<>();
+        // a cash weapon cover (170xxxx) is drawn in place of the weapon, with the art made for that
+        // weapon's type (its "30".."49" nodes); the real weapon still decides stances and attacks
+        int cover = 0;
+        for (int e : equips) if (e / 10000 == 170) cover = e;
         for (int e : equips) {
+            if (e / 10000 == 170) continue;
             WzNode n = wz.get("Character/" + equipFolder(e) + "/" + String.format("%08d.img", e));
             if (!n.exists()) continue;
-            equipImgs.add(n);
+            WzNode drawn = n;
+            if (cover != 0 && equipFolder(e).equals("Weapon")) {
+                WzNode c = wz.get("Character/Weapon/" + String.format("%08d.img", cover));
+                WzNode art = c.get(Integer.toString(e / 10000 % 100));
+                if (art.exists()) {
+                    drawn = art;
+                    coverDrawn = cover;
+                }
+            }
+            equipImgs.add(drawn);
             String vslot = n.get("info").getString("vslot", "");
-            for (int i = 0; i + 2 <= vslot.length(); i += 2) occupied.put(vslot.substring(i, i + 2), n);
+            for (int i = 0; i + 2 <= vslot.length(); i += 2) occupied.put(vslot.substring(i, i + 2), drawn);
             if (equipFolder(e).equals("Weapon")) {
                 WzNode info = n.get("info");
                 weaponId = e;

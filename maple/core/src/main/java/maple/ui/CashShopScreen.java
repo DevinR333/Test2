@@ -275,7 +275,8 @@ public final class CashShopScreen extends Widget implements Ui.Refreshable {
         Map<Integer, Integer> slots = new HashMap<>();
         for (Item it : world.data().inventory(-1).values()) {
             int s = -it.position;
-            if (s > 100) slots.put(s - 100, it.itemId);
+            if (s == 111) slots.put(111, it.itemId); // a weapon cover is drawn over the weapon, both stay
+            else if (s > 100) slots.put(s - 100, it.itemId);
             else slots.putIfAbsent(s, it.itemId);
         }
         for (Map.Entry<Integer, Integer> e : tryOn.entrySet()) {
@@ -297,6 +298,7 @@ public final class CashShopScreen extends Widget implements Ui.Refreshable {
         if (o.itemId / 1000000 != 1) return;
         int slot = -ItemInfo.equipSlot(o.itemId);
         if (slot == 0) return;
+        if (o.itemId / 10000 == 170) slot = 111;
         tryOn.put(slot, o.itemId);
         previewDirty = true;
     }

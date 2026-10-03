@@ -62,7 +62,7 @@ public final class ItemInfo {
             case 180: case 181: case 182: case 183: return "PetEquip";
             case 190: case 191: case 192: case 193: case 198: return "TamingMob";
             default:
-                if (id / 10000 >= 130 && id / 10000 < 170) return "Weapon";
+                if (id / 10000 >= 130 && id / 10000 <= 170) return "Weapon"; // 170: cash weapon covers
                 if (id / 10000 == 20 || id / 10000 == 21) return "Face";
                 if (id / 10000 == 3) return "Hair";
                 return "Accessory";
@@ -85,21 +85,44 @@ public final class ItemInfo {
                 if (id / 10000 == 500) return wz.get("Item/Pet/" + id + ".img");
                 return wz.get("Item/Cash/" + String.format("%04d", id / 10000) + ".img/" + sid);
             default:
-                if (id / 10000 == 900) return wz.get("Item/Special/0900.img/" + sid);
+                if (id / 10000 == 900 || id / 10000 == 910) // 910: Cash Shop packages
+                    return wz.get("Item/Special/" + String.format("%04d", id / 10000) + ".img/" + id);
                 return WzNode.MISSING;
         }
     }
 
     /** The item has a name in String.wz (cheap: does not read the item itself). */
     public static boolean named(int id) {
+        if (id / 10000 == 910) return !packageContents(id).isEmpty();
         return !stringNode(id).getString("name", "").isEmpty();
+    }
+
+    private static Map<Integer, WzNode> commodity;
+
+    /**
+     * What a Cash Shop package (910xxxx) holds, from Etc/CashPackage.img and the Commodity entries
+     * it lists: {itemId, count, period in days} each.
+     */
+    public static synchronized java.util.List<int[]> packageContents(int id) {
+        if (commodity == null) {
+            commodity = new HashMap<>();
+            for (WzNode n : wz.get("Etc/Commodity.img").children()) commodity.put(n.getInt("SN", 0), n);
+        }
+        java.util.List<int[]> out = new java.util.ArrayList<>();
+        for (WzNode sn : wz.get("Etc/CashPackage.img/" + id + "/SN").children()) {
+            WzNode c = commodity.get(sn.asInt(0));
+            if (c == null || c.getInt("ItemId", 0) == 0) continue;
+            out.add(new int[]{c.getInt("ItemId", 0), Math.max(1, c.getInt("Count", 1)), c.getInt("Period", 0)});
+        }
+        return out;
     }
 
     private static WzNode stringNode(int id) {
         String s = Integer.toString(id);
         switch (id / 1000000) {
             case 1: {
-                WzNode n = strEqp.get(equipFolder(id)).get(s);
+                String folder = equipFolder(id);
+                WzNode n = strEqp.get(folder.equals("TamingMob") ? "Taming" : folder).get(s);
                 return n;
             }
             case 2: return strConsume.get(s);
@@ -115,7 +138,15 @@ public final class ItemInfo {
         node = itemNode(id);
         info = node.get("info");
         WzNode str = stringNode(id);
-        name = str.getString("name", "");
+        String n = str.getString("name", "");
+        if (id / 10000 == 910) { // packages keep their name with the icon; a few have none
+            n = node.getString("name", "");
+            if (n.isEmpty() || n.equals("None") || maple.game.QuestBook.korean(n)) {
+                java.util.List<int[]> in = packageContents(id);
+                n = in.isEmpty() ? "" : get(in.get(0)[0]).name + " Package";
+            }
+        }
+        name = n;
         desc = str.getString("desc", "");
         slotMax = info.getInt("slotMax", id / 1000000 == 1 ? 1 : 100);
         price = info.getInt("price", 0);
@@ -136,7 +167,11 @@ public final class ItemInfo {
     /** The inventory icon (info/icon). */
     public WzNode icon() {
         WzNode i = info.get("icon");
-        if (!i.exists() && id / 10000 == 500) i = info.get("icon"); // pets keep it in info too
+        if (!i.exists() && id / 10000 == 910) { // packages: next to the name, else the first item's
+            i = node.get("icon");
+            java.util.List<int[]> in = packageContents(id);
+            if (!i.exists() && !in.isEmpty()) i = get(in.get(0)[0]).icon();
+        }
         return i;
     }
 
@@ -178,7 +213,7 @@ public final class ItemInfo {
             case 113: return -50;  // belt
             case 114: return -49;  // medal
             default:
-                if (p >= 130 && p < 170) return -11;
+                if (p >= 130 && p <= 170) return -11; // 170: cash weapon cover (worn at -111)
                 if (p == 180) return -121;
                 if (p == 190) return -18;
                 if (p == 191) return -19;

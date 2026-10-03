@@ -445,7 +445,7 @@ public class MapleGame extends ApplicationAdapter {
             int pos = it.position;
             if (pos <= -100) {
                 ids.add(it.itemId); // cash cover
-            } else if (!eq.containsKey(pos - 100)) {
+            } else if (!eq.containsKey(pos - 100) || pos == -11) { // a weapon cover needs the weapon under it
                 ids.add(it.itemId);
             }
         }

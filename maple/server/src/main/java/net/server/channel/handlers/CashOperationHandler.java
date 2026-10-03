@@ -280,6 +280,8 @@ public final class CashOperationHandler extends AbstractPacketHandler {
                                 chr.addPlayerRing(ring);
                             }
                         }
+                    } else { // no room in that bag: say so instead of doing nothing
+                        c.sendPacket(PacketCreator.showCashShopMessage((byte) 0xBB));
                     }
                 } else if (action == 0x0E) { // Put into Cash Inventory
                     int cashId = p.readInt();

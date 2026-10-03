@@ -53,6 +53,65 @@ public final class ItemTooltip extends Tooltip {
             if (slots > 0 || info.tuc > 0) rows.add(new Object[]{"NUMBER OF UPGRADES AVAILABLE : " + slots, WHITE, true});
         }
         if (!info.desc.isEmpty()) rows.add(new Object[]{stripMarkup(info.desc), WHITE, false});
+        if (itemId / 10000 == 910) packageRows();
+    }
+
+    /** A package lists what it holds and what each piece does (each arrives in the Cash Inventory). */
+    private void packageRows() {
+        java.util.List<int[]> in = ItemInfo.packageContents(info.id);
+        rows.add(new Object[]{"This package contains " + in.size() + " item" + (in.size() == 1 ? "" : "s") + ":", WHITE, false});
+        for (int[] c : in) {
+            ItemInfo p = ItemInfo.get(c[0]);
+            String line = "- " + (p.name.isEmpty() ? "Item " + c[0] : p.name) + (c[1] > 1 ? " x" + c[1] : "");
+            if (c[2] > 0 && !offline.OfflineOptions.permanentCash) line += " (" + c[2] + " days)";
+            rows.add(new Object[]{line, 0xFFFFCC00, false});
+            String what = p.isEquip() ? equipSummary(p) : stripMarkup(p.desc).replace('\n', ' ').trim();
+            if (what.length() > 150) what = what.substring(0, 147).trim() + "...";
+            if (!what.isEmpty()) rows.add(new Object[]{what, MUTED, true});
+        }
+    }
+
+    /** "Hat, req. Lv. 10: STR +2, Speed +5" for an equip inside a package. */
+    private static String equipSummary(ItemInfo p) {
+        StringBuilder b = new StringBuilder(slotName(p.id));
+        if (p.reqLevel > 0) b.append(", req. Lv. ").append(p.reqLevel);
+        String[][] stats = {{"incSTR", "STR"}, {"incDEX", "DEX"}, {"incINT", "INT"}, {"incLUK", "LUK"}, {"incMHP", "HP"},
+                {"incMMP", "MP"}, {"incPAD", "Weapon ATT"}, {"incMAD", "Magic ATT"}, {"incPDD", "Weapon DEF"},
+                {"incMDD", "Magic DEF"}, {"incACC", "Accuracy"}, {"incEVA", "Avoid"}, {"incSpeed", "Speed"}, {"incJump", "Jump"}};
+        String sep = ": ";
+        for (String[] s : stats) {
+            int v = p.info.getInt(s[0], 0);
+            if (v == 0) continue;
+            b.append(sep).append(s[1]).append(v > 0 ? " +" : " ").append(v);
+            sep = ", ";
+        }
+        if (p.desc.length() > 0) b.append(". ").append(stripMarkup(p.desc).replace('\n', ' ').trim());
+        return b.toString();
+    }
+
+    private static String slotName(int id) {
+        switch (id / 10000) {
+            case 100: return "Hat";
+            case 101: return "Face accessory";
+            case 102: return "Eye accessory";
+            case 103: return "Earrings";
+            case 104: return "Top";
+            case 105: return "Overall";
+            case 106: return "Bottom";
+            case 107: return "Shoes";
+            case 108: return "Gloves";
+            case 109: return "Shield";
+            case 110: return "Cape";
+            case 111: return "Ring";
+            case 112: return "Pendant";
+            case 180: case 181: case 182: case 183: return "Pet equipment";
+            case 190: return "Mount";
+            case 191: return "Saddle";
+            default:
+                if (id / 10000 == 170) return "Weapon (cash cover)";
+                if (id / 10000 >= 130 && id / 10000 < 170) return "Weapon";
+                return "Equipment";
+        }
     }
 
     private void stat(String label, String key, Integer actual) {

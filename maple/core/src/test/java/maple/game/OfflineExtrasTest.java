@@ -255,6 +255,97 @@ public class OfflineExtrasTest {
         enterMap(warp[0]);
     }
 
+    /** Cash Shop packages: buying one fills the locker with its items, and each comes out into the bag. */
+    @Test(timeout = 1800000)
+    public void cashPackages() throws Exception {
+        boolean[] opened = {false};
+        c.cashShopHandler = () -> opened[0] = true;
+        c.enterCashShop();
+        stepUntil(() -> opened[0] && c.inCashShop, 10000);
+        world.cashCheck();
+        stepUntil(() -> world.cash.nxCredit > 0, 5000);
+        java.util.List<int[]> packs = new java.util.ArrayList<>();
+        for (maple.wz.WzNode n : wz.get("Etc/Commodity.img").children()) {
+            int sn = n.getInt("SN", 0), id = n.getInt("ItemId", 0);
+            server.CashShop.CashItem ci = server.CashShop.CashItemFactory.getItem(sn);
+            if (id / 10000 == 910 && ci != null && ci.isOnSale()) packs.add(new int[]{sn, id});
+        }
+        System.out.println("packages offered: " + packs.size());
+        assertTrue(packs.size() > 20);
+        int equips = 0;
+        for (int[] p : packs) {
+                        java.util.List<?> contents = server.CashShop.CashItemFactory.getPackage(p[1]);
+            assertFalse("package " + p[1] + " has contents", contents.isEmpty());
+            ItemInfo pi = ItemInfo.get(p[1]);
+            assertTrue("package " + p[1] + " named: " + pi.name, !pi.name.isEmpty() && !pi.name.equals("None") && !QuestBook.korean(pi.name));
+            assertTrue("package " + p[1] + " has an icon", pi.icon().exists());
+            assertEquals("package " + p[1] + " lists its items", contents.size(), ItemInfo.packageContents(p[1]).size());
+            for (int[] in : ItemInfo.packageContents(p[1])) assertTrue("content " + in[0] + " named", ItemInfo.named(in[0]));
+            int before = world.cash.locker.size();
+            world.cashBuy(p[0], p[1], 1);
+            stepUntil(() -> world.cash.locker.size() >= before + contents.size(), 10000);
+            assertEquals("package " + p[1] + " bought", before + contents.size(), world.cash.locker.size());
+            java.util.List<CashShopState.Entry> got = new java.util.ArrayList<>(world.cash.locker.subList(before, world.cash.locker.size()));
+            for (CashShopState.Entry e : got) {
+                assertNotEquals("no package item itself in the locker", 910, e.itemId / 10000);
+                int type = ItemInfo.inventoryType(e.itemId);
+                if (c.player.inventory(type).size() >= c.player.slotLimits[type]) { // a full bag says so
+                    world.cash.message = null;
+                    world.cashTakeOut(e.cashId);
+                    stepUntil(() -> world.cash.message != null, 5000);
+                    assertEquals("Your inventory is full.", world.cash.message);
+                    int slots = c.player.slotLimits[type];
+                    world.cashExpand(type, 1); // make room and carry on
+                    stepUntil(() -> c.player.slotLimits[type] > slots, 5000);
+                    assertTrue("bag expanded", c.player.slotLimits[type] > slots);
+                }
+                long n0 = c.player.inventory(type).values().stream().filter(it -> it.itemId == e.itemId).count();
+                world.cashTakeOut(e.cashId);
+                stepUntil(() -> c.player.inventory(type).values().stream().filter(it -> it.itemId == e.itemId).count() > n0, 5000);
+                assertTrue("took out " + e.itemId + " from package " + p[1],
+                        c.player.inventory(type).values().stream().filter(it -> it.itemId == e.itemId).count() > n0);
+                assertFalse("left the locker", world.cash.locker.stream().anyMatch(x -> x.cashId == e.cashId));
+                Item out = null;
+                for (Item it : c.player.inventory(type).values()) if (it.cashId == e.cashId) out = it;
+                assertNotNull("same item in the bag", out);
+                world.cashPutBack(out); // and back, keeping the bag from filling up
+                stepUntil(() -> world.cash.locker.stream().anyMatch(x -> x.cashId == e.cashId), 5000);
+                assertTrue("put back " + e.itemId, world.cash.locker.stream().anyMatch(x -> x.cashId == e.cashId));
+                if (type == 1) equips++;
+            }
+        }
+        assertTrue("equips came out: " + equips, equips > 300);
+        warp = null;
+        c.leaveCashShop();
+        pump(() -> warp != null);
+        enterMap(warp[0]);
+    }
+
+    /** A cash weapon cover goes on at -111 over the real weapon, which stays, and is drawn with art for that weapon type. */
+    @Test(timeout = 120000)
+    public void weaponCover() throws Exception {
+        client.Character chr = server();
+        client.inventory.Inventory worn = chr.getInventory(client.inventory.InventoryType.EQUIPPED);
+        if (worn.getItem((short) -11) == null) {
+            if (firstOf(1, 1302000) == null) give(1302000, 1);
+            world.equip(firstOf(1, 1302000).position);
+            stepUntil(() -> worn.getItem((short) -11) != null, 5000);
+        }
+        int weapon = worn.getItem((short) -11).getItemId();
+        give(1702119, 1);
+        assertEquals("a cover is a weapon-slot item", -11, ItemInfo.equipSlot(1702119));
+        assertFalse(ItemInfo.get(1702119).name.isEmpty());
+        world.equip(firstOf(1, 1702119).position);
+        stepUntil(() -> worn.getItem((short) -111) != null, 5000);
+        assertEquals("cover worn at -111", 1702119, worn.getItem((short) -111).getItemId());
+        assertEquals("weapon still worn", weapon, worn.getItem((short) -11).getItemId());
+        maple.chr.Avatar a = new maple.chr.Avatar(wz, 0, 20000, 30000, new int[]{1040002, weapon, 1702119});
+        assertEquals("cover art drawn", 1702119, a.coverDrawn);
+        assertEquals("", a.problems);
+        assertNotNull(a.frames("stand1"));
+        a.dispose();
+    }
+
     static Npc npc(int id) {
         for (Npc n : world.npcs.values()) if (n.id == id) return n;
         return null;
