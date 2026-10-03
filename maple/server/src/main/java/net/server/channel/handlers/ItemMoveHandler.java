@@ -35,7 +35,8 @@ public final class ItemMoveHandler extends AbstractPacketHandler {
     @Override
     public final void handlePacket(InPacket p, Client c) {
         p.skip(4);
-        if (c.getPlayer().getAutobanManager().getLastSpam(6) + 300 > currentServerTime()) {
+        // real time: the coarse server clock (777 ms steps) made two moves in one step look 0 ms apart
+        if (c.getPlayer().getAutobanManager().getLastSpam(6) + 300 > System.currentTimeMillis()) {
             c.sendPacket(PacketCreator.enableActions());
             return;
         }
@@ -55,6 +56,6 @@ public final class ItemMoveHandler extends AbstractPacketHandler {
             InventoryManipulator.move(c, type, src, action);
         }
 
-        c.getPlayer().getAutobanManager().spam(6);
+        c.getPlayer().getAutobanManager().spamAt(6, System.currentTimeMillis());
     }
 }

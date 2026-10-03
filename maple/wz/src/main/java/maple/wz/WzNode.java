@@ -69,6 +69,13 @@ public class WzNode {
         return this;
     }
 
+    /** Removes a child (patches: drop a value a copied image should not keep). */
+    public WzNode remove(String name) {
+        ensureParsed();
+        if (children != null) children.remove(name);
+        return this;
+    }
+
     /** Puts an existing node (e.g. another item's icon) here as well, under its own name. */
     public WzNode addExisting(WzNode node) {
         if (node != null && node != MISSING) add(node);

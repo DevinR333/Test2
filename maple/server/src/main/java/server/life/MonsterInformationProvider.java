@@ -170,6 +170,8 @@ public class MonsterInformationProvider {
 
         int template = offline.OfflineItems.dropTemplate(monsterId);
         if (ret.isEmpty() && template != 0) ret.addAll(retrieveDrop(template)); // offline: holiday monsters
+        if (monsterId == offline.UltimateExplorer.HARP || monsterId == offline.UltimateExplorer.BLOOD_HARP) // Empress's Grace
+            ret.add(new MonsterDropEntry(offline.UltimateExplorer.PERIDOT, offline.UltimateExplorer.PERIDOT_CHANCE, 1, 1, (short) offline.UltimateExplorer.QUEST_GRACE));
 
         drops.put(monsterId, ret);
         return ret;

@@ -1819,6 +1819,7 @@ public class Character extends AbstractCharacterObject {
             if (!GameConstants.isHiddenSkills(skill.getId())) {
                 sendPacket(PacketCreator.updateSkill(skill.getId(), newLevel, newMasterlevel, expiration));
             }
+            if (skill.getId() == offline.UltimateExplorer.SHOUT && client != null && getMap() != null) updateLocalStats(); // Empress's Shout: max HP/MP
         } else {
             skills.remove(skill);
             sendPacket(PacketCreator.updateSkill(skill.getId(), newLevel, newMasterlevel, -1)); //Shouldn't use expiration anymore :)
@@ -7611,8 +7612,10 @@ public class Character extends AbstractCharacterObject {
             //equipspeed = 0;
             //equipjump = 0;
 
+            List<Integer> worn = new ArrayList<>();
             for (Item item : getInventory(InventoryType.EQUIPPED)) {
                 Equip equip = (Equip) item;
+                worn.add(equip.getItemId());
                 equipmaxhp += equip.getHp();
                 equipmaxmp += equip.getMp();
                 equipdex += equip.getDex();
@@ -7624,6 +7627,15 @@ public class Character extends AbstractCharacterObject {
                 //equipspeed += equip.getSpeed();
                 //equipjump += equip.getJump();
             }
+            int[] set = offline.UltimateExplorer.setBonus(worn); // Empress's Fine / Brilliant set effects
+            equipstr += set[0];
+            equipdex += set[1];
+            equipint_ += set[2];
+            equipluk += set[3];
+            equipmaxhp += set[4];
+            equipmaxmp += set[5];
+            equipwatk += set[6];
+            equipmagic += set[7] + set[2];
 
             equipchanged = false;
         }
@@ -7636,6 +7648,14 @@ public class Character extends AbstractCharacterObject {
         localluk += equipluk;
         localmagic += equipmagic;
         localwatk += equipwatk;
+    }
+
+    private transient int knightLevel = -1;
+
+    /** The best level among this account's other Cygnus Knights in this world (Empress's Blessing). */
+    public int bestKnightLevel() {
+        if (knightLevel < 0) knightLevel = offline.UltimateExplorer.bestKnightLevel(accountid, world, id);
+        return knightLevel;
     }
 
     private void reapplyLocalStats() {
@@ -7664,6 +7684,11 @@ public class Character extends AbstractCharacterObject {
             Integer hbmp = getBuffedValue(BuffStat.HYPERBODYMP);
             if (hbmp != null) {
                 localmaxmp += (hbmp.doubleValue() / 100) * localmaxmp;
+            }
+
+            if (getSkillLevel(offline.UltimateExplorer.SHOUT) > 0) { // Empress's Shout: +20% max HP / MP
+                localmaxhp += localmaxhp / 5;
+                localmaxmp += localmaxmp / 5;
             }
 
             localmaxhp = Math.min(30000, localmaxhp);
@@ -7721,6 +7746,10 @@ public class Character extends AbstractCharacterObject {
                 localjump += jumpbuff.intValue();
             }
             */
+
+            int empress = offline.UltimateExplorer.blessing(bestKnightLevel()); // Empress's Blessing
+            localwatk += empress;
+            localmagic += empress;
 
             Integer blessing = getSkillLevel(10000000 * getJobType() + 12);
             if (blessing > 0) {

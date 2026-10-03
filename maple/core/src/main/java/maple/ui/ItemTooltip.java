@@ -15,6 +15,8 @@ import java.util.List;
  * UIWindow.img/ToolTip/Equip Can/Cannot requirement and job art, then stats and the description.
  */
 public final class ItemTooltip extends Tooltip {
+    /** Levels added to yours for level requirements (Empress's Might: 10). */
+    public static int levelBonus;
     private static final int WHITE = 0xFFFFFFFF, HEADING = 0xFFFDF514, MUTED = 0xFFBCBCBC, IMPROVED = 0xFFFF8A18;
     private final UiAssets assets;
     private final ItemInfo info;
@@ -129,6 +131,7 @@ public final class ItemTooltip extends Tooltip {
 
     private String title() {
         String name = info.name.isEmpty() ? "Item " + info.id : info.name;
+        if (info.id == offline.UltimateExplorer.MEDAL && item != null && !item.owner.isEmpty()) name = item.owner + "'s Successor";
         if (info.id / 10000 == 204 && !name.matches(".*\\d+\\s*%.*")) {
             int rate = info.info.getInt("success", -1);
             if (rate >= 0) name += " " + rate + "%";
@@ -172,7 +175,7 @@ public final class ItemTooltip extends Tooltip {
         if (equip) {
             String[][] req = {{"reqLEV", "reqLevel"}, {"reqSTR", "reqSTR"}, {"reqDEX", "reqDEX"}, {"reqINT", "reqINT"}, {"reqLUK", "reqLUK"}, {"reqPOP", "reqPOP"}};
             int[] need = {info.reqLevel, info.reqStr, info.reqDex, info.reqInt, info.reqLuk, info.reqPop};
-            int[] have = me == null ? new int[6] : new int[]{me.level, me.str, me.dex, me.intel, me.luk, me.fame};
+            int[] have = me == null ? new int[6] : new int[]{me.level + levelBonus, me.str, me.dex, me.intel, me.luk, me.fame};
             for (int i = 0; i < 6; i++) {
                 boolean can = me == null || have[i] >= need[i];
                 String prefix = "UIWindow.img/ToolTip/Equip/" + (can ? "Can" : "Cannot") + "/";

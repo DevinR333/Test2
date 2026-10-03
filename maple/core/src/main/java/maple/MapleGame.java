@@ -164,6 +164,7 @@ public class MapleGame extends ApplicationAdapter {
         batch = new SpriteBatch(4000);
         Gdx.input.setCatchKey(Input.Keys.BACK, true);
         Gdx.input.setInputProcessor(new InputHandler());
+        offline.OfflineItems.install(); // before anything reads the data (it adds whole new images too)
         wz = new Wz(source);
         Log.info("WZ source: " + source.describe() + ", build " + Log.build());
         try {
@@ -181,7 +182,6 @@ public class MapleGame extends ApplicationAdapter {
         UiSounds.init(wz);
         assets = new UiAssets(wz);
         g = new UiDraw(batch, assets);
-        offline.OfflineItems.install(); // before anything reads the item data
         ui = new Ui(assets, g);
         ui.setPrefs(prefs);
         try {
@@ -203,7 +203,7 @@ public class MapleGame extends ApplicationAdapter {
     }
 
     private boolean option(String key) {
-        boolean def = key.equals("music") || key.equals("sound") || key.equals("freeCashShop") || key.equals("permanentCash") || key.equals("limitedCash") || key.equals("holidays") || key.equals("petLoot") || key.equals("touch") && Gdx.app.getType() == com.badlogic.gdx.Application.ApplicationType.Android;
+        boolean def = key.equals("music") || key.equals("sound") || key.equals("freeCashShop") || key.equals("permanentCash") || key.equals("limitedCash") || key.equals("holidays") || key.equals("petLoot") || key.equals("empressBlessing") || key.equals("touch") && Gdx.app.getType() == com.badlogic.gdx.Application.ApplicationType.Android;
         return prefs.getBoolean("opt." + key, def);
     }
 
@@ -222,6 +222,7 @@ public class MapleGame extends ApplicationAdapter {
         offline.OfflineOptions.limitedCash = option("limitedCash");
         offline.OfflineOptions.holidays = option("holidays");
         offline.OfflineOptions.petLoot = option("petLoot");
+        offline.OfflineOptions.empressBlessing = option("empressBlessing");
         offline.OfflineOptions.expRate = rate("exp");
         offline.OfflineOptions.mesoRate = rate("meso");
         offline.OfflineOptions.dropRate = rate("drop");
@@ -1120,8 +1121,11 @@ public class MapleGame extends ApplicationAdapter {
             if (old != null) ui.close(old);
             StyleDialog oldStyle = ui.find(StyleDialog.class);
             if (oldStyle != null) ui.close(oldStyle);
+            maple.ui.windows.UltimateCreator oldCreator = ui.find(maple.ui.windows.UltimateCreator.class);
+            if (oldCreator != null) ui.close(oldCreator);
             if (talk == null) return;
-            if (talk.type == 7 && talk.styles.length > 0) ui.open(new StyleDialog(ui, world, talk));
+            if (talk.type == 2 && talk.text.startsWith(offline.UltimateExplorer.CREATOR)) ui.open(new maple.ui.windows.UltimateCreator(ui, world, talk));
+            else if (talk.type == 7 && talk.styles.length > 0) ui.open(new StyleDialog(ui, world, talk));
             else ui.open(new NpcDialog(ui, world, talk));
         }
 

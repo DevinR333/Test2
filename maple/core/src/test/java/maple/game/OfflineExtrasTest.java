@@ -346,6 +346,174 @@ public class OfflineExtrasTest {
         a.dispose();
     }
 
+    /**
+     * Ultimate Explorers: the data is there for game and server, a level-120 knight takes Empress's
+     * Grace from Cygnus and turns in 10 Peridots for Shout and Prayer, the set effects count on both
+     * sides, Cygnus makes the Ultimate Explorer once (level 50, 2nd job, the Fine Set worn, the medal
+     * with the knight's name, Empress's Might), and Might and the Brilliant Set work.
+     */
+    @Test(timeout = 300000)
+    public void ultimateExplorer() throws Exception {
+        final int Q = offline.UltimateExplorer.QUEST_GRACE, CYG = offline.UltimateExplorer.CYGNUS;
+        server.ItemInformationProvider ii = server.ItemInformationProvider.getInstance();
+        // data, on both sides
+        assertEquals("Peridot", ItemInfo.get(offline.UltimateExplorer.PERIDOT).name);
+        assertTrue(ItemInfo.get(offline.UltimateExplorer.PERIDOT).icon().exists());
+        for (int[] j : offline.UltimateExplorer.JOBS) {
+            for (int id : new int[]{j[1], j[2]}) {
+                assertTrue(id + " named", ItemInfo.get(id).name.startsWith("Empress's "));
+                assertTrue(id + " has art", ItemInfo.get(id).icon().exists());
+                assertNotNull(id + " on the server", ii.getEquipById(id));
+                assertEquals(id + " level", ItemInfo.get(id).id / 1 > 0 ? (offline.UltimateExplorer.isFine(id) ? 60 : 80) : 0, ItemInfo.get(id).reqLevel);
+            }
+        }
+        for (int id : new int[]{offline.UltimateExplorer.FINE_HAT, offline.UltimateExplorer.FINE_ROBE, offline.UltimateExplorer.FINE_GLOVES,
+                offline.UltimateExplorer.FINE_SHOES, offline.UltimateExplorer.BRILLIANT_HAT, offline.UltimateExplorer.BRILLIANT_ROBE,
+                offline.UltimateExplorer.BRILLIANT_GLOVES, offline.UltimateExplorer.BRILLIANT_SHOES, offline.UltimateExplorer.MEDAL}) {
+            assertFalse(id + " named", ItemInfo.get(id).name.isEmpty());
+            assertTrue(id + " art", ItemInfo.get(id).icon().exists());
+            assertNotNull("server " + id, ii.getEquipById(id));
+        }
+        assertEquals(7, ii.getEquipById(offline.UltimateExplorer.FINE_HAT) instanceof client.inventory.Equip
+                ? ((client.inventory.Equip) ii.getEquipById(offline.UltimateExplorer.FINE_HAT)).getStr() : -1);
+        assertNotNull(client.SkillFactory.getSkill(offline.UltimateExplorer.SHOUT));
+        assertNotNull(client.SkillFactory.getSkill(offline.UltimateExplorer.PRAYER));
+        assertNotNull(client.SkillFactory.getSkill(offline.UltimateExplorer.MIGHT));
+        assertEquals(4, client.SkillFactory.getSkill(offline.UltimateExplorer.PRAYER).getEffect(1).getX());
+        assertTrue("Peridots drop from Harps during the quest", server.life.MonsterInformationProvider.getInstance()
+                .retrieveDrop(offline.UltimateExplorer.HARP).stream().anyMatch(e -> e.itemId == offline.UltimateExplorer.PERIDOT && e.questid == Q));
+
+        // a level-120 Dawn Warrior in Ereve
+        client.Character chr = server();
+        chr.changeJob(client.Job.DAWNWARRIOR3);
+        while (chr.getLevel() < 120) chr.levelUp(false);
+        stepUntil(() -> c.player.stats.level == 120 && c.player.stats.job == 1111, 5000);
+        warp = null;
+        chr.changeMap(130000000);
+        pump(() -> warp != null);
+        enterMap(warp[0]);
+        stepUntil(() -> npc(CYG) != null, 5000);
+        assertNotNull("Cygnus is here", npc(CYG));
+        assertTrue("Empress's Grace offered", world.quests.startable(CYG).contains(Q));
+        player.spawn(npc(CYG).x, npc(CYG).y - 10);
+        for (int i = 0; i < 50; i++) step();
+        sendMove();
+        for (int i = 0; i < 50; i++) step();
+        talkThrough(npc(CYG), "Empress's Grace");
+        stepUntil(() -> world.quests.state(Q) == 1, 5000);
+        assertEquals("started", 1, world.quests.state(Q));
+        assertFalse("not ready without Peridots", world.quests.ready(Q));
+        give(offline.UltimateExplorer.PERIDOT, 10);
+        Thread.sleep(600);
+        assertTrue("ready with 10", world.quests.ready(Q));
+        int hpBefore = chr.getCurrentMaxHp();
+        talkThrough(npc(CYG), "Empress's Grace");
+        stepUntil(() -> world.quests.state(Q) == 2, 5000);
+        assertEquals("completed", 2, world.quests.state(Q));
+        stepUntil(() -> c.player.skills.containsKey(offline.UltimateExplorer.SHOUT), 5000);
+        assertTrue("Empress's Shout learned", c.player.skills.containsKey(offline.UltimateExplorer.SHOUT));
+        assertTrue("Empress's Prayer learned", c.player.skills.containsKey(offline.UltimateExplorer.PRAYER));
+        assertNull("Peridots taken", firstOf(4, offline.UltimateExplorer.PERIDOT));
+        assertEquals("Shout: max HP +20%", hpBefore + hpBefore / 5, chr.getCurrentMaxHp(), 2);
+        assertEquals("client agrees", chr.getCurrentMaxHp(), world.stats.maxHp, 2);
+
+        // set effect: the whole Fine Set worn
+        for (int id : offline.UltimateExplorer.fineSet(1111)) {
+            give(id, 1);
+            Thread.sleep(350); // the server ignores item moves under 300 ms apart
+            world.equip(firstOf(1, id).position);
+            stepUntil(() -> chr.getInventory(client.inventory.InventoryType.EQUIPPED).findById(id) != null, 5000);
+            assertNotNull("wearing " + id + " bag " + c.player.inventory(1).size() + " chat " + chat, chr.getInventory(client.inventory.InventoryType.EQUIPPED).findById(id));
+        }
+        int itemStr = 0;
+        for (client.inventory.Item it : chr.getInventory(client.inventory.InventoryType.EQUIPPED)) itemStr += ((client.inventory.Equip) it).getStr();
+        java.util.List<Integer> wornIds = new java.util.ArrayList<>();
+        for (client.inventory.Item it : chr.getInventory(client.inventory.InventoryType.EQUIPPED)) wornIds.add(it.getItemId());
+        assertEquals("5-piece set: STR +6 on the server " + wornIds + " " + java.util.Arrays.toString(offline.UltimateExplorer.setBonus(wornIds)), chr.getStr() + itemStr + 6, chr.getTotalStr());
+        for (int i = 0; i < 20; i++) step();
+        assertEquals("and in the game's stat window", chr.getTotalStr(), world.stats.str);
+
+        // Cygnus makes the Ultimate Explorer through the creation screen
+        assertEquals(1, offline.UltimateExplorer.knightState(chr));
+        world.talkTo(npc(CYG)); // no quests left with her: straight to her own words
+        NpcTalk menu = world.talk;
+        if (menu != null && menu.local != null) {
+            java.util.regex.Matcher m = java.util.regex.Pattern.compile("#L(\\d+)#Talk to").matcher(menu.text);
+            assertTrue(menu.text, m.find());
+            world.answer(1, Integer.parseInt(m.group(1)), null);
+        }
+        stepUntil(() -> world.talk != null && world.talk.type == 1, 5000);
+        assertEquals("asks first", 1, world.talk.type);
+        world.answer(1, 0, null);
+        stepUntil(() -> world.talk != null && world.talk.type == 2, 5000);
+        assertTrue("opens the creation screen", world.talk.text.startsWith(offline.UltimateExplorer.CREATOR));
+        world.answer(1, 0, "Shopper|110|20000|30000|0|0|0"); // a taken name
+        stepUntil(() -> world.talk != null && world.talk.type == 2 && world.talk.text.length() > offline.UltimateExplorer.CREATOR.length(), 5000);
+        assertTrue("name taken: asked again", world.talk.text.contains("name"));
+        world.answer(1, 0, "Successor1|110|20000|30000|0|0|0");
+        stepUntil(() -> world.talk != null && world.talk.type == 0, 5000);
+        assertTrue(world.talk.text, world.talk.text.contains("Successor1"));
+        world.answer(0, 0, null);
+        assertEquals("one per knight", 2, offline.UltimateExplorer.knightState(chr));
+        assertEquals(-4, offline.UltimateExplorer.create(chr.getClient(), chr, "Successor2", 110, 20000, 30000, 0, 0));
+        int[] made = ultimate("Successor1");
+        assertNotNull("saved", made);
+        assertEquals("level 50", 50, made[0]);
+        assertEquals("Fighter", 110, made[1]);
+        java.util.Set<Integer> worn = new java.util.HashSet<>();
+        String medalOwner = null;
+        try (java.sql.Connection con = tools.DatabaseConnection.getConnection();
+             java.sql.PreparedStatement ps = con.prepareStatement("SELECT i.itemid, i.position, i.owner FROM inventoryitems i WHERE i.characterid = ? AND i.position < 0")) {
+            ps.setInt(1, made[2]);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                while (rs.next()) {
+                    worn.add(rs.getInt(1));
+                    if (rs.getInt(1) == offline.UltimateExplorer.MEDAL) medalOwner = rs.getString(3);
+                }
+            }
+        }
+        for (int id : offline.UltimateExplorer.fineSet(110)) assertTrue("wears " + id + ": " + worn, worn.contains(id));
+        assertTrue("medal worn", worn.contains(offline.UltimateExplorer.MEDAL));
+        assertEquals("medal carries the knight's name", "Shopper", medalOwner);
+        try (java.sql.Connection con = tools.DatabaseConnection.getConnection();
+             java.sql.PreparedStatement ps = con.prepareStatement("SELECT skilllevel FROM skills WHERE characterid = ? AND skillid = ?")) {
+            ps.setInt(1, made[2]);
+            ps.setInt(2, offline.UltimateExplorer.MIGHT);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                assertTrue("Empress's Might", rs.next() && rs.getInt(1) == 1);
+            }
+        }
+
+        // Might: items up to 10 levels above (tried on this character for the moment), and the Brilliant Set at 70+
+        client.inventory.Equip hat = (client.inventory.Equip) ii.getEquipById(offline.UltimateExplorer.FINE_HAT); // level 60
+        chr.setLevel(55);
+        boolean without = ii.canWearEquipment(chr, hat, -1);
+        chr.changeSkillLevel(client.SkillFactory.getSkill(offline.UltimateExplorer.MIGHT), (byte) 1, 1, -1);
+        assertTrue("Empress's Might", offline.UltimateExplorer.isUltimate(chr));
+        assertFalse("a level-60 hat is too high at 55", without);
+        assertTrue("Might: 10 levels higher", ii.canWearEquipment(chr, hat, -1));
+        chr.setLevel(120);
+        assertEquals(0, offline.UltimateExplorer.upgrade(chr));
+        for (int id : offline.UltimateExplorer.brilliantSet(1111)) {
+            int bid = id;
+            stepUntil(() -> firstOf(1, bid) != null, 5000);
+            assertNotNull("Brilliant " + id, firstOf(1, id));
+        }
+        assertEquals("only once", -3, offline.UltimateExplorer.upgrade(chr));
+        chr.changeSkillLevel(client.SkillFactory.getSkill(offline.UltimateExplorer.MIGHT), (byte) 0, 0, -1);
+    }
+
+    /** {level, job, id} of a saved character, or null. */
+    static int[] ultimate(String name) throws Exception {
+        try (java.sql.Connection con = tools.DatabaseConnection.getConnection();
+             java.sql.PreparedStatement ps = con.prepareStatement("SELECT level, job, id FROM characters WHERE name = ?")) {
+            ps.setString(1, name);
+            try (java.sql.ResultSet rs = ps.executeQuery()) {
+                return rs.next() ? new int[]{rs.getInt(1), rs.getInt(2), rs.getInt(3)} : null;
+            }
+        }
+    }
+
     static Npc npc(int id) {
         for (Npc n : world.npcs.values()) if (n.id == id) return n;
         return null;

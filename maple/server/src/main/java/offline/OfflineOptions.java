@@ -16,6 +16,8 @@ public final class OfflineOptions {
     public static volatile boolean holidays = true;
     /** Pets loot mesos and items without wearing a Meso Magnet / Item Pouch. */
     public static volatile boolean petLoot = true;
+    /** Ultimate Explorers' Empress's Blessing: other characters gain from your best Cygnus Knight's level. */
+    public static volatile boolean empressBlessing = true;
     /** World rates, changeable while playing (OfflineServer.applyRates). */
     public static volatile int expRate = 3, mesoRate = 5, dropRate = 1;
 

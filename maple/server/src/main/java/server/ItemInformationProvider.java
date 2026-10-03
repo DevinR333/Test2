@@ -1794,6 +1794,7 @@ public class ItemInformationProvider {
              Really hard check, and not really needed in this one
              Gm's should just be GM job, and players cannot change jobs.
              }*/
+            if (offline.UltimateExplorer.isUltimate(chr)) reqLevel -= 10; // Empress's Might
             if (reqLevel > chr.getLevel()) {
                 continue;
             } else if (getEquipStats(equip.getItemId()).get("reqDEX") > tdex) {
@@ -1860,6 +1861,7 @@ public class ItemInformationProvider {
         if (highfivestamp) {
             reqLevel -= 5;
         }
+        if (offline.UltimateExplorer.isUltimate(chr)) reqLevel -= 10; // Empress's Might
         int i = 0; //lol xD
         //Removed job check. Shouldn't really be needed.
         if (reqLevel > chr.getLevel()) {

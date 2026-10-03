@@ -93,6 +93,10 @@ public class AutobanManager {
         this.spam[type] = timestamp;
     }
 
+    public void spamAt(int type, long time) {
+        this.spam[type] = time;
+    }
+
     public long getLastSpam(int type) {
         return spam[type];
     }

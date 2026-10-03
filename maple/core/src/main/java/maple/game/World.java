@@ -1,5 +1,7 @@
 package maple.game;
 
+import maple.ui.ItemTooltip;
+
 import com.badlogic.gdx.graphics.g2d.Batch;
 import maple.chr.Avatar;
 import maple.chr.Player;
@@ -144,6 +146,13 @@ public final class World {
 
     public void recomputeStats() {
         if (data() == null) return;
+        // Empress's Blessing: the best of this account's other Cygnus Knights
+        int best = 0;
+        for (maple.net.model.CharEntry e : client.characters) {
+            if (e.stats.id != data().stats.id && offline.UltimateExplorer.isKnight(e.stats.job)) best = Math.max(best, e.stats.level);
+        }
+        stats.knightLevel = best;
+        ItemTooltip.levelBonus = data().skills.containsKey(offline.UltimateExplorer.MIGHT) ? 10 : 0; // Empress's Might
         stats.compute(data());
         player.speed = stats.speed;
         player.jump = stats.jump;

@@ -17,6 +17,8 @@ public final class PlayerStats {
     public float mastery = 0.1f, critical;
     /** Buff deltas (from GIVE_BUFF), applied on top of equipment. */
     public int buffWatk, buffMatk, buffWdef, buffMdef, buffAcc, buffAvoid, buffSpeed, buffJump;
+    /** Best level of the account's other Cygnus Knights (Empress's Blessing). */
+    public int knightLevel;
 
     public void compute(PlayerData d) {
         CharStats s = d.stats;
@@ -49,6 +51,32 @@ public final class PlayerStats {
             jump += it.jump;
             if (it.position == -11) weaponId = it.itemId;
         }
+        java.util.List<Integer> worn = new java.util.ArrayList<>();
+        for (Item it : d.inventory(-1).values()) worn.add(it.itemId);
+        int[] set = offline.UltimateExplorer.setBonus(worn); // Empress's set effects
+        str += set[0];
+        dex += set[1];
+        intel += set[2];
+        luk += set[3];
+        maxHp += set[4];
+        maxMp += set[5];
+        watk += set[6];
+        matk += set[7];
+        wdef += set[8];
+        mdef += set[9];
+        acc += set[10];
+        avoid += set[11];
+        speed += set[12];
+        jump += set[13];
+        if (d.skills.containsKey(offline.UltimateExplorer.SHOUT)) { // Empress's Shout
+            maxHp += maxHp / 5;
+            maxMp += maxMp / 5;
+        }
+        int blessing = offline.UltimateExplorer.blessing(knightLevel); // Empress's Blessing
+        watk += blessing;
+        matk += blessing;
+        acc += blessing;
+        avoid += blessing;
         watk += buffWatk;
         matk += buffMatk;
         wdef += buffWdef;

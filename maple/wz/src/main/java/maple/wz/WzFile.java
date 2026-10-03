@@ -178,6 +178,19 @@ public final class WzFile {
                 throw new WzException("bad entry type " + type);
             }
         }
+        java.util.List<String[]> copies = WzPatches.copiesIn(dir.fullPath());
+        if (copies != null && dir.children != null) {
+            for (String[] c : copies) {
+                WzNode base = dir.children.get(c[1]);
+                if (base == null || base.type != WzNode.Type.IMG || dir.children.containsKey(c[0])) continue;
+                WzNode img = new WzNode(dir, c[0], WzNode.Type.IMG);
+                img.file = this;
+                img.offset = base.offset;
+                img.length = base.length;
+                img.parsed = false;
+                dir.add(img);
+            }
+        }
         // Sanity-check one image header so a wrong version hash is caught here.
         if (dir.children != null) {
             for (WzNode n : dir.children.values()) {

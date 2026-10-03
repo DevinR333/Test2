@@ -503,6 +503,7 @@ public class StatEffect {
                 case Noblesse.ECHO_OF_HERO:
                 case Legend.ECHO_OF_HERO:
                 case Evan.ECHO_OF_HERO:
+                case offline.UltimateExplorer.PRAYER: // Empress's Prayer: the same +x% ATT / M.ATT, on yourself
                     statups.add(new Pair<>(BuffStat.ECHO_OF_HERO, ret.x));
                     break;
                 case Beginner.MONSTER_RIDER:

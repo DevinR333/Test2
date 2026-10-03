@@ -71,6 +71,7 @@ public final class OfflineItems {
     public static synchronized void install() {
         if (installed) return;
         installed = true;
+        UltimateExplorer.install();
         WzPatches.register("Item/Consume/0200.img", img -> {
             String id = "0" + LEVEL_POTION;
             if (img.child(id) != null) return;
