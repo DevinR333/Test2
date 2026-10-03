@@ -22,7 +22,7 @@ public final class StatWindow extends Window {
     private static final int[] DETAIL_ROWS = {8, 26, 44, 62, 80, 98, 116, 134, 152};
     private final World world;
     private final Button[] apUp = new Button[6];
-    private final Button detail, hide;
+    private final Button detail, hide, auto;
     private boolean showDetail;
     private final float baseW;
 
@@ -35,6 +35,7 @@ public final class StatWindow extends Window {
             apUp[i] = add(new Button(ui.assets, "UIWindow.img/Stat/BtApUp", 153, AP_ROWS[i], () -> world.distributeAp(mask)));
         }
         detail = add(new Button(ui.assets, "UIWindow.img/Stat/BtDetail", 124, 324, this::toggleDetail));
+        auto = add(new Button(ui.assets, "UIWindow.img/Stat/BtAuto", 91, 203, world::autoAssignMenu)); // beside the AP count
         hide = add(new Button(ui.assets, "Basic.img/BtHide", 170 + 155, 144 + 182, this::toggleDetail));
         if (!hide.present()) {
             remove(hide);
@@ -63,6 +64,7 @@ public final class StatWindow extends Window {
     public void refresh() {
         CharStats s = world.data() == null ? null : world.data().stats;
         for (Button b : apUp) b.disabled = s == null || s.ap <= 0;
+        auto.disabled = s == null || s.ap <= 0;
     }
 
     private static String withBonus(int base, int total) {

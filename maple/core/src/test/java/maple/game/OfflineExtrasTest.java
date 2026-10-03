@@ -518,6 +518,17 @@ public class OfflineExtrasTest {
     public void combatStress() throws Exception {
         client.Character chr = server();
         while (chr.getLevel() < 41) chr.levelUp(false);
+        // a fighter who can actually hurt Stumps: Warrior, STR, a sword
+        if (chr.getJob().getId() == 0) chr.changeJob(client.Job.WARRIOR);
+        chr.gainAp(150, false);
+        stepUntil(() -> c.player.stats.ap >= 150, 5000);
+        world.autoAssign(0x40, chr.getRemainingAp(), 0x80, 0);
+        stepUntil(() -> chr.getRemainingAp() == 0, 5000);
+        if (firstOf(1, 1302000) == null && chr.getInventory(client.inventory.InventoryType.EQUIPPED).getItem((short) -11) == null) give(1302000, 1);
+        if (firstOf(1, 1302000) != null) {
+            world.equip(firstOf(1, 1302000).position);
+            stepUntil(() -> chr.getInventory(client.inventory.InventoryType.EQUIPPED).getItem((short) -11) != null, 5000);
+        }
         warp = null;
         chr.changeMap(101040000);
         pump(() -> warp != null);
@@ -556,6 +567,33 @@ public class OfflineExtrasTest {
         assertTrue("monsters die (" + kills + " kills, " + attacks + " attacks)", kills > 20);
         assertTrue("the game keeps up (worst step " + worstStep + " ms)", worstStep < 500);
         assertTrue("no server errors: " + serverErrors, serverErrors.isEmpty());
+    }
+
+    @Test(timeout = 120000)
+    public void autoAssignAp() throws Exception {
+        client.Character chr = server();
+        chr.gainAp(20, false);
+        stepUntil(() -> c.player.stats.ap >= 20, 5000);
+        assertTrue("client sees the AP (" + c.player.stats.ap + ", server " + chr.getRemainingAp() + ")", c.player.stats.ap >= 20);
+        world.talk = null;
+        int ap = chr.getRemainingAp(), luk = chr.getLuk();
+        world.autoAssignMenu();
+        pick("All into LUK");
+        stepUntil(() -> chr.getRemainingAp() == 0, 5000);
+        assertEquals("all AP into LUK", luk + ap, chr.getLuk());
+
+        // smart: a warrior gets STR, with DEX raised toward its level
+        while (chr.getLevel() < 30) chr.levelUp(false);
+        chr.changeJob(client.Job.WARRIOR);
+        chr.gainAp(30, false);
+        stepUntil(() -> c.player.stats.ap >= 30 && c.player.stats.job == 100, 5000);
+        int ap2 = chr.getRemainingAp(), str = chr.getStr(), dex = chr.getDex();
+        world.autoAssignMenu();
+        pick("Auto-assign for my class");
+        stepUntil(() -> chr.getRemainingAp() == 0, 5000);
+        assertEquals("all AP used", 0, chr.getRemainingAp());
+        assertEquals("split between STR and DEX", str + dex + ap2, chr.getStr() + chr.getDex());
+        assertTrue("mostly STR", chr.getStr() - str >= chr.getDex() - dex || dex >= 30);
     }
 
     @Test(timeout = 60000)

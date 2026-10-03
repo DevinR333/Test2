@@ -2418,6 +2418,52 @@ public final class World {
         }
     }
 
+    private static final int STR = 0x40, DEX = 0x80, INT = 0x100, LUK = 0x200;
+
+    /** Auto-Assign: the class's main stat with enough of its secondary stat, or every point into one stat. */
+    public void autoAssignMenu() {
+        if (data() == null || data().stats.ap <= 0) return;
+        List<String> options = java.util.Arrays.asList("Auto-assign for my class", "All into STR", "All into DEX", "All into INT", "All into LUK");
+        localMenu("You have #b" + data().stats.ap + " AP#k. How should they be used?", options, choice -> {
+            int ap = data().stats.ap;
+            if (choice == 0) {
+                int[] plan = smartPlan();
+                autoAssign(plan[0], ap - plan[2], plan[1], plan[2]);
+            } else {
+                autoAssign(new int[]{STR, DEX, INT, LUK}[choice - 1], ap, STR, 0);
+            }
+        });
+    }
+
+    /** {main stat, secondary stat, points for the secondary} for the character's class. */
+    int[] smartPlan() {
+        maple.net.model.CharStats s = data().stats;
+        int job = s.job % 1000, cls = job / 100, branch = (job % 100) / 10, level = s.level, ap = s.ap;
+        int main, second, target;
+        switch (cls) {
+            case 2: main = INT; second = LUK; target = level; break;              // magician: LUK for wands/staffs
+            case 3: main = DEX; second = STR; target = level / 2 + 4; break;      // bowman
+            case 4: main = LUK; second = DEX; target = level; break;              // thief
+            case 5:
+                if (branch == 2) { main = DEX; second = STR; target = level / 2 + 4; } // gunslinger
+                else { main = STR; second = DEX; target = level / 2 + 4; }            // brawler, 1st job
+                break;
+            default: main = STR; second = DEX; target = level; break;             // warrior, beginner
+        }
+        int have = second == STR ? s.str : second == DEX ? s.dex : second == INT ? s.intel : s.luk;
+        int forSecond = Math.max(0, Math.min(ap, target - have));
+        return new int[]{main, second, forSecond};
+    }
+
+    /** AUTO_DISTRIBUTE_AP: up to two (stat, amount) pairs. */
+    public void autoAssign(int stat1, int amount1, int stat2, int amount2) {
+        PacketWriter w = new PacketWriter(RecvOpcode.AUTO_DISTRIBUTE_AP.getValue());
+        w.writeInt(stamp()).writeInt(0);
+        w.writeInt(stat1).writeInt(Math.max(0, amount1));
+        w.writeInt(stat2).writeInt(Math.max(0, amount2));
+        client.send(w);
+    }
+
     /** AP: stat is the server's Stat mask value (STR 0x40, DEX 0x80, INT 0x100, LUK 0x200, MaxHP 0x800, MaxMP 0x2000). */
     public void distributeAp(int stat) {
         PacketWriter w = new PacketWriter(RecvOpcode.DISTRIBUTE_AP.getValue());
