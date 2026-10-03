@@ -544,14 +544,25 @@ public final class CashShopScreen extends Widget implements Ui.Refreshable {
     }
 
     @Override
+    public Object pinKey(float lx, float ly) {
+        Offer o = offerAt(lx, ly);
+        if (o != null) return "offer" + o.sn;
+        int li = lockerAt(lx, ly);
+        if (li >= 0) return "locker" + world.cash.locker.get(li).cashId;
+        Item it = bagAt(lx, ly);
+        return it == null ? null : "bag" + it.position + ":" + it.itemId;
+    }
+
+    @Override
     public Tooltip tooltip(float lx, float ly) {
         Offer o = offerAt(lx, ly);
         if (o != null) return new ItemTooltip(ui.assets, o.itemId, null, world.data() == null ? null : world.data().stats, false, null);
         int li = lockerAt(lx, ly);
+        String again = ui.touchDevice ? "Tap again" : "Double-click";
         if (li >= 0) return new ItemTooltip(ui.assets, world.cash.locker.get(li).itemId, null, world.data().stats, false,
-                "Double-click to move it to your inventory.");
+                again + " to move it to your inventory.");
         Item it = bagAt(lx, ly);
-        if (it != null) return new ItemTooltip(ui.assets, it.itemId, it, world.data().stats, false, "Double-click to put it in the Cash Inventory.");
+        if (it != null) return new ItemTooltip(ui.assets, it.itemId, it, world.data().stats, false, again + " to put it in the Cash Inventory.");
         return null;
     }
 

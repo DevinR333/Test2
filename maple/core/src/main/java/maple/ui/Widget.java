@@ -89,6 +89,12 @@ public class Widget {
         return null;
     }
 
+    /**
+     * Touch screens: which item is under this point (any value that is equal for the same item), or
+     * null. The first tap on an item only shows its tooltip; the next tap uses it or drags it.
+     */
+    public Object pinKey(float lx, float ly) { return null; }
+
     /** Whether this widget itself takes pointer input (buttons, slots, drag bars...). */
     public boolean interactive() { return false; }
 

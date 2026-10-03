@@ -16,7 +16,7 @@ public class Tooltip {
         public final boolean center;
         public final int size;
 
-        Line(String text, int color, boolean bold, boolean center, int size) {
+        public Line(String text, int color, boolean bold, boolean center, int size) {
             this.text = text;
             this.color = color;
             this.bold = bold;
@@ -57,22 +57,40 @@ public class Tooltip {
         return this;
     }
 
-    /** Draws the tooltip near (px, py), kept on the 800x600 screen. */
-    public void draw(UiDraw g, float px, float py) {
+    private float textW(UiDraw g) {
         float maxW = width > 0 ? width : 0;
         if (maxW == 0) {
             for (Line l : lines) maxW = Math.max(maxW, g.textWidth(l.text, l.size, l.bold));
             maxW = Math.min(maxW, 280);
         }
+        return maxW;
+    }
+
+    /** {width, height} of the box. */
+    public float[] size(UiDraw g) {
+        float maxW = textW(g);
         float iconW = icon != null ? Math.max(icon.w, 32) + 10 : 0;
         float textH = 0;
         for (Line l : lines) textH += lineH(g, l, maxW);
-        float boxW = maxW + iconW + 16, boxH = Math.max(textH, icon != null ? icon.h : 0) + 16;
+        return new float[]{maxW + iconW + 16, Math.max(textH, icon != null ? icon.h : 0) + 16};
+    }
+
+    /** Draws the tooltip near (px, py), kept on the screen. */
+    public void draw(UiDraw g, float px, float py) {
+        float[] sz = size(g);
+        float boxW = sz[0], boxH = sz[1];
         float x = px + 12, y = py + 18;
         if (x + boxW > Ui.W) x = px - boxW - 4;
         if (y + boxH > 600) y = 600 - boxH;
-        x = Math.max(0, x);
-        y = Math.max(0, y);
+        drawAt(g, Math.max(0, x), Math.max(0, y));
+    }
+
+    /** Draws the box with its top-left at (x, y). */
+    public void drawAt(UiDraw g, float x, float y) {
+        float maxW = textW(g);
+        float iconW = icon != null ? Math.max(icon.w, 32) + 10 : 0;
+        float[] sz = size(g);
+        float boxW = sz[0], boxH = sz[1];
         g.fill(x, y, boxW, boxH, BACK);
         g.outline(x, y, boxW, boxH, 0xFFFFFFFF);
         float ty = y + 8;
@@ -85,6 +103,29 @@ public class Tooltip {
             g.text(l.text, lx, ty, maxW, l.center ? com.badlogic.gdx.utils.Align.center : com.badlogic.gdx.utils.Align.left,
                     true, l.size, l.bold, l.color);
             ty += lineH(g, l, maxW);
+        }
+    }
+
+    /** An item's tooltip with what is worn in its place beside it (inventory equips). */
+    public static final class Compare extends Tooltip {
+        private final Tooltip item, worn;
+
+        public Compare(Tooltip item, Tooltip worn) {
+            this.item = item;
+            this.worn = worn;
+        }
+
+        @Override
+        public float[] size(UiDraw g) {
+            float[] a = item.size(g), b = worn.size(g);
+            return new float[]{a[0] + 6 + b[0], Math.max(a[1], b[1])};
+        }
+
+        @Override
+        public void drawAt(UiDraw g, float x, float y) {
+            float[] a = item.size(g);
+            item.drawAt(g, x, y);
+            worn.drawAt(g, x + a[0] + 6, y);
         }
     }
 

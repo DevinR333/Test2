@@ -290,6 +290,35 @@ public final class Ui {
             w.onRightClick(lx, ly);
             return true;
         }
+        // touch screens: first tap on an item shows its stats (nothing moves); tapping it again uses
+        // it, and pressing it and sliding drags it
+        if (touchDevice && carry == null) {
+            Object key = w.pinKey(lx, ly);
+            if (key == null) {
+                pinned = null;
+            } else if (pinned != w || !key.equals(pinKey)) {
+                pinned = w;
+                pinKey = key;
+                pinLx = lx;
+                pinLy = ly;
+                lastClick = null;
+                UiSounds.play("BtMouseClick");
+                return true;
+            } else {
+                pressX = x;
+                pressY = y;
+                if (w.onPress(lx, ly)) {
+                    pinTap = true; // decided on release: tap uses it, slide drags it
+                    pressed = w;
+                    pressedPointer = pointer;
+                } else {
+                    pinned = null; // nothing to drag here: the second tap is the double-click
+                    w.onDoubleClick(lx, ly);
+                }
+                cursorPress();
+                return true;
+            }
+        }
         long now = System.currentTimeMillis();
         boolean dbl = w == lastClick && now - lastClickTime < 400;
         lastClick = w;
@@ -323,6 +352,11 @@ public final class Ui {
     }
 
     private float pressX, pressY;
+    /** Touch: the item whose tooltip is shown after a first tap. */
+    private Widget pinned;
+    private Object pinKey;
+    private float pinLx, pinLy;
+    private boolean pinTap;
 
     private void dropCarry(Carry c, float x, float y) {
         Widget w = widgetAt(x, y);
@@ -359,6 +393,16 @@ public final class Ui {
         pressedPointer = -1;
         float lx = x - absX(p), ly = y - absY(p);
         p.onRelease(lx, ly, p.contains(lx, ly));
+        if (pinTap) { // the second tap on a shown item: a tap uses it, a slide dropped it somewhere
+            pinTap = false;
+            pinned = null;
+            if (carry != null && !carry.dragged) {
+                carry = null;
+                p.onDoubleClick(lx, ly);
+                cursorRelease();
+                return true;
+            }
+        }
         if (carry != null && carry.dragged) {
             // drag-and-drop: drop where the finger/mouse was released
             Carry c = carry;
@@ -470,7 +514,12 @@ public final class Ui {
         }
         drawLayer(overlay);
         if (carry != null && mouseX >= 0) carry.draw(g, mouseX, mouseY);
-        if (hovered != null && pressed == null && carry == null) {
+        if (touchDevice && pinned != null && carry == null) {
+            Tooltip t = attached(pinned) && pinned.visible ? pinned.tooltip(pinLx, pinLy) : null;
+            if (t == null) pinned = null;
+            else t.draw(g, absX(pinned) + pinLx, absY(pinned) + pinLy);
+        }
+        if (hovered != null && pressed == null && carry == null && !touchDevice) {
             Tooltip t = hovered.tooltip(mouseX - absX(hovered), mouseY - absY(hovered));
             if (t != null) t.draw(g, mouseX, mouseY);
         }

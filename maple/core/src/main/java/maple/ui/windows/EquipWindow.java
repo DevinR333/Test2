@@ -139,6 +139,12 @@ public final class EquipWindow extends Window implements Ui.DropTarget {
     }
 
     @Override
+    public Object pinKey(float lx, float ly) {
+        int i = indexAt(lx, ly);
+        return i < 0 || world.data() == null || shown(i) == null ? null : -1000 - i;
+    }
+
+    @Override
     public Tooltip tooltip(float lx, float ly) {
         int i = indexAt(lx, ly);
         if (i < 0 || world.data() == null) return null;

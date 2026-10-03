@@ -195,12 +195,30 @@ public final class ItemWindow extends Window implements Ui.DropTarget {
     }
 
     @Override
+    public Object pinKey(float lx, float ly) {
+        int slot = slotAt(lx, ly);
+        if (slot == 0 || world.data() == null || world.data().inventory(type()).get(slot) == null) return null;
+        return type() * 1000 + slot;
+    }
+
+    @Override
     public Tooltip tooltip(float lx, float ly) {
         int slot = slotAt(lx, ly);
         if (slot == 0 || world.data() == null) return null;
         Item it = world.data().inventory(type()).get(slot);
         if (it == null) return null;
-        return new ItemTooltip(ui.assets, it.itemId, it, world.data().stats, false, null);
+        Tooltip main = new ItemTooltip(ui.assets, it.itemId, it, world.data().stats, false, null);
+        // equips: what is worn in that place, beside it
+        if (type() == 1) {
+            int pos = ItemInfo.equipSlot(it.itemId);
+            Item worn = pos == 0 ? null : world.data().inventory(-1).get(pos);
+            if (worn != null) {
+                Tooltip w = new ItemTooltip(ui.assets, worn.itemId, worn, world.data().stats, true, null);
+                w.lines.add(0, new Tooltip.Line("Currently equipped", 0xFFFFCC00, true, true, 11));
+                return new Tooltip.Compare(main, w);
+            }
+        }
+        return main;
     }
 
     @Override
