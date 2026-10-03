@@ -45,7 +45,7 @@ public class AndroidLauncher extends AndroidApplication {
                 exportDone = done;
                 Intent i = new Intent(Intent.ACTION_CREATE_DOCUMENT);
                 i.addCategory(Intent.CATEGORY_OPENABLE);
-                i.setType("application/zip");
+                i.setType(suggestedName.endsWith(".txt") ? "text/plain" : "application/zip");
                 i.putExtra(Intent.EXTRA_TITLE, suggestedName);
                 try {
                     startActivityForResult(i, EXPORT);

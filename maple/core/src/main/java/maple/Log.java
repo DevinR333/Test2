@@ -45,7 +45,10 @@ public final class Log {
         public synchronized void write(int b) {
             original.write(b);
             if (b == '\n') {
-                remember(new String(line.toByteArray(), java.nio.charset.StandardCharsets.UTF_8).replace("\r", ""));
+                String s = new String(line.toByteArray(), java.nio.charset.StandardCharsets.UTF_8).replace("\r", "");
+                remember(s);
+                // server warnings, errors and stack traces also go to the log file (for bug reports)
+                if (s.contains("WARN") || s.contains("ERROR") || s.contains("Exception") || s.startsWith("\tat ") || s.contains("Autoban")) append(s);
                 line.reset();
             } else if (line.size() < 2000) {
                 line.write(b);

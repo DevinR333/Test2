@@ -71,7 +71,7 @@ public class OfflineExtrasTest {
                 orig.write(b);
                 if (b == '\n') {
                     String l = line.toString();
-                    if (l.contains("Error saving") || l.contains("JdbcSQL")) serverErrors.add(l);
+                    if (l.contains("Error saving") || l.contains("JdbcSQL") || l.contains("Exception") || l.contains("ERROR")) serverErrors.add(l);
                     line.setLength(0);
                 } else line.append((char) b);
             }
@@ -511,6 +511,51 @@ public class OfflineExtrasTest {
         world.answer(1, 0, "hello maple");
         stepUntil(() -> chat.stream().anyMatch(s -> s.contains("hello maple")), 5000);
         assertTrue("megaphone shown: " + chat, chat.stream().anyMatch(s -> s.contains("hello maple")));
+    }
+
+    /** Nonstop fighting on Perion Street Corner: monsters keep dying, the server keeps up, nothing breaks. */
+    @Test(timeout = 300000)
+    public void combatStress() throws Exception {
+        client.Character chr = server();
+        while (chr.getLevel() < 41) chr.levelUp(false);
+        warp = null;
+        chr.changeMap(101040000);
+        pump(() -> warp != null);
+        enterMap(warp[0]);
+        serverErrors.clear();
+        int expStart = c.player.stats.exp + c.player.stats.level * 1000000;
+        long end = System.currentTimeMillis() + 90000, worstStep = 0, worstKill = 0;
+        int attacks = 0, kills = 0;
+        while (System.currentTimeMillis() < end) {
+            Mob target = null;
+            for (Mob m : world.mobs.values()) if (m.alive()) { target = m; break; }
+            if (target == null) { step(); continue; }
+            player.phys.x = target.phys.x + 30;
+            player.phys.y = target.phys.y;
+            player.facingRight = false;
+            sendMove();
+            long t0 = System.currentTimeMillis();
+            Mob tgt = target;
+            for (int a = 0; a < 15 && tgt.alive(); a++) {
+                world.attack();
+                attacks++;
+                for (int i = 0; i < 40; i++) {
+                    long s0 = System.nanoTime();
+                    step();
+                    worstStep = Math.max(worstStep, (System.nanoTime() - s0) / 1000000);
+                }
+            }
+            if (!tgt.alive()) {
+                kills++;
+                worstKill = Math.max(worstKill, System.currentTimeMillis() - t0);
+            }
+        }
+        System.out.println("combatStress: attacks=" + attacks + " kills=" + kills + " worstStepMs=" + worstStep + " worstKillMs=" + worstKill
+                + " exp gained=" + (c.player.stats.exp + c.player.stats.level * 1000000 - expStart) + " serverErrors=" + serverErrors.size());
+        for (String e : serverErrors.subList(0, Math.min(10, serverErrors.size()))) System.out.println("  ERR " + e);
+        assertTrue("monsters die (" + kills + " kills, " + attacks + " attacks)", kills > 20);
+        assertTrue("the game keeps up (worst step " + worstStep + " ms)", worstStep < 500);
+        assertTrue("no server errors: " + serverErrors, serverErrors.isEmpty());
     }
 
     @Test(timeout = 60000)

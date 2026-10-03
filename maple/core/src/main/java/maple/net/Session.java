@@ -53,6 +53,30 @@ public final class Session {
         Thread t = new Thread(() -> readLoop(in), "net-" + name);
         t.setDaemon(true);
         t.start();
+        Thread w = new Thread(this::writeLoop, "net-out-" + name);
+        w.setDaemon(true);
+        w.start();
+    }
+
+    /** Packets ready to go out, in order: the game never waits for the socket (a stalled server must not freeze it). */
+    private final java.util.concurrent.LinkedBlockingQueue<byte[]> outgoing = new java.util.concurrent.LinkedBlockingQueue<>();
+
+    private void writeLoop() {
+        try {
+            while (!closed) {
+                byte[] next = outgoing.poll(500, java.util.concurrent.TimeUnit.MILLISECONDS);
+                if (next == null) continue;
+                out.write(next);
+                byte[] more;
+                while ((more = outgoing.poll()) != null) out.write(more);
+                out.flush();
+            }
+        } catch (IOException e) {
+            if (!closed) error = e.getMessage();
+            close();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
     }
 
     private static InitializationVector iv(byte[] b) {
@@ -96,9 +120,8 @@ public final class Session {
             byte[] all = new byte[4 + data.length];
             System.arraycopy(header, 0, all, 0, 4);
             System.arraycopy(data, 0, all, 4, data.length);
-            out.write(all);
-            out.flush();
-        } catch (IOException e) {
+            outgoing.add(all); // encrypted here (keeps the cipher order), written by writeLoop
+        } catch (RuntimeException e) {
             error = e.getMessage();
             close();
         }

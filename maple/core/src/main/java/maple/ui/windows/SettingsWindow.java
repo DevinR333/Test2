@@ -28,6 +28,7 @@ public final class SettingsWindow extends Window {
         void setRate(String key, int value);
         void editTouch();
         void exportSave();
+        void exportLog();
         void importSave();
         void logOut();
     }
@@ -36,7 +37,7 @@ public final class SettingsWindow extends Window {
     private final List<Object[]> rows = new ArrayList<>(); // label, kind ("aspect"/"opt"/"action"/"header"), value
     private static final int ROW = 18, TOP = 30;
     /** Rate steps for the - / + buttons. */
-    private static final int[] RATES = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100};
+    private static final int[] RATES = {1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 15, 20, 25, 30, 40, 50, 75, 100, 150, 200, 250, 300, 400, 500, 750, 1000};
     private static final int MINUS_X = 150, PLUS_X = 226, STEP_W = 22; // the - and + boxes
 
     static int step(int rate, int dir) {
@@ -78,6 +79,7 @@ public final class SettingsWindow extends Window {
         rows.add(new Object[]{"Pets loot without Meso Magnet/Item Pouch", "opt", "petLoot"});
         rows.add(new Object[]{"Save data", "header", null});
         rows.add(new Object[]{"Export save...", "action", (Runnable) host::exportSave});
+        rows.add(new Object[]{"Export log (for bug reports)...", "action", (Runnable) host::exportLog});
         rows.add(new Object[]{"Import save...", "action", (Runnable) host::importSave});
         rows.add(new Object[]{"Log out to character select", "action", (Runnable) () -> {
             close();

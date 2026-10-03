@@ -687,11 +687,33 @@ public class MapleGame extends ApplicationAdapter {
 
     // ---- the game
 
+    private long autosaveAt;
+    private final java.util.concurrent.atomic.AtomicBoolean saving = new java.util.concurrent.atomic.AtomicBoolean();
+
+    /** Every 30 seconds in game: save in the background, then a yellow "Autosaved" line (lower right, like meso gains). */
+    private void autosave() {
+        long now = System.currentTimeMillis();
+        if (autosaveAt == 0) autosaveAt = now;
+        if (now - autosaveAt < 30000 || !OfflineServer.isOnline() || !saving.compareAndSet(false, true)) return;
+        autosaveAt = now;
+        new Thread(() -> {
+            try {
+                OfflineServer.saveNow();
+                Gdx.app.postRunnable(() -> {
+                    if (statusMessages != null && screen == Screen.GAME) statusMessages.add("Autosaved", 0xFFFFFF00);
+                });
+            } finally {
+                saving.set(false);
+            }
+        }, "autosave").start();
+    }
+
     private void gameFrame(long ms) {
         if (client.state == GameClient.State.FAILED) {
             fatal = client.error;
             return;
         }
+        autosave();
         if (field == null) return;
         readKeys();
         accumulator += ms;
@@ -1198,6 +1220,16 @@ public class MapleGame extends ApplicationAdapter {
         public void editTouch() {
             touch.enabled = true;
             touch.editing = true;
+        }
+
+        @Override
+        public void exportLog() {
+            java.io.File log = Gdx.files.local("maple-log.txt").file();
+            if (!log.exists()) {
+                notice("There is no log yet.");
+                return;
+            }
+            SaveTransfer.platform.exportFile(log, "maple-log-" + new java.text.SimpleDateFormat("yyyyMMdd-HHmm", java.util.Locale.US).format(new java.util.Date()) + ".txt", MapleGame.this::notice);
         }
 
         @Override

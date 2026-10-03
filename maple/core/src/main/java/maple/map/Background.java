@@ -64,6 +64,21 @@ public final class Background {
      */
     void draw(Batch batch, double viewX, double viewY, float vw, float vh, long time) {
         if (anim.isEmpty()) return;
+        // Wider than the original 800: backdrops pinned (fully or partly) to the screen were drawn to
+        // cover exactly 800 pixels, so they are laid out as on 800x600 and zoomed evenly to the width.
+        if (vw > 800.5f && !htiled() && hspeed == 0 && Math.abs(rx) < 100) {
+            float s = vw / 800f;
+            com.badlogic.gdx.math.Matrix4 old = batch.getTransformMatrix().cpy();
+            batch.setTransformMatrix(new com.badlogic.gdx.math.Matrix4(old)
+                    .translate(vw / 2f, vh / 2f, 0).scale(s, s, 1).translate(-400f, -vh / 2f, 0));
+            drawAt(batch, viewX - (vw - 800) / 2.0, viewY, 800, vh, time);
+            batch.setTransformMatrix(old);
+            return;
+        }
+        drawAt(batch, viewX, viewY, vw, vh, time);
+    }
+
+    private void drawAt(Batch batch, double viewX, double viewY, float vw, float vh, long time) {
         double woff = vw / 2.0, hoff = vh / 2.0 - 10;
         double x, y;
         if (hspeed != 0) x = bx + moveX + viewX;
