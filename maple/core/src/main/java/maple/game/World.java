@@ -1858,7 +1858,10 @@ public final class World {
                 Item it = Decode.item(r, pos);
                 int type = ItemInfo.inventoryType(it.itemId);
                 data().inventory(type).put(pos, it);
-                cash.locker.removeIf(e -> e.cashId == it.cashId);
+                // non-cash items (offline extras: Level Up Potion, Job Switch Token, bandanas) come
+                // back without a cash serial: clear the entry that was asked for
+                long asked = lastTakeOut;
+                cash.locker.removeIf(e -> e.cashId == it.cashId || e.cashId == asked);
                 break;
             }
             case 0x6A: { // put back into the locker
@@ -1909,7 +1912,10 @@ public final class World {
         client.send(w);
     }
 
+    private long lastTakeOut;
+
     public void cashTakeOut(long cashId) {
+        lastTakeOut = cashId;
         PacketWriter w = new PacketWriter(RecvOpcode.CASHSHOP_OPERATION.getValue());
         w.writeByte(0x0D);
         w.writeInt((int) cashId);

@@ -47,13 +47,18 @@ public class HitOnSlopesTest {
                         pad.right = scenario == 1 && (i / 120) % 2 == 1;
                         // hit every 0.25-0.5 s from a random side (scenario 2: also while in the air)
                         if (i % (30 + rng.nextInt(30)) == 0 && (scenario == 2 || p.phys.onGround)) p.knockback(rng.nextBoolean());
-                        double under = p.phys.onGround ? Double.NaN : groundUnder(t, p.phys.x, p.phys.y);
+                        double x0 = p.phys.x, y0 = p.phys.y;
+                        boolean wasGround = p.phys.onGround;
                         p.update(f, pad);
                         if (p.state == Player.State.LADDER || p.state == Player.State.ROPE) break;
-                        if (!p.phys.onGround && p.phys.vspeed > 0 && !Double.isNaN(under) && p.phys.y > under + 0.01
-                                && groundUnder(t, p.phys.x, p.phys.y) < p.phys.y) {
+                        Foothold crossed = maple.map.FootholdPhysicsTest.crossedFloor(t, x0, y0, p.phys.x, p.phys.y);
+                        // walking from one joined segment onto the next is not going through
+                        if (crossed != null && !(wasGround && p.phys.onGround)
+                                && !(p.phys.onGround && p.phys.y <= crossed.groundBelow(p.phys.x) + 0.01)) {
                             problems.append(map).append(" fh ").append(fh.id).append(" scenario ").append(scenario)
-                                    .append(": through the floor at x=").append((int) p.phys.x).append('\n');
+                                    .append(": through fh ").append(crossed.id).append(String.format(" (%d,%d)-(%d,%d)", crossed.x1, crossed.y1, crossed.x2, crossed.y2))
+                                    .append(String.format(" step (%.2f,%.3f)->(%.2f,%.3f) wasGround=%b now on=%b fh=%d state=%s hs=%.2f vs=%.2f",
+                                            x0, y0, p.phys.x, p.phys.y, wasGround, p.phys.onGround, p.phys.fhid, p.state, p.phys.hspeed, p.phys.vspeed)).append('\n');
                             break;
                         }
                         if (p.phys.onGround && Math.abs(t.get(p.phys.fhid).groundBelow(p.phys.x) - p.phys.y) > 0.01) {

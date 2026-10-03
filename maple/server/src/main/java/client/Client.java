@@ -1164,6 +1164,9 @@ public class Client extends ChannelInboundHandlerAdapter {
     }
 
     public void checkIfIdle(final IdleStateEvent event) {
+        // offline: the game runs on this device; a backgrounded app cannot answer pings and must
+        // not be dropped for it (it would come back to "Lost connection")
+        if (offline.OfflineServer.isOnline()) return;
         final long pingedAt = System.currentTimeMillis();
         sendPacket(PacketCreator.getPing());
         TimerManager.getInstance().schedule(() -> {

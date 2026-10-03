@@ -128,9 +128,10 @@ public final class FootholdTree {
         switch (p.mode) {
             case NORMAL:
                 moveNormal(p);
-                limitHorizontal(p);
+                boolean stopped = limitHorizontal(p);
                 if (p.onGround && p.vspeed >= 0 && p.fhid != 0 && !get(p.fhid).isWall()) groundStep(p);
                 else airStep(p);
+                if (stopped) p.hspeed = 0;
                 return; // position already applied
             case FLYING:
                 moveFlying(p);
@@ -204,9 +205,13 @@ public final class FootholdTree {
         if (Math.abs(p.vspeed) < 0.001) p.vspeed = 0;
     }
 
-    /** Walls (and, for monsters that turn, platform edges) stop horizontal movement. */
-    private void limitHorizontal(PhysicsObject p) {
-        if (!p.hmobile()) return;
+    /**
+     * Walls (and, for monsters that turn, platform edges) stop horizontal movement. The step is
+     * shortened to end at the wall rather than moving the object there, so the floor check still sees
+     * the real path (a floor rising into a wall would otherwise be skipped under).
+     */
+    private boolean limitHorizontal(PhysicsObject p) {
+        if (!p.hmobile()) return false;
         double cx = p.x, nx = p.nextX();
         boolean left = p.hspeed < 0;
         double wall = wall(p.fhid, left, p.y);
@@ -216,9 +221,11 @@ public final class FootholdTree {
             collision = left ? cx >= wall && nx <= wall : cx <= wall && nx >= wall;
         }
         if (collision) {
-            p.limitX(wall);
+            p.hspeed = wall - cx; // ends exactly at the wall
             p.flags &= ~PhysicsObject.TURN_AT_EDGES;
+            return true;
         }
+        return false;
     }
 
     /** The segment joined to fh at its right (or left) end point, or null. */

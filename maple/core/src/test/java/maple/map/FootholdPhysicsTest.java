@@ -276,12 +276,13 @@ public class FootholdPhysicsTest {
                         p.hspeed = kx;
                         p.vspeed = -3.5 * 0.5;
                         p.onGround = false;
-                        double under = fh.groundBelow(mx);
                         for (int i = 0; i < 3000 && !p.onGround; i++) {
-                            double below = groundUnder(t, p);
+                            double x0 = p.x, y0 = p.y;
                             t.move(p);
-                            if (!p.onGround && p.vspeed > 0 && p.y > below + 0.01 && groundUnder(t, p) < p.y) {
-                                problems.append(img.name).append(" fh ").append(fh.id).append(" knocked ").append(kx > 0 ? "right" : "left").append(" fell through\n");
+                            Foothold crossed = crossedFloor(t, x0, y0, p.x, p.y);
+                            if (crossed != null && !(p.onGround && p.y <= crossed.groundBelow(p.x) + 0.01)) {
+                                problems.append(img.name).append(" fh ").append(fh.id).append(" knocked ").append(kx > 0 ? "right" : "left")
+                                        .append(" went through fh ").append(crossed.id).append('\n');
                                 break;
                             }
                         }
@@ -297,5 +298,21 @@ public class FootholdPhysicsTest {
         System.out.println("knockback: " + hits + " hits");
         assertTrue(hits > 1000);
         assertEquals("problems:\n" + (problems.length() > 2000 ? problems.substring(0, 2000) : problems), 0, problems.length());
+    }
+
+    /** A floor whose line the step (x0,y0)->(x1,y1) crosses from its top side to its underside, or null. */
+    public static Foothold crossedFloor(FootholdTree t, double x0, double y0, double x1, double y1) {
+        for (Foothold fh : t.all()) {
+            if (fh.isWall()) continue;
+            double f0 = y0 - fh.groundBelow(x0), f1 = y1 - fh.groundBelow(x1);
+            if (f0 > 0 || f1 <= 0.01) continue;
+            double tt = f0 / (f0 - f1), cx = x0 + tt * (x1 - x0);
+            // stepping off an open end (no joined segment) is a fall, not going through
+            Foothold ln = t.get(fh.x1 <= fh.x2 ? fh.prev : fh.next), rn = t.get(fh.x1 <= fh.x2 ? fh.next : fh.prev);
+            double lm = ln.id == 0 || ln.isWall() ? 2 : 0.01; // an end into nothing or a wall is an edge
+            double rm = rn.id == 0 || rn.isWall() ? 2 : 0.01;
+            if (cx >= fh.l() + lm && cx <= fh.r() - rm) return fh;
+        }
+        return null;
     }
 }
