@@ -203,6 +203,15 @@ public final class World {
                 if (secs <= 0) cooldownsUntil.remove(id);
                 else cooldownsUntil.put(id, timeMs + secs * 1000L);
             } else if (op == SendOpcode.GIVE_BUFF.getValue()) giveBuff(r);
+            else if (op == SendOpcode.VICIOUS_HAMMER.getValue()) {
+                int mode = r.readUByte();
+                r.readInt();
+                if (mode == 0x39) events.popup("The item gained an upgrade slot. (Hammered " + r.readInt() + "/2)");
+            } else if (op == SendOpcode.VEGA_SCROLL.getValue()) {
+                int mode = r.readUByte();
+                if (mode == 0x41) events.popup("Vega's Spell: the scroll succeeded!");
+                else if (mode == 0x43) events.popup("Vega's Spell: the scroll failed.");
+            }
             else if (op == SendOpcode.CANCEL_BUFF.getValue()) { /* expiry handled by the timers */ events.refresh(); }
             else if (op == SendOpcode.CHATTEXT.getValue()) chatText(r);
             else if (op == SendOpcode.SERVERMESSAGE.getValue()) serverMessage(r);
@@ -2280,6 +2289,125 @@ public final class World {
         showLocal(t);
     }
 
+    private void localYesNo(String text, Runnable yes) {
+        NpcTalk t = localTalk(9010000, 1, text, false, false);
+        t.local = (a, s, x) -> {
+            if (a == 1) yes.run();
+        };
+        showLocal(t);
+    }
+
+    /** "#v<id># #t<id>#" lines for a menu of items. */
+    private static String itemLine(Item it) {
+        String n = "#v" + it.itemId + "# #t" + it.itemId + "#";
+        if (it.isEquip() && it.level > 0) n += " (+" + it.level + ")";
+        if (!it.isEquip() && it.quantity > 1) n += " x" + it.quantity;
+        return n;
+    }
+
+    /** Item Tag (5060000, a worn item), Item Guard (5060001, 506100x: a permanent equip) and Incubator (5060002: a Pigmy Egg). */
+    private void itemGuard(int slot, int id) {
+        List<Item> pick = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
+        if (id == 5060000) {
+            for (Item it : data().inventory(-1).values()) if (it.position > -100 && it.owner.isEmpty()) pick.add(it);
+            if (pick.isEmpty()) {
+                localSay("You are not wearing anything without a name tag.");
+                return;
+            }
+            for (Item it : pick) lines.add(itemLine(it));
+            localMenu("Which worn item should carry your name?", lines, i -> client.send(cashUse(slot, id)
+                    .writeShort(pick.get(i).position).writeInt(stamp())));
+        } else if (id == 5060002) {
+            for (Item it : data().inventory(4).values()) if (it.itemId / 10000 == 417) pick.add(it);
+            if (pick.isEmpty()) {
+                localSay("You need a #bPigmy Egg#k in your Etc inventory to use the Incubator.");
+                return;
+            }
+            for (Item it : pick) lines.add(itemLine(it));
+            localMenu("Which egg should hatch?", lines, i -> client.send(cashUse(slot, id).writeInt(4).writeInt(pick.get(i).position)));
+        } else {
+            for (Item it : data().inventory(1).values()) {
+                boolean locked = (it.flag & 0x01) != 0;
+                if (!locked && (it.expiration <= 0 || it.expiration >= 150842304000000000L)) pick.add(it);
+            }
+            if (pick.isEmpty()) {
+                localSay("There is no unlocked, permanent equipment in your Equip inventory.");
+                return;
+            }
+            for (Item it : pick) lines.add(itemLine(it));
+            localMenu("Which item should be locked? A locked item cannot be dropped, traded or sold.", lines,
+                    i -> client.send(cashUse(slot, id).writeInt(1).writeInt(pick.get(i).position).writeInt(stamp())));
+        }
+    }
+
+    /** Scissors of Karma: lets an untradeable item that allows it be traded once. */
+    private void scissors(int slot, int id) {
+        List<Item> pick = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
+        for (int t = 1; t <= 4; t++) {
+            for (Item it : data().inventory(t).values()) {
+                if (ItemInfo.get(it.itemId).info.getInt("tradeAvailable", 0) > 0 && (it.flag & (it.isEquip() ? 0x10 : 0x02)) == 0) pick.add(it);
+            }
+        }
+        if (pick.isEmpty()) {
+            localSay("None of your items can be cut free with #b#t" + id + "##k.");
+            return;
+        }
+        for (Item it : pick) lines.add(itemLine(it));
+        localMenu("Which item should become tradeable once?", lines, i -> {
+            Item it = pick.get(i);
+            client.send(cashUse(slot, id).writeInt(ItemInfo.inventoryType(it.itemId)).writeInt(it.position));
+        });
+    }
+
+    /** Vicious' Hammer: one more upgrade slot on an equip (twice per item). */
+    private void hammer(int slot, int id) {
+        List<Item> pick = new ArrayList<>();
+        List<String> lines = new ArrayList<>();
+        for (Item it : data().inventory(1).values()) {
+            if (it.vicious < 2 && !ItemInfo.get(it.itemId).cash && ItemInfo.get(it.itemId).tuc > 0) pick.add(it);
+        }
+        if (pick.isEmpty()) {
+            localSay("No equipment in your Equip inventory can take #b#t" + id + "##k.");
+            return;
+        }
+        for (Item it : pick) lines.add(itemLine(it) + " (hammered " + it.vicious + "/2)");
+        localMenu("Which item should get another upgrade slot?", lines,
+                i -> client.send(cashUse(slot, id).writeInt(1).writeInt(pick.get(i).position).writeInt(stamp())));
+    }
+
+    /** Vega's Spell: a 10% (or 60%) scroll on an equip at a better chance (Etc/VegaSpell.img lists the scrolls). */
+    private void vega(int slot, int id) {
+        String rate = id == 5610000 ? "0.1" : "0.6";
+        java.util.Set<Integer> allowed = new java.util.HashSet<>();
+        for (maple.wz.WzNode n : wz.get("Etc/VegaSpell.img").children()) {
+            if (n.getString("prob", "").endsWith(rate)) allowed.add(n.getInt("item", 0));
+        }
+        List<Item> scrolls = new ArrayList<>();
+        for (Item it : data().inventory(2).values()) if (allowed.contains(it.itemId)) scrolls.add(it);
+        if (scrolls.isEmpty()) {
+            localSay("#b#t" + id + "##k works with " + (id == 5610000 ? "10%" : "60%") + " scrolls, and you have none.");
+            return;
+        }
+        List<String> sl = new ArrayList<>();
+        for (Item it : scrolls) sl.add(itemLine(it));
+        localMenu("Which scroll?", sl, si -> {
+            Item scroll = scrolls.get(si);
+            int target = 100 + (scroll.itemId / 100) % 100;
+            List<Item> equips = new ArrayList<>();
+            for (Item it : data().inventory(1).values()) if (it.itemId / 10000 == target && it.upgradeSlots > 0) equips.add(it);
+            if (equips.isEmpty()) {
+                localSay("You have no equipment with upgrade slots that #t" + scroll.itemId + "# can scroll.");
+                return;
+            }
+            List<String> el = new ArrayList<>();
+            for (Item it : equips) el.add(itemLine(it) + " (" + it.upgradeSlots + " slots)");
+            localMenu("Scroll which item?", el, ei -> client.send(cashUse(slot, id).writeInt(1).writeInt(equips.get(ei).position)
+                    .writeInt(2).writeInt(scroll.position)));
+        });
+    }
+
     private PacketWriter cashUse(int slot, int itemId) {
         PacketWriter w = new PacketWriter(RecvOpcode.USE_CASH_ITEM.getValue());
         w.writeShort(slot).writeInt(itemId);
@@ -2328,6 +2456,20 @@ public final class World {
             case 510: case 520: case 524: case 530: case 533: case 545: case 550:
                 client.send(cashUse(slot, id));
                 return;
+            case 506: itemGuard(slot, id); return;
+            case 509: // a note to another character
+                localText("Who is the note for? (character name)", to -> localText("What does the note say?",
+                        msg -> client.send(cashUse(slot, id).writeString(to.trim()).writeString(msg))));
+                return;
+            case 516:
+                localSay("Put #b#t" + id + "##k on a key in #bKey Config#k (drag it from the Cash tab), then press that key to make the face.");
+                return;
+            case 540: // using it cancels a name change bought in the Cash Shop (applied when you next log in)
+                localYesNo("Cancel your pending name change?", () -> client.send(cashUse(slot, id)));
+                return;
+            case 552: scissors(slot, id); return;
+            case 557: hammer(slot, id); return;
+            case 561: vega(slot, id); return;
             default:
                 // the rest work by being in the inventory (EXP/drop coupons, safety charms...)
                 localSay("#b#t" + id + "##k works while it is in your inventory.");
@@ -2621,6 +2763,11 @@ public final class World {
     }
 
     public void faceExpression(int emote) {
+        if (emote > 7) { // an emotion item: only with it in the Cash inventory
+            int item = 5159992 + emote;
+            if (data() == null || data().inventory(5).values().stream().noneMatch(it -> it.itemId == item)) return;
+        }
+        player.express(emote);
         PacketWriter w = new PacketWriter(RecvOpcode.FACE_EXPRESSION.getValue());
         w.writeInt(emote);
         client.send(w);

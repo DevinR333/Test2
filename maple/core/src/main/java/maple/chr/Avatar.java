@@ -35,6 +35,8 @@ public final class Avatar {
         final Sprite sprite;
         final int x, y; // top-left relative to the feet
         final int z;
+        /** The default face: replaced while an expression plays. */
+        boolean face;
 
         Part(Sprite sprite, int x, int y, int z) {
             this.sprite = sprite;
@@ -47,7 +49,25 @@ public final class Avatar {
     public static final class Frame {
         final List<Part> parts = new ArrayList<>();
         int delay;
+        /** Where the head's "brow" point is (expressions hang from it). */
+        int browX, browY;
     }
+
+    /** One frame of a facial expression (Character/Face/<id>.img/<expression>/<n>/face). */
+    private static final class FaceFrame {
+        final Sprite sprite;
+        final int dx, dy, delay; // top-left relative to the brow point
+
+        FaceFrame(Sprite sprite, int dx, int dy, int delay) {
+            this.sprite = sprite;
+            this.dx = dx;
+            this.dy = dy;
+            this.delay = delay;
+        }
+    }
+
+    private final Map<String, FaceFrame[]> expressions = new HashMap<>();
+    private WzNode faceCanvasNode;
 
     private final Map<String, Frame[]> stances = new HashMap<>();
     private final Map<String, Integer> zOrder = new HashMap<>();
@@ -104,6 +124,8 @@ public final class Avatar {
         if (!head.exists()) problems += "head missing; ";
 
         WzNode faceCanvas = faceImg.get("default").get("face");
+        faceCanvasNode = faceCanvas.resolve();
+        loadExpressions(faceImg);
         for (String stance : STANCES) {
             WzNode bs = body.get(stance);
             if (!bs.exists()) continue;
@@ -281,6 +303,11 @@ public final class Avatar {
             }
         }
         for (WzNode p : todo) place(fr, p, 0, 0, anchors);
+        int[] brow = anchors.get("brow");
+        if (brow != null) {
+            fr.browX = brow[0];
+            fr.browY = brow[1];
+        }
         Collections.sort(fr.parts, (a, b) -> Integer.compare(a.z, b.z));
     }
 
@@ -290,7 +317,39 @@ public final class Avatar {
         }
         Sprite s = bank.get(canvas);
         if (s == null) return;
-        fr.parts.add(new Part(s, px - s.ox, py - s.oy, z(canvas)));
+        Part part = new Part(s, px - s.ox, py - s.oy, z(canvas));
+        part.face = canvas == faceCanvasNode;
+        fr.parts.add(part);
+    }
+
+    /** Every expression the face has (hit, smile, ... blink), placed by its own brow point. */
+    private void loadExpressions(WzNode faceImg) {
+        for (WzNode e : faceImg.children()) {
+            if (e.name.equals("info") || e.name.equals("default")) continue;
+            List<FaceFrame> frames = new ArrayList<>();
+            for (int i = 0; ; i++) {
+                WzNode f = e.get(i);
+                if (!f.exists()) break;
+                WzNode c = f.get("face").resolve();
+                if (!c.isCanvas()) continue;
+                Sprite sp = bank.get(c);
+                if (sp == null) continue;
+                WzNode brow = c.get("map").get("brow");
+                int delay = f.getInt("delay", 0);
+                if (delay < 100) delay = 2500; // a still face is held (the v83 client does the same)
+                frames.add(new FaceFrame(sp, -brow.vx() - sp.ox, -brow.vy() - sp.oy, delay));
+            }
+            if (!frames.isEmpty()) expressions.put(e.name, frames.toArray(new FaceFrame[0]));
+        }
+    }
+
+    /** How long an expression plays once, or 0 if the face has none by that name. */
+    public int expressionLength(String name) {
+        FaceFrame[] f = expressions.get(name);
+        if (f == null) return 0;
+        int t = 0;
+        for (FaceFrame x : f) t += x.delay;
+        return t;
     }
 
     public boolean has(String stance) { return stances.containsKey(stance); }
@@ -315,10 +374,33 @@ public final class Avatar {
 
     /** Draws at the feet position (x, y). Sprites face left; flip mirrors to the right. */
     public void draw(Batch batch, String stance, int frame, float x, float y, boolean flip) {
+        draw(batch, stance, frame, x, y, flip, null, 0);
+    }
+
+    /** Draws with a facial expression playing (expressionMs into it) in place of the default face. */
+    public void draw(Batch batch, String stance, int frame, float x, float y, boolean flip, String expression, long expressionMs) {
         Frame[] f = frames(stance);
         if (f == null || f.length == 0) return;
         Frame fr = f[frame % f.length];
+        FaceFrame face = null;
+        FaceFrame[] ef = expression == null ? null : expressions.get(expression);
+        if (ef != null) {
+            long t = expressionMs;
+            for (FaceFrame e : ef) {
+                face = e;
+                if (t < e.delay) break;
+                t -= e.delay;
+            }
+        }
         for (Part p : fr.parts) {
+            if (p.face && face != null) {
+                Sprite s = face.sprite;
+                if (s.region == null) continue;
+                int px = fr.browX + face.dx, py = fr.browY + face.dy;
+                if (flip) batch.draw(s.region, x - px, y + py, -s.w, s.h);
+                else batch.draw(s.region, x + px, y + py, s.w, s.h);
+                continue;
+            }
             if (p.sprite.region == null) continue;
             if (flip) batch.draw(p.sprite.region, x - p.x, y + p.y, -p.sprite.w, p.sprite.h);
             else batch.draw(p.sprite.region, x + p.x, y + p.y, p.sprite.w, p.sprite.h);

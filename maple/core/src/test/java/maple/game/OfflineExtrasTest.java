@@ -514,6 +514,102 @@ public class OfflineExtrasTest {
         }
     }
 
+    /** Uses a Cash item through its dialogue: picks menu entry `pick` (or types `text`) at each step. */
+    static void useCash(int itemId, Object... answers) throws InterruptedException {
+        Item it = firstOf(5, itemId);
+        assertNotNull("have " + itemId, it);
+        Thread.sleep(3900); // the server allows one cash item every 3 seconds (its clock moves in 777 ms steps)
+        world.useCashItem(it.position);
+        for (Object a : answers) {
+            NpcTalk t = world.talk;
+            assertNotNull(itemId + ": a prompt", t);
+            if (a instanceof String) world.answer(1, 0, (String) a);
+            else world.answer(1, (Integer) a, null);
+        }
+        for (int i = 0; i < 100; i++) step();
+    }
+
+    /** Item Tag, Item Guard, Incubator, Scissors of Karma, Vicious' Hammer, Vega's Spell, Note, Name Change cancel. */
+    @Test(timeout = 180000)
+    public void cashItemsWithTargets() throws Exception {
+        client.Character chr = server();
+        client.inventory.Inventory equipped = chr.getInventory(client.inventory.InventoryType.EQUIPPED);
+        client.inventory.Inventory bag = chr.getInventory(client.inventory.InventoryType.EQUIP);
+        // Item Tag: your name on a worn item
+        if (equipped.getItem((short) -11) == null) {
+            give(1302000, 1);
+            Thread.sleep(350);
+            world.equip(firstOf(1, 1302000).position);
+            stepUntil(() -> equipped.getItem((short) -11) != null, 5000);
+        }
+        give(5060000, 1);
+        int before = (int) data().inventory(-1).values().stream().filter(i -> i.position > -100 && i.owner.isEmpty()).count();
+        useCash(5060000, 0);
+        stepUntil(() -> equipped.list().stream().anyMatch(i -> chr.getName().equals(i.getOwner())), 5000);
+        assertTrue("Item Tag: a worn item carries the name", equipped.list().stream().anyMatch(i -> chr.getName().equals(i.getOwner())));
+        assertNull("used up", firstOf(5, 5060000));
+        // Item Guard: a permanent equip gets locked
+        give(1302000, 1);
+        give(5060001, 1);
+        useCash(5060001, 0);
+        stepUntil(() -> bag.list().stream().anyMatch(i -> (i.getFlag() & 0x01) != 0), 5000);
+        StringBuilder dbg = new StringBuilder();
+        for (client.inventory.Item i : bag.list()) dbg.append(i.getItemId()).append('@').append(i.getPosition()).append(" exp ").append(i.getExpiration()).append(" flag ").append(i.getFlag()).append("; ");
+        for (Item i : data().inventory(1).values()) dbg.append("client ").append(i.itemId).append('@').append(i.position).append(" exp ").append(i.expiration).append("; ");
+        assertTrue("Item Guard: locked " + dbg + " cash left " + firstOf(5, 5060001), bag.list().stream().anyMatch(i -> (i.getFlag() & 0x01) != 0));
+        // Incubator: a Pigmy Egg hatches into something
+        give(4170000, 1);
+        give(5060002, 1);
+        chat.clear();
+        useCash(5060002, 0);
+        stepUntil(() -> firstOf(4, 4170000) == null, 5000);
+        assertNull("egg used", firstOf(4, 4170000));
+        assertTrue("hatched: " + chat, chat.stream().anyMatch(m -> m.startsWith("The egg hatched")));
+        // Scissors of Karma: an item that allows it becomes tradeable once
+        give(1002357, 1);
+        give(5520000, 1);
+        assertTrue(ItemInfo.get(1002357).info.getInt("tradeAvailable", 0) > 0);
+        int karmaMenu = 0;
+        java.util.List<Item> karmaable = new java.util.ArrayList<>();
+        for (int t = 1; t <= 4; t++) for (Item i : data().inventory(t).values()) if (ItemInfo.get(i.itemId).info.getInt("tradeAvailable", 0) > 0) karmaable.add(i);
+        for (int k = 0; k < karmaable.size(); k++) if (karmaable.get(k).itemId == 1002357) karmaMenu = k;
+        useCash(5520000, karmaMenu);
+        stepUntil(() -> (bag.findById(1002357).getFlag() & 0x10) != 0, 5000);
+        assertTrue("Karma: tradeable once", (bag.findById(1002357).getFlag() & 0x10) != 0);
+        // Vicious' Hammer: one more slot
+        client.inventory.Equip sword = (client.inventory.Equip) bag.findById(1302000);
+        int slots = sword.getUpgradeSlots();
+        give(5570000, 1);
+        java.util.List<Item> hammerable = new java.util.ArrayList<>();
+        for (Item i : data().inventory(1).values()) if (i.vicious < 2 && !ItemInfo.get(i.itemId).cash && ItemInfo.get(i.itemId).tuc > 0) hammerable.add(i);
+        int hm = 0;
+        for (int k = 0; k < hammerable.size(); k++) if (hammerable.get(k).position == sword.getPosition()) hm = k;
+        chat.clear();
+        useCash(5570000, hm);
+        stepUntil(() -> sword.getVicious() == 1, 5000);
+        assertEquals("hammered once", 1, sword.getVicious());
+        assertEquals("one more slot", slots + 1, sword.getUpgradeSlots());
+        // Vega's Spell (10%) with a 10% hat scroll on a hat
+        give(1002001, 1);
+        give(2040002, 1);
+        give(5610000, 1);
+        assertTrue("hat has slots", ((client.inventory.Equip) bag.findById(1002001)).getUpgradeSlots() > 0);
+        chat.clear();
+        useCash(5610000, 0, 0);
+        stepUntil(() -> firstOf(2, 2040002) == null && chat.stream().anyMatch(m -> m.contains("Vega's Spell")), 8000);
+        assertNull("scroll used", firstOf(2, 2040002));
+        assertTrue("result shown: " + chat, chat.stream().anyMatch(m -> m.contains("Vega's Spell")));
+        // a Note to a character
+        give(5090000, 1);
+        useCash(5090000, chr.getName(), "hello");
+        stepUntil(() -> firstOf(5, 5090000) == null, 5000);
+        assertNull("note sent", firstOf(5, 5090000));
+    }
+
+    static maple.net.model.PlayerData data() {
+        return c.player;
+    }
+
     static Npc npc(int id) {
         for (Npc n : world.npcs.values()) if (n.id == id) return n;
         return null;

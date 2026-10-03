@@ -805,6 +805,10 @@ public class MapleGame extends ApplicationAdapter {
             case KeyMap.ITEM:
                 world.useItemId(action);
                 break;
+            case KeyMap.CASH_ITEM:
+                if (action / 10000 == 516) world.faceExpression(action - 5159992); // emotion items
+                else world.useItemId(action);
+                break;
             case KeyMap.MENU:
                 menuAction(action);
                 break;

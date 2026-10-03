@@ -80,8 +80,50 @@ public final class Player {
     /** Current frame of the running action (for afterimages/hit timing). */
     public int actionFrame() { return actionFrame; }
 
+    /**
+     * Facial expressions (v83 order of the FACE_EXPRESSION numbers): 1-7 the F1-F7 faces, 8-22 the
+     * Cash Shop emotion items 5160000-5160014 (matched to their descriptions).
+     */
+    public static final String[] EXPRESSIONS = {"default", "hit", "smile", "troubled", "cry", "angry", "bewildered", "stunned",
+            "vomit", "oops", "cheers", "chu", "wink", "pain", "glitter", "blaze", "shine", "love", "despair", "hum", "bowing", "hot", "dam"};
+    private String expression;
+    private long expressionMs;
+    private int expressionLength;
+    private int blinkInMs = 3000;
+    private static final java.util.Random BLINK = new java.util.Random();
+
+    /** Plays a facial expression once (by number, as sent to the server). */
+    public void express(int emote) {
+        if (emote > 0 && emote < EXPRESSIONS.length) express(EXPRESSIONS[emote]);
+    }
+
+    public void express(String name) {
+        if (avatar == null) return;
+        int len = avatar.expressionLength(name);
+        if (len <= 0) return;
+        expression = name;
+        expressionMs = 0;
+        expressionLength = len;
+    }
+
+    public String expression() { return expression; }
+
+    private void tickExpression(int ms) {
+        if (expression != null) {
+            expressionMs += ms;
+            if (expressionMs >= expressionLength) expression = null;
+            return;
+        }
+        blinkInMs -= ms; // the face blinks now and then, as in the v83 client
+        if (blinkInMs <= 0) {
+            blinkInMs = 2000 + BLINK.nextInt(4000);
+            express("blink");
+        }
+    }
+
     /** Hit by a monster: knock back away from it unless climbing. */
     public void knockback(boolean fromLeft) {
+        express("hit");
         alertMs = 5000;
         invincibleMs = 2000;
         if (state == State.LADDER || state == State.ROPE || dead) return;
@@ -121,6 +163,7 @@ public final class Player {
         phys.jumpMul = jump / 100.0;
         if (alertMs > 0) alertMs -= 8;
         if (invincibleMs > 0) invincibleMs -= 8;
+        tickExpression(8);
         if (knockTicks > 0) knockTicks--;
         if (action != null) {
             actionLeft -= 8;
@@ -322,8 +365,8 @@ public final class Player {
         boolean climbing = state == State.LADDER || state == State.ROPE;
         if (chairAnim != null && !chairAnim.isEmpty()) chairAnim.draw(batch, x, y, facingRight, chairTime, 1f);
         if (invincibleMs > 0 && !dead && (invincibleMs / 100) % 2 == 1) batch.setColor(0.5f, 0.5f, 0.5f, 0.5f);
-        if (action != null) avatar.draw(batch, action, actionFrame, x, y, facingRight);
-        else avatar.draw(batch, stance, frame, x, y, !climbing && facingRight);
+        if (action != null) avatar.draw(batch, action, actionFrame, x, y, facingRight, expression, expressionMs);
+        else avatar.draw(batch, stance, frame, x, y, !climbing && facingRight, expression, expressionMs);
         batch.setColor(1, 1, 1, 1);
     }
 

@@ -66,6 +66,7 @@ import server.maps.MapleTVEffect;
 import server.maps.PlayerShopItem;
 import service.NoteService;
 import tools.PacketCreator;
+import tools.Randomizer;
 import tools.Pair;
 
 import java.util.ArrayList;
@@ -654,16 +655,14 @@ public final class UseCashItemHandler extends AbstractPacketHandler {
     private static boolean getIncubatedItem(Client c, int id) {
         final int[] ids = {1012070, 1302049, 1302063, 1322027, 2000004, 2000005, 2020013, 2020015, 2040307, 2040509, 2040519, 2040521, 2040533, 2040715, 2040717, 2040810, 2040811, 2070005, 2070006, 4020009,};
         final int[] quantitys = {1, 1, 1, 1, 240, 200, 200, 200, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 3};
-        int amount = 0;
-        for (int i = 0; i < ids.length; i++) {
-            if (i == id) {
-                amount = quantitys[i];
-            }
-        }
-        if (c.getPlayer().getInventory(InventoryType.getByType((byte) (id / 1000000))).isFull()) {
+        // what hatches is drawn from this list (Cosmic passed the Incubator's own id here: nothing hatched)
+        int pick = Randomizer.nextInt(ids.length);
+        int hatched = ids[pick], amount = quantitys[pick];
+        if (c.getPlayer().getInventory(InventoryType.getByType((byte) (hatched / 1000000))).isFull()) {
             return false;
         }
-        InventoryManipulator.addById(c, id, (short) amount);
+        InventoryManipulator.addById(c, hatched, (short) amount);
+        c.getPlayer().dropMessage(5, "The egg hatched: " + ItemInformationProvider.getInstance().getName(hatched) + (amount > 1 ? " x" + amount : "") + ".");
         return true;
     }
 }
