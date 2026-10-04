@@ -68,19 +68,6 @@ def body_sdf(p):
     # neck: too long, bent hard to the side
     d = smin(d, capsule(p, [0.0, 1.90, 0.07], H_NECK, 0.05, 0.045), 0.04)
     d = smin(d, capsule(p, H_NECK, HEAD_C + np.array([-0.06, -0.02, -0.03]), 0.045, 0.05), 0.04)
-    # head: elongated skull, tilted ~70 deg
-    q = rot(p, HEAD_C, [0, 0, 1], -1.15)
-    head = ellipsoid(q, HEAD_C, [0.085, 0.125, 0.10])
-    jaw = ellipsoid(q, HEAD_C + np.array([0.0, -0.15, 0.04]), [0.055, 0.11, 0.065])
-    head = smin(head, jaw, 0.03)
-    # gaping mouth cavity (shows as a dark hollow through the veil)
-    mouth = ellipsoid(q, HEAD_C + np.array([0.0, -0.14, 0.08]), [0.034, 0.10, 0.06])
-    head = np.maximum(head, -mouth)
-    # deep eye sockets
-    for sx in (-0.035, 0.035):
-        eye = ellipsoid(q, HEAD_C + np.array([sx, 0.02, 0.085]), [0.026, 0.022, 0.04])
-        head = np.maximum(head, -eye)
-    d = smin(d, head, 0.025)
     # arms: far too long, hanging to the knees; extra-long forearms, one reaching forward
     def arm(sh, el, wr, hand_dir, curl):
         nonlocal_d = capsule(p, sh, el, 0.045, 0.032)
@@ -168,7 +155,7 @@ def build(name, fn_kind):
     with open(path, "w") as f:
         f.write(f"# the Host - procedurally sculpted ({len(verts)} verts)\n")
         np.savetxt(f, verts, fmt="v %.5f %.5f %.5f")
-        np.savetxt(f, normals, fmt="vn %.4f %.4f %.4f")
+        np.savetxt(f, -normals, fmt="vn %.4f %.4f %.4f")  # skimage "ascent" normals point inward for an SDF
         fi = faces[:, ::-1] + 1  # flip winding for Godot (CCW front-faces outward)
         np.savetxt(f, np.repeat(fi, 2, axis=1).reshape(-1, 6), fmt="f %d//%d %d//%d %d//%d")
     print("wrote", path, len(verts), "verts", len(faces), "tris", flush=True)
@@ -176,4 +163,3 @@ def build(name, fn_kind):
 if __name__ == "__main__":
     os.makedirs(OUT, exist_ok=True)
     build("body", "body")
-    build("veil", "veil")
