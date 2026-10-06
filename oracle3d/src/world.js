@@ -201,7 +201,8 @@ export class TileMap {
     if (!c || !c.heights) return 0;
     const lx = Math.floor(px) - rx * this.roomW * 16, lz = Math.floor(pz) - ry * this.roomH * 16;
     if (lx < 0 || lz < 0 || lx >= c.heights.W || lz >= c.heights.H) return 0;
-    return c.heights.h[lz * c.heights.W + lx];
+    const i = lz * c.heights.W + lx;
+    return Math.max(c.heights.h[i], c.heights.deck[i]);
   }
 
   // Build or refresh room meshes within `radius` rooms of (rx, ry); drop far ones.
@@ -263,7 +264,7 @@ export class TileMap {
     if (this.elevDirty || !this.elev) this.refreshElevation();
     const heights = buildChunkHeights(this, this.models, rx * this.roomW, ry * this.roomH, this.roomW, this.roomH, this.elev);
     chunk.heights = heights;
-    const geo = meshChunk(heights, (x, z) => this.heightAtMapPx(x, z));
+    const geo = meshChunk(heights, (x, z) => this.cellAtMapPx(x, z));
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', new THREE.BufferAttribute(geo.position, 3));
     g.setAttribute('normal', new THREE.BufferAttribute(geo.normal, 3));
@@ -279,25 +280,22 @@ export class TileMap {
     this.group.add(mesh);
   }
 
-  // Height at a pixel in map coordinates, from whatever chunk covers it (for faces at
-  // chunk edges). Falls back to flat ground for rooms that are not built.
-  heightAtMapPx(x, z) {
+  // The cell at a pixel in map coordinates ({ c: chunk heights, i }), from whatever chunk covers
+  // it (for faces at chunk edges). Rooms that are not built yet are computed on the fly.
+  cellAtMapPx(x, z) {
     const rx = Math.floor(x / (this.roomW * 16)), ry = Math.floor(z / (this.roomH * 16));
+    if (rx < 0 || ry < 0 || rx >= this.roomsW || ry >= this.roomsH || !this.roomHasTiles(rx, ry)) return null;
     const c = this.chunks.get(ry * this.roomsW + rx);
-    if (c && c.heights && !c.dirty) {
-      const lx = x - rx * this.roomW * 16, lz = z - ry * this.roomH * 16;
-      return c.heights.h[lz * c.heights.W + lx];
+    let hs = c && c.heights && !c.dirty ? c.heights : null;
+    if (!hs) {
+      const key = `${rx},${ry}`;
+      if (!this._tmpHeights || this._tmpHeights.key !== key) {
+        this._tmpHeights = buildChunkHeights(this, this.models, rx * this.roomW, ry * this.roomH, this.roomW, this.roomH, this.elev);
+        this._tmpHeights.key = key;
+      }
+      hs = this._tmpHeights;
     }
-    if (!this.roomHasTiles(rx, ry)) return 0;
-    // Not built yet: compute just that room's heights (cheap, cached on the chunk).
-    if (rx < 0 || ry < 0 || rx >= this.roomsW || ry >= this.roomsH) return 0;
-    let tmp = this._tmpHeights && this._tmpHeights.key === `${rx},${ry}` ? this._tmpHeights : null;
-    if (!tmp) {
-      tmp = buildChunkHeights(this, this.models, rx * this.roomW, ry * this.roomH, this.roomW, this.roomH, this.elev);
-      tmp.key = `${rx},${ry}`;
-      this._tmpHeights = tmp;
-    }
-    return tmp.h[(z - ry * this.roomH * 16) * tmp.W + (x - rx * this.roomW * 16)];
+    return { c: hs, i: (z - ry * this.roomH * 16) * hs.W + (x - rx * this.roomW * 16) };
   }
 
   dispose() {

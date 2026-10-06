@@ -2,45 +2,75 @@
 //
 // Zelda's overworld art is drawn in an oblique projection: a thing of height H standing
 // at depth z is drawn H pixels further up the screen than its base. So every solid
-// region in the 2D map (a tree, a house, a cliff) is really a roof seen from above
-// with a front wall below it. For each column of solid pixels we pick a height from how
-// tall the region is on screen, stand its bottom rows up as a vertical front wall,
-// and lay the rest down as the roof. Water and holes sink below the ground.
+// thing in the 2D map (a tree, a post, a house, a cliff) is really a roof seen from
+// above with a front wall below it. For each column of an object's pixels we pick a
+// height from how tall it is on screen, stand its bottom rows up as the front wall, and
+// lay the rest down as the roof. The sides and back reuse that column's front-wall art.
+//
+// Only an object's own pixels are raised: where a solid tile shows plain ground around
+// the object (between fence posts, around a tree's canopy), those pixels are found by
+// flood-filling ground colours in from the walkable tiles and stay on the ground.
 //
 // Everything here is plain JS so the Node tools can run it too.
 
-export const CLS = { GROUND: 0, SOLID: 1, WATER: 2, HOLE: 3, LAVA: 4 };
+export const CLS = { GROUND: 0, SOLID: 1, WATER: 2, HOLE: 3, LAVA: 4, BRIDGE: 5 };
 
-const DEPTH = { [CLS.WATER]: -3, [CLS.HOLE]: -14, [CLS.LAVA]: -2 };
+const DEPTH = { [CLS.WATER]: -3, [CLS.HOLE]: -14, [CLS.LAVA]: -2, [CLS.BRIDGE]: -3 };
+const DECK_RAISE = 1; // bridges float this far above the ground they connect
+const DECK_THICK = 2;
 
 // Collision bits 0-3 mark which 8x8 quarter of a metatile is solid
 // (bit 3 top-left, bit 2 top-right, bit 1 bottom-left, bit 0 bottom-right).
 const QUARTER_BIT = [8, 4, 2, 1];
+// Bridge collision values (constants/common/specialCollisionValues.s).
+const BRIDGES = new Set([0x11, 0x12, 0x13, 0x19, 0x1a, 0x1b]);
 
-// How tall (in pixels) a solid run that is `len` pixels long on screen stands.
+export const NO_LEVEL = -32768;
+
+// How tall (in pixels) an object column that is `len` pixels long on screen stands.
 export function runHeight(len) {
-  if (len <= 4) return 2;
-  return Math.max(3, Math.min(22, Math.round(len * 0.42)));
+  if (len <= 3) return 2;
+  return Math.max(3, Math.min(22, Math.round(len * 0.45)));
 }
 
-// Per-tileset lookups: the class of every pixel of every metatile.
+// Per-tileset lookups: the class and colour of every pixel of every metatile, and the
+// colours that make up its plain ground.
 // tile(id) returns that metatile's 16x16 RGBA pixels.
 export class TilesetModel {
   constructor(tile, collisions) {
     this.cls = new Uint8Array(256 * 256); // [id*256 + py*16 + px]
+    this.color = new Uint32Array(256 * 256);
     this.collisions = collisions;
+    const groundCount = new Map();
+    let groundTotal = 0;
     for (let id = 0; id < 256; id++) {
       const c = collisions[id];
-      const hazard = c === 0x10 ? classifyHazard(tile(id)) : CLS.GROUND;
-      for (let py = 0; py < 16; py++) for (let px = 0; px < 16; px++) {
+      const px = tile(id);
+      const hazard = c === 0x10 ? classifyHazard(px) : CLS.GROUND;
+      for (let py = 0; py < 16; py++) for (let qx = 0; qx < 16; qx++) {
+        const p = py * 16 + qx;
         let k = CLS.GROUND;
         if (c >= 1 && c <= 15) {
-          if (c & QUARTER_BIT[(py >> 3) * 2 + (px >> 3)]) k = CLS.SOLID;
+          if (c & QUARTER_BIT[(py >> 3) * 2 + (qx >> 3)]) k = CLS.SOLID;
         } else if (c === 0x10) {
           k = hazard;
+        } else if (BRIDGES.has(c)) {
+          k = CLS.BRIDGE;
         }
-        this.cls[id * 256 + py * 16 + px] = k;
+        const rgb = (px[p * 4] << 16) | (px[p * 4 + 1] << 8) | px[p * 4 + 2];
+        this.cls[id * 256 + p] = k;
+        this.color[id * 256 + p] = rgb;
+        if (c === 0) {
+          groundCount.set(rgb, (groundCount.get(rgb) || 0) + 1);
+          groundTotal++;
+        }
       }
+    }
+    // Ground colours: the dominant colours of walkable tiles (not speckles or outlines).
+    this.ground = new Set();
+    for (const [rgb, n] of groundCount) {
+      const luma = 0.3 * (rgb >> 16) + 0.59 * ((rgb >> 8) & 255) + 0.11 * (rgb & 255);
+      if (n > groundTotal * 0.08 && luma > 60) this.ground.add(rgb);
     }
   }
 }
@@ -60,143 +90,330 @@ function classifyHazard(px) {
 // map: { mtW, mtH, ids, tilesets } with ids/tilesets as arrays of mtW*mtH metatiles.
 // models: TilesetModel per tileset index.
 // elev: result of computeElevation (ground level per 8x8 cell, cliff/stair cells), or null.
-// The chunk covers metatiles [cx, cx+cw) x [cy, cy+ch). A margin of rows above and below
-// is examined so runs crossing the chunk edge get the same height on both sides.
-const MARGIN = 96;
-const NO_LEVEL = -32768;
+// The chunk covers metatiles [cx, cx+cw) x [cy, cy+ch). A margin around it is examined
+// so objects crossing the chunk edge get the same shape on both sides.
+const MARGIN_Y = 96, MARGIN_X = 32;
+const P_GROUND = 0, P_OBJECT = 1, P_CLIFF = 2, P_STAIRS = 3, P_ORGANIC = 4;
+
+// Leafy pixels (tree crowns, bushes) are modelled as rounded mounds instead of walls.
+function isLeafy(rgb) {
+  const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
+  return g > r + 12 && g > b + 12 && g > 50;
+}
+const DOME_R = 7, DOME_CAP = 15;
+const domeHeight = (d) => Math.max(2, Math.round(DOME_CAP * Math.sqrt(Math.min(1, d / DOME_R))));
 
 export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
   const W = cw * 16, H = ch * 16;
-  const y0px = cy * 16 - MARGIN;
-  const rows = H + MARGIN * 2;
+  const wx0 = cx * 16 - MARGIN_X, wy0 = cy * 16 - MARGIN_Y;
+  const ww = W + MARGIN_X * 2, wh = H + MARGIN_Y * 2;
   const mapPxH = map.mtH * 16, mapPxW = map.mtW * 16;
 
-  const classAt = (px, py) => {
-    if (px < 0 || py < 0 || px >= mapPxW || py >= mapPxH) return CLS.GROUND;
-    const mi = (py >> 4) * map.mtW + (px >> 4);
-    const m = models[map.tilesets[mi]];
-    if (!m) return CLS.GROUND;
-    return m.cls[map.ids[mi] * 256 + (py & 15) * 16 + (px & 15)];
-  };
-  // Cell kind (0 region, 1 cliff, 2 stairs) and ground level at a map pixel.
-  const kindAt = (px, py) => {
-    if (!elev || px < 0 || py < 0 || px >= mapPxW || py >= mapPxH) return 0;
-    return elev.kind[(py >> 3) * elev.cw + (px >> 3)];
-  };
-  const levelAt = (px, py) => {
-    if (!elev || px < 0 || py < 0 || px >= mapPxW || py >= mapPxH) return NO_LEVEL;
-    return elev.level[(py >> 3) * elev.cw + (px >> 3)];
-  };
-
-  // Outputs, one per pixel cell of the chunk:
-  //   h: top height; texture row of the top = runY0 + (z - runY0) * runK
-  const h = new Int16Array(W * H);
-  const runK = new Float32Array(W * H);
-  const runY0 = new Int32Array(W * H);
-
-  // Pixel kinds within a column: ground/hazard, object (solid, not cliff), cliff, stairs.
-  const P_GROUND = 0, P_OBJECT = 1, P_CLIFF = 2, P_STAIRS = 3;
-  const col = new Uint8Array(rows);
-  const cls = new Uint8Array(rows);
-  const lvl = new Int16Array(rows);
-
-  let curX = 0;
-  const put = (r, height, y0, k) => {
-    const z = y0px + r - cy * 16;
-    if (z < 0 || z >= H) return;
-    const i = z * W + curX;
-    h[i] = height; runY0[i] = y0; runK[i] = k;
-  };
-
-  for (let x = 0; x < W; x++) {
-    curX = x;
-    const ax = cx * 16 + x;
-    for (let r = 0; r < rows; r++) {
-      const py = y0px + r;
-      const c = classAt(ax, py), kd = kindAt(ax, py);
-      cls[r] = c;
-      lvl[r] = levelAt(ax, py);
-      col[r] = kd === 2 ? P_STAIRS : kd === 1 ? P_CLIFF : c === CLS.SOLID ? P_OBJECT : P_GROUND;
+  // ---- gather the window ----
+  const kind = new Uint8Array(ww * wh);
+  const cls = new Uint8Array(ww * wh);
+  const lvl = new Int16Array(ww * wh).fill(NO_LEVEL);
+  const deckLvl = new Int16Array(ww * wh).fill(NO_LEVEL);
+  const ground = new Uint8Array(ww * wh); // object pixel showing plain ground colour
+  const rgbs = new Uint32Array(ww * wh);
+  for (let y = 0; y < wh; y++) {
+    const py = wy0 + y;
+    if (py < 0 || py >= mapPxH) continue;
+    for (let x = 0; x < ww; x++) {
+      const px = wx0 + x;
+      if (px < 0 || px >= mapPxW) continue;
+      const i = y * ww + x;
+      const mi = (py >> 4) * map.mtW + (px >> 4);
+      const m = models[map.tilesets[mi]];
+      let c = CLS.GROUND, rgbIsGround = false;
+      if (m) {
+        const p = map.ids[mi] * 256 + (py & 15) * 16 + (px & 15);
+        c = m.cls[p];
+        rgbs[i] = m.color[p];
+        rgbIsGround = m.ground.has(m.color[p]);
+      }
+      cls[i] = c;
+      let kd = 0;
+      if (elev) {
+        const ci = (py >> 3) * elev.cw + (px >> 3);
+        kd = elev.kind[ci];
+        lvl[i] = elev.level[ci];
+        deckLvl[i] = elev.deck[ci];
+      }
+      kind[i] = kd === 2 ? P_STAIRS : kd === 1 ? P_CLIFF : c === CLS.SOLID ? P_OBJECT : P_GROUND;
+      if (kind[i] === P_OBJECT && rgbIsGround) ground[i] = 1;
     }
-    // Level of the nearest region pixel above/below a run (skipping nothing else).
-    const levelAbove = (r) => (r > 0 && lvl[r - 1] !== NO_LEVEL ? lvl[r - 1] : NO_LEVEL);
-    const levelBelow = (e) => (e < rows && lvl[e] !== NO_LEVEL ? lvl[e] : NO_LEVEL);
+  }
 
+  // ---- silhouettes: ground-coloured object pixels reachable from walkable ground ----
+  const queue = new Int32Array(ww * wh);
+  let qh = 0, qt = 0;
+  const tryAdd = (j) => { if (ground[j] === 1 && kind[j] === P_OBJECT) { ground[j] = 2; queue[qt++] = j; } };
+  for (let i = 0; i < ww * wh; i++) {
+    if (kind[i] !== P_GROUND) continue;
+    const x = i % ww;
+    if (x > 0) tryAdd(i - 1);
+    if (x < ww - 1) tryAdd(i + 1);
+    if (i >= ww) tryAdd(i - ww);
+    if (i < ww * (wh - 1)) tryAdd(i + ww);
+  }
+  while (qh < qt) {
+    const i = queue[qh++];
+    const x = i % ww;
+    if (x > 0) tryAdd(i - 1);
+    if (x < ww - 1) tryAdd(i + 1);
+    if (i >= ww) tryAdd(i - ww);
+    if (i < ww * (wh - 1)) tryAdd(i + ww);
+  }
+  for (let i = 0; i < ww * wh; i++) {
+    if (ground[i] !== 2) continue;
+    kind[i] = P_GROUND; // stays at the ground level of its 8x8 cell
+    cls[i] = CLS.GROUND;
+  }
+
+  // ---- leafy mounds: distance from each leafy pixel to the nearest non-leafy one ----
+  // Dark outlines are not leafy, so every crown in a forest gets its own mound.
+  const dist = new Float32Array(ww * wh);
+  for (let i = 0; i < ww * wh; i++) {
+    if (kind[i] === P_OBJECT && isLeafy(rgbs[i])) { kind[i] = P_ORGANIC; dist[i] = 1e9; }
+  }
+  const D1 = 1, D2 = 1.414;
+  for (let y = 0; y < wh; y++) for (let x = 0; x < ww; x++) {
+    const i = y * ww + x;
+    if (kind[i] !== P_ORGANIC) continue;
+    let d = dist[i];
+    if (x > 0) d = Math.min(d, dist[i - 1] + D1);
+    if (y > 0) {
+      d = Math.min(d, dist[i - ww] + D1);
+      if (x > 0) d = Math.min(d, dist[i - ww - 1] + D2);
+      if (x < ww - 1) d = Math.min(d, dist[i - ww + 1] + D2);
+    }
+    if (x === 0 || y === 0 || x === ww - 1) d = Math.min(d, DOME_R); // window edge: assume more crown beyond
+    dist[i] = d;
+  }
+  for (let y = wh - 1; y >= 0; y--) for (let x = ww - 1; x >= 0; x--) {
+    const i = y * ww + x;
+    if (kind[i] !== P_ORGANIC) continue;
+    let d = dist[i];
+    if (x < ww - 1) d = Math.min(d, dist[i + 1] + D1);
+    if (y < wh - 1) {
+      d = Math.min(d, dist[i + ww] + D1);
+      if (x < ww - 1) d = Math.min(d, dist[i + ww + 1] + D2);
+      if (x > 0) d = Math.min(d, dist[i + ww - 1] + D2);
+    }
+    if (y === wh - 1) d = Math.min(d, DOME_R);
+    dist[i] = d;
+  }
+
+  // ---- outputs, one per pixel cell of the chunk ----
+  // Every cell has a top at height h. Its texture is the map pixel
+  //   x: fx if set, else x + ox        y: fy if set, else z + oy
+  // (a plain shift, or a row/column repeated), so the art is never stretched.
+  // Walls: the cell's south face shows art rows ending at sF (sLen rows over the wall
+  // height), its north face rows from nF (nLen rows, may run backwards), its east/west
+  // faces columns from xF (xLen columns); faces without art repeat the top pixel.
+  const N = W * H;
+  const out = {
+    W, H, originX: cx * 16, originZ: cy * 16,
+    h: new Int16Array(N),
+    ox: new Int16Array(N), oy: new Int16Array(N),
+    fx: new Int32Array(N).fill(NONE), fy: new Int32Array(N).fill(NONE),
+    sF: new Float32Array(N).fill(NONE), sLen: new Float32Array(N),
+    nF: new Float32Array(N).fill(NONE), nLen: new Float32Array(N),
+    xF: new Float32Array(N).fill(NONE), xLen: new Float32Array(N),
+    deck: new Int16Array(N).fill(NO_LEVEL),
+  };
+  const cellOf = (wx, wy) => {
+    const x = wx - MARGIN_X, z = wy - MARGIN_Y;
+    return x >= 0 && z >= 0 && x < W && z < H ? z * W + x : -1;
+  };
+  const set = (wx, wy, height, o) => {
+    const i = cellOf(wx, wy);
+    if (i < 0) return;
+    out.h[i] = height;
+    out.ox[i] = o.ox || 0; out.oy[i] = o.oy || 0;
+    out.fx[i] = o.fx ?? NONE; out.fy[i] = o.fy ?? NONE;
+    out.sF[i] = o.sF ?? NONE; out.sLen[i] = o.sLen || 0;
+    out.nF[i] = o.nF ?? NONE; out.nLen[i] = o.nLen || 0;
+    out.xF[i] = o.xF ?? NONE; out.xLen[i] = o.xLen || 0;
+  };
+  const W0 = (r) => r * ww; // row start in the window
+  // Fill for ground hidden behind something: continue the ground texture from dy rows
+  // (or dx columns) away when that pixel is plain ground, else repeat the edge row.
+  // Plain walkable ground (not the background showing between an object's parts).
+  const openGround = (i) => kind[i] === P_GROUND && cls[i] === CLS.GROUND && ground[i] !== 2;
+  const fillY = (x, rr, dy, edgeRow) => {
+    // Look further in the same direction until the source pixel is plain ground.
+    const step = dy < 0 ? -1 : 1;
+    for (let d = dy, n = 0; n < 48; d += step, n++) {
+      const sr = rr + d;
+      if (sr < 0 || sr >= wh) break;
+      if (openGround(W0(sr) + x)) return { oy: d };
+    }
+    return { fy: edgeRow };
+  };
+  const fillX = (k, y, dx, edgeCol) => {
+    const step = dx < 0 ? -1 : 1;
+    for (let d = dx, n = 0; n < 48; d += step, n++) {
+      const sk = k + d;
+      if (sk < 0 || sk >= ww) break;
+      if (openGround(W0(y) + sk)) return { ox: d };
+    }
+    return { fx: edgeCol };
+  };
+  const levelOr = (v, d) => (v === NO_LEVEL ? d : v);
+  const rim = (i) => isRim(rgbs[i]);
+  const side = new Uint8Array(ww * wh); // cliff pixels left for the row pass
+
+  // ---- column pass (all window columns, so the row pass has its inputs) ----
+  for (let x = 0; x < ww; x++) {
+    const at = (r) => W0(r) + x;
+    const levelAbove = (r) => (r > 0 ? lvl[at(r - 1)] : NO_LEVEL);
+    const levelBelow = (e) => (e < wh ? lvl[at(e)] : NO_LEVEL);
     let r = 0;
-    while (r < rows) {
-      const kind = col[r];
-      if (kind === P_GROUND) {
-        const base = lvl[r] === NO_LEVEL ? 0 : lvl[r];
-        put(r, base + (DEPTH[cls[r]] || 0), y0px + r, 1);
+    while (r < wh) {
+      const k0 = kind[at(r)];
+      if (k0 === P_ORGANIC) {
+        const lv = levelOr(lvl[at(r)], 0);
+        set(x, r, lv + domeHeight(dist[at(r)]), {});
+        r++;
+        continue;
+      }
+      if (k0 === P_GROUND) {
+        const lv = levelOr(lvl[at(r)], 0);
+        const c = cls[at(r)];
+        set(x, r, lv + (DEPTH[c] || 0), {});
+        if (c === CLS.BRIDGE) {
+          const i = cellOf(x, r);
+          if (i >= 0) out.deck[i] = levelOr(deckLvl[at(r)], lv) + DECK_RAISE;
+        }
         r++;
         continue;
       }
       let e = r;
-      while (e < rows && col[e] === kind) e++;
+      while (e < wh && kind[at(e)] === k0) e++;
       const len = e - r;
-      const top = y0px + r;
-      if (kind === P_OBJECT) {
-        // A tree, rock, house...: stands on the ground level of its own cells.
-        const base = lvl[r] === NO_LEVEL ? Math.max(0, levelBelow(e) === NO_LEVEL ? 0 : levelBelow(e)) : lvl[r];
-        const ht = runHeight((r === 0 || e === rows) ? Math.max(len, 64) : len);
-        // The roof shows rows [top, end - ht) stretched over the footprint; the bottom
-        // `ht` rows become the front wall (drawn by the side faces).
-        const k = Math.max(0, len - ht) / len;
-        for (let rr = r; rr < e; rr++) put(rr, base + ht, top, k);
-      } else if (kind === P_CLIFF) {
-        let a = levelAbove(r), b = levelBelow(e);
-        if (a === NO_LEVEL && b === NO_LEVEL) { a = b = 0; }
-        if (a === NO_LEVEL) a = b;
-        if (b === NO_LEVEL) b = a;
-        if (a > b) {
-          // South-facing cliff: rim on top at the plateau level, face below it.
-          const face = a - b;
-          const k = Math.max(0, len - face) / len;
-          for (let rr = r; rr < e; rr++) put(rr, a, top, k);
+      const y0 = wy0 + r, y1 = wy0 + e; // map rows of the run
+
+      if (k0 === P_OBJECT) {
+        // Undo the oblique projection: a box of height ht whose roof shows the top
+        // rows 1:1 and whose front wall shows the bottom ht rows. The strip behind it
+        // (hidden in the 2D art) is ground, filled with the row above the object.
+        const lv = levelOr(lvl[at(r)], levelOr(levelBelow(e), 0));
+        const ht = len <= 3 ? len : Math.min(runHeight((r === 0 || e === wh) ? Math.max(len, 64) : len), len - 2);
+        for (let rr = r; rr < e; rr++) {
+          if (rr - r < ht) set(x, rr, lv, fillY(x, rr, -ht, y0 - 1));
+          else set(x, rr, lv + ht, { oy: -ht, sF: y1, sLen: ht, nF: y1 - 0.01, nLen: -ht });
+        }
+      } else if (k0 === P_CLIFF) {
+        const a = levelAbove(r), b = levelBelow(e);
+        if (a !== NO_LEVEL && b !== NO_LEVEL && a > b) {
+          // South-facing cliff: plateau (a) north, lowland (b) south. The red rim lies
+          // at the plateau edge; the brown face below it is the wall, at the bottom row.
+          let lastRim = -1;
+          for (let rr = r; rr < e; rr++) if (rim(at(rr))) lastRim = rr;
+          const rimEnd = lastRim < 0 ? r : Math.min(e, lastRim + 2);
+          const rimLen = rimEnd - r, faceLen = e - rimEnd;
+          for (let rr = r; rr < e; rr++) {
+            if (rr >= e - rimLen) set(x, rr, a, { oy: -faceLen, sF: y1, sLen: Math.max(1, faceLen) });
+            else set(x, rr, a, { ...fillY(x, rr, -(e - r - rimLen), y0 - 1), sF: y1, sLen: Math.max(1, faceLen) });
+          }
+        } else if (a !== NO_LEVEL && b !== NO_LEVEL && a < b) {
+          // North edge of a plateau (b): brown band north, rim south of it. The band is
+          // the plateau's back wall, standing on its north edge.
+          let firstRim = -1;
+          for (let rr = r; rr < e; rr++) if (rim(at(rr))) { firstRim = rr; break; }
+          const rimStart = firstRim < 0 ? e : Math.max(r, firstRim - 1);
+          const wallLen = rimStart - r, rimLen = e - rimStart;
+          for (let rr = r; rr < e; rr++) {
+            if (rr < r + rimLen) set(x, rr, b, { oy: wallLen, nF: y0, nLen: Math.max(1, wallLen) });
+            else set(x, rr, b, { ...fillY(x, rr, e - r - rimLen, y1), nF: y0, nLen: Math.max(1, wallLen) });
+          }
         } else {
-          // Top edge of a drop (or a side wall): flat at the higher level.
-          for (let rr = r; rr < e; rr++) put(rr, b, y0px + rr, 1);
+          // Same level north and south: a side wall, worked out by the row pass.
+          const lv = levelOr(a, levelOr(b, 0));
+          for (let rr = r; rr < e; rr++) { side[at(rr)] = 1; set(x, rr, lv, {}); }
         }
       } else {
-        // Stairs: a ramp from the level above to the level below.
+        // Stairs: steps from the level above down to the level below.
         let a = levelAbove(r), b = levelBelow(e);
-        if (a === NO_LEVEL) a = b === NO_LEVEL ? 0 : b;
+        if (a === NO_LEVEL) a = levelOr(b, 0);
         if (b === NO_LEVEL) b = a;
-        for (let rr = r; rr < e; rr++) put(rr, Math.round(a + (b - a) * (rr - r + 0.5) / len), y0px + rr, 1);
+        const steps = Math.max(1, Math.round(len / 4));
+        for (let rr = r; rr < e; rr++) {
+          const s = Math.min(steps - 1, Math.floor((rr - r) * steps / len));
+          set(x, rr, Math.round(a + (b - a) * (s + 0.5) / steps), {});
+        }
       }
       r = e;
     }
   }
-  return { W, H, h, runK, runY0, originX: cx * 16, originZ: cy * 16 };
+
+  // ---- row pass: east/west cliff sides ----
+  for (let y = MARGIN_Y; y < MARGIN_Y + H; y++) {
+    let x = 0;
+    while (x < ww) {
+      if (!side[W0(y) + x]) { x++; continue; }
+      let e = x;
+      while (e < ww && side[W0(y) + e]) e++;
+      const L = x > 0 ? lvl[W0(y) + x - 1] : NO_LEVEL, R = e < ww ? lvl[W0(y) + e] : NO_LEVEL;
+      const x0 = wx0 + x, x1 = wx0 + e, w = e - x;
+      if (L !== NO_LEVEL && R !== NO_LEVEL && L !== R) {
+        // Rim pixels next to the plateau, brown face toward the lowland.
+        let rimW = 0;
+        if (L > R) {
+          for (let k = x; k < e && rim(W0(y) + k); k++) rimW++;
+          if (rimW === 0) for (let k = x; k < Math.min(e, x + 3); k++) if (rim(W0(y) + k)) rimW = k - x + 1;
+          const faceW = w - rimW;
+          for (let k = x; k < e; k++) {
+            if (k >= e - rimW) set(k, y, L, { ox: -faceW, xF: x0 + rimW, xLen: Math.max(1, faceW) });
+            else set(k, y, L, { ...fillX(k, y, -(w - rimW), x0 - 1), xF: x0 + rimW, xLen: Math.max(1, faceW) });
+          }
+        } else {
+          for (let k = e - 1; k >= x && rim(W0(y) + k); k--) rimW++;
+          const faceW = w - rimW;
+          for (let k = x; k < e; k++) {
+            if (k < x + rimW) set(k, y, R, { ox: faceW, xF: x1 - rimW - 0.01, xLen: -Math.max(1, faceW) });
+            else set(k, y, R, { ...fillX(k, y, w - rimW, x1), xF: x1 - rimW - 0.01, xLen: -Math.max(1, faceW) });
+          }
+        }
+      }
+      x = e;
+    }
+  }
+  return out;
 }
 
-// Height of the terrain under a world pixel (for placing sprites), using a chunk.
-export function heightAt(chunk, wx, wz) {
-  const x = Math.floor(wx) - chunk.originX, z = Math.floor(wz) - chunk.originZ;
-  if (x < 0 || z < 0 || x >= chunk.W || z >= chunk.H) return 0;
-  return chunk.h[z * chunk.W + x];
+const NONE = -2147483648;
+export { NONE as NO_SRC };
+
+function isRim(rgb) {
+  const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
+  return r > 150 && g < 120 && b < 120;
 }
 
 // Build the triangle mesh of a chunk. Returns typed arrays:
 //   position (x, y, z), normal, src (texture source pixel in map space)
 // Top faces are merged into rectangles where height and texture mapping match.
-export function meshChunk(c, neighborHeight) {
-  const { W, H, h, runK, runY0 } = c;
+// neighbor(x, z) gives { c, i } (a chunk and cell index) for cells outside the chunk.
+export function meshChunk(c, neighbor) {
+  const { W, H } = c;
   const pos = [], nor = [], src = [];
-  const ox = c.originX, oz = c.originZ;
+  const ox0 = c.originX, oz0 = c.originZ;
 
   const quad = (p, n, s) => {
-    // p: 4 corners [x,y,z]; s: 4 [sx,sy]; two triangles 0-1-2, 0-2-3
     for (const k of [0, 1, 2, 0, 2, 3]) {
       pos.push(p[k][0], p[k][1], p[k][2]);
       nor.push(n[0], n[1], n[2]);
       src.push(s[k][0], s[k][1]);
     }
   };
+  // Texture of a cell's top at map point (px, pz).
+  const topS = (cc, i, px, pz) => [cc.fx[i] !== NONE ? cc.fx[i] + 0.5 : px + cc.ox[i], cc.fy[i] !== NONE ? cc.fy[i] + 0.5 : pz + cc.oy[i]];
 
   // ---- top faces (greedy) ----
   const done = new Uint8Array(W * H);
-  const same = (a, b) => h[a] === h[b] && runK[a] === runK[b] && runY0[a] === runY0[b];
+  const same = (a, b) => c.h[a] === c.h[b] && c.ox[a] === c.ox[b] && c.oy[a] === c.oy[b] && c.fx[a] === c.fx[b] && c.fy[a] === c.fy[b];
   for (let z = 0; z < H; z++) {
     for (let x = 0; x < W; x++) {
       const i = z * W + x;
@@ -212,73 +429,136 @@ export function meshChunk(c, neighborHeight) {
         d++;
       }
       for (let dz = 0; dz < d; dz++) for (let k = 0; k < w; k++) done[(z + dz) * W + x + k] = 1;
-      const y = h[i];
-      const x0 = ox + x, x1 = ox + x + w, z0 = oz + z, z1 = oz + z + d;
-      const sy = (zz) => runY0[i] + (zz - runY0[i]) * runK[i];
-      quad(
-        [[x0, y, z0], [x0, y, z1], [x1, y, z1], [x1, y, z0]],
-        [0, 1, 0],
-        [[x0, sy(z0)], [x0, sy(z1)], [x1, sy(z1)], [x1, sy(z0)]],
-      );
+      const y = c.h[i];
+      const x0 = ox0 + x, x1 = ox0 + x + w, z0 = oz0 + z, z1 = oz0 + z + d;
+      const e = 0.001;
+      quad([[x0, y, z0], [x0, y, z1], [x1, y, z1], [x1, y, z0]], [0, 1, 0],
+        [topS(c, i, x0 + e, z0 + e), topS(c, i, x0 + e, z1 - e), topS(c, i, x1 - e, z1 - e), topS(c, i, x1 - e, z0 + e)]);
     }
   }
 
-  const hAt = (x, z) => {
-    if (x >= 0 && z >= 0 && x < W && z < H) return h[z * W + x];
-    return neighborHeight ? neighborHeight(ox + x, oz + z) : 0;
+  const cell = (x, z) => {
+    if (x >= 0 && z >= 0 && x < W && z < H) return { c, i: z * W + x };
+    return neighbor ? neighbor(ox0 + x, oz0 + z) : null;
   };
+  const hOf = (r) => (r ? r.c.h[r.i] : 0);
+  const t = (e, lo, hi) => (hi > lo ? (e - lo) / (hi - lo) : 0);
 
-  // ---- vertical faces between columns (facing +x / -x) ----
-  // Each chunk owns the faces on its left edge and interior; the face on boundary x
-  // separates cell x-1 and cell x.
-  for (let x = 0; x <= W; x++) {
-    if (x === W) break; // right edge belongs to the neighbour's left edge
+  // Texture for a point on a wall of cell r (the higher side). dir: 's', 'n', 'e', 'w'.
+  // (px, pz): map point of the wall; e: height of the point.
+  const wallS = (r, dir, px, pz, e, lo, hi) => {
+    const cc = r.c, i = r.i;
+    const f = t(e, lo, hi);
+    if ((dir === 'e' || dir === 'w') && cc.xF[i] !== NONE) {
+      return [cc.xF[i] + 0.01 + f * (cc.xLen[i] - 0.02), cc.fy[i] !== NONE ? cc.fy[i] + 0.5 : pz + cc.oy[i]];
+    }
+    if (dir !== 'n' && cc.sF[i] !== NONE) {
+      const sx = cc.fx[i] !== NONE ? cc.fx[i] + 0.5 : px + cc.ox[i];
+      return [sx, cc.sF[i] - 0.01 - f * (cc.sLen[i] - 0.02)];
+    }
+    if (dir === 'n' && cc.nF[i] !== NONE) {
+      const sx = cc.fx[i] !== NONE ? cc.fx[i] + 0.5 : px + cc.ox[i];
+      return [sx, cc.nF[i] + 0.01 + f * (cc.nLen[i] - 0.02 * Math.sign(cc.nLen[i]))];
+    }
+    return topS(cc, i, px, pz);
+  };
+  // Wall attributes that must match for two neighbouring wall pieces to merge.
+  const wallKey = (r) => (r ? [r.c.h[r.i], r.c.sF[r.i], r.c.sLen[r.i], r.c.nF[r.i], r.c.nLen[r.i], r.c.xF[r.i], r.c.xLen[r.i], r.c.ox[r.i], r.c.oy[r.i], r.c.fx[r.i], r.c.fy[r.i]].join() : '0');
+
+  // ---- walls between columns (facing +x / -x); this chunk owns its left edge ----
+  for (let x = 0; x < W; x++) {
     let z = 0;
     while (z < H) {
-      const a = hAt(x - 1, z), b = h[z * W + x];
+      const A = cell(x - 1, z), B = cell(x, z);
+      const a = hOf(A), b = hOf(B);
       if (a === b) { z++; continue; }
+      const hiR = a > b ? A : B, loR = a > b ? B : A;
+      const key = wallKey(hiR) + '|' + hOf(loR);
       let e = z + 1;
-      while (e < H && hAt(x - 1, e) === a && h[e * W + x] === b) e++;
-      const wx = ox + x, z0 = oz + z, z1 = oz + e;
+      while (e < H) {
+        const A2 = cell(x - 1, e), B2 = cell(x, e);
+        const a2 = hOf(A2), b2 = hOf(B2);
+        if (a2 === b2 || (a2 > b2) !== (a > b)) break;
+        if (wallKey(a2 > b2 ? A2 : B2) + '|' + hOf(a2 > b2 ? B2 : A2) !== key) break;
+        e++;
+      }
+      const wx = ox0 + x, z0 = oz0 + z, z1 = oz0 + e;
       const lo = Math.min(a, b), hi = Math.max(a, b);
-      // Faces +x if the left column is higher (wall of the left column facing right).
-      const facesPlusX = a > b;
-      const sx = facesPlusX ? wx - 0.5 : wx + 0.5;
-      const s = (zz, yy) => [sx, zz - (yy - lo) - 0.01];
-      if (facesPlusX) {
+      const plusX = a > b;
+      const px = plusX ? wx - 0.5 : wx + 0.5;
+      const dir = plusX ? 'e' : 'w';
+      const S = (zz, yy) => wallS(hiR, dir, px, zz, yy, lo, hi);
+      if (plusX) {
         quad([[wx, hi, z1], [wx, lo, z1], [wx, lo, z0], [wx, hi, z0]], [1, 0, 0],
-          [s(z1, hi), s(z1, lo), s(z0, lo), s(z0, hi)]);
+          [S(z1 - 0.01, hi), S(z1 - 0.01, lo), S(z0 + 0.01, lo), S(z0 + 0.01, hi)]);
       } else {
         quad([[wx, hi, z0], [wx, lo, z0], [wx, lo, z1], [wx, hi, z1]], [-1, 0, 0],
-          [s(z0, hi), s(z0, lo), s(z1, lo), s(z1, hi)]);
+          [S(z0 + 0.01, hi), S(z0 + 0.01, lo), S(z1 - 0.01, lo), S(z1 - 0.01, hi)]);
       }
       z = e;
     }
   }
 
-  // ---- vertical faces between rows (facing +z = south, toward the camera / -z) ----
+  // ---- walls between rows (facing +z = south / -z = north) ----
   for (let z = 0; z < H; z++) {
     let x = 0;
     while (x < W) {
-      const a = hAt(x, z - 1), b = h[z * W + x];
+      const A = cell(x, z - 1), B = cell(x, z);
+      const a = hOf(A), b = hOf(B);
       if (a === b) { x++; continue; }
+      const hiR = a > b ? A : B, loR = a > b ? B : A;
+      const key = wallKey(hiR) + '|' + hOf(loR);
       let e = x + 1;
-      while (e < W && hAt(e, z - 1) === a && h[z * W + e] === b) e++;
-      const wz = oz + z, x0 = ox + x, x1 = ox + e;
+      while (e < W) {
+        const A2 = cell(e, z - 1), B2 = cell(e, z);
+        const a2 = hOf(A2), b2 = hOf(B2);
+        if (a2 === b2 || (a2 > b2) !== (a > b)) break;
+        if (wallKey(a2 > b2 ? A2 : B2) + '|' + hOf(a2 > b2 ? B2 : A2) !== key) break;
+        e++;
+      }
+      const wz = oz0 + z, x0 = ox0 + x, x1 = ox0 + e;
       const lo = Math.min(a, b), hi = Math.max(a, b);
       if (a > b) {
-        // South-facing front wall: texture is the oblique art, srcY = z - y.
-        const s = (xx, yy) => [xx, wz - (yy - lo) - 0.5];
+        const S = (xx, yy) => wallS(hiR, 's', xx, wz - 0.5, yy, lo, hi);
         quad([[x0, hi, wz], [x0, lo, wz], [x1, lo, wz], [x1, hi, wz]], [0, 0, 1],
-          [s(x0, hi), s(x0, lo), s(x1, lo), s(x1, hi)]);
+          [S(x0 + 0.01, hi), S(x0 + 0.01, lo), S(x1 - 0.01, lo), S(x1 - 0.01, hi)]);
       } else {
-        // North-facing wall (back of things, or the far bank of water/holes).
-        const s = (xx) => [xx, wz + 0.5];
+        const S = (xx, yy) => wallS(hiR, 'n', xx, wz + 0.5, yy, lo, hi);
         quad([[x1, hi, wz], [x1, lo, wz], [x0, lo, wz], [x0, hi, wz]], [0, 0, -1],
-          [s(x1, hi), s(x1, lo), s(x0, lo), s(x0, hi)]);
+          [S(x1 - 0.01, hi), S(x1 - 0.01, lo), S(x0 + 0.01, lo), S(x0 + 0.01, hi)]);
       }
       x = e;
     }
+  }
+
+  // ---- bridge decks: slabs floating over the water ----
+  const deck = c.deck;
+  const used = new Uint8Array(W * H);
+  for (let z = 0; z < H; z++) for (let x = 0; x < W; x++) {
+    const i = z * W + x;
+    if (deck[i] === NO_LEVEL || used[i]) continue;
+    const top = deck[i];
+    let w = 1;
+    while (x + w < W && !used[i + w] && deck[i + w] === top) w++;
+    let d = 1;
+    outer2: while (z + d < H) {
+      for (let k = 0; k < w; k++) { const j = (z + d) * W + x + k; if (used[j] || deck[j] !== top) break outer2; }
+      d++;
+    }
+    for (let dz = 0; dz < d; dz++) for (let k = 0; k < w; k++) used[(z + dz) * W + x + k] = 1;
+    const x0 = ox0 + x, x1 = ox0 + x + w, z0 = oz0 + z, z1 = oz0 + z + d, bot = top - DECK_THICK;
+    quad([[x0, top, z0], [x0, top, z1], [x1, top, z1], [x1, top, z0]], [0, 1, 0],
+      [[x0, z0], [x0, z1 - 0.01], [x1 - 0.01, z1 - 0.01], [x1 - 0.01, z0]]);
+    quad([[x0, bot, z1], [x0, bot, z0], [x1, bot, z0], [x1, bot, z1]], [0, -1, 0],
+      [[x0, z1 - 0.01], [x0, z0], [x1 - 0.01, z0], [x1 - 0.01, z1 - 0.01]]);
+    quad([[x0, top, z1], [x0, bot, z1], [x1, bot, z1], [x1, top, z1]], [0, 0, 1],
+      [[x0, z1 - 0.5], [x0, z1 - 0.5], [x1 - 0.01, z1 - 0.5], [x1 - 0.01, z1 - 0.5]]);
+    quad([[x1, top, z0], [x1, bot, z0], [x0, bot, z0], [x0, top, z0]], [0, 0, -1],
+      [[x1 - 0.01, z0 + 0.5], [x1 - 0.01, z0 + 0.5], [x0, z0 + 0.5], [x0, z0 + 0.5]]);
+    quad([[x1, top, z1], [x1, bot, z1], [x1, bot, z0], [x1, top, z0]], [1, 0, 0],
+      [[x1 - 0.5, z1 - 0.01], [x1 - 0.5, z1 - 0.01], [x1 - 0.5, z0], [x1 - 0.5, z0]]);
+    quad([[x0, top, z0], [x0, bot, z0], [x0, bot, z1], [x0, top, z1]], [-1, 0, 0],
+      [[x0 + 0.5, z0], [x0 + 0.5, z0], [x0 + 0.5, z1 - 0.01], [x0 + 0.5, z1 - 0.01]]);
   }
 
   return {

@@ -1,12 +1,14 @@
 // Works out how high each patch of ground is, so plateaus stand above the lowlands.
 //
-// The map is split into 8x8 cells (the game's collision resolution). Cells that are
-// cliff walls or stairs separate the rest into regions of connected ground. Each cliff
-// band tells us how two regions relate: in the oblique art, a tall band of brown cliff
-// face below a red rim means the ground north of it is higher by roughly the band's
-// height; a thin band (just the rim) is the top edge of a drop, so the north side is
-// lower. Votes from every column are combined and region heights are solved from the
-// largest region outward.
+// The map is split into 8x8 cells (the game's collision resolution). Cliff walls,
+// stairs and bridges separate the rest into regions: connected land, or connected
+// water. Then every cliff, shore and bridge says something about two regions:
+//  - a tall band of cliff face below a red rim: the north side is one storey higher;
+//  - a thin band (just the rim): the top edge of a drop, the north side is a storey lower;
+//  - water touching land with no cliff between: same level (a beach);
+//  - a bridge: the land at both ends is at the same level.
+// Regions get their levels from the largest one outward, trusting the best-supported
+// relations first.
 
 // Overworld metatiles (collision mode 0) that are cliff walls. These ids are the same in
 // every overworld tileset (see the atlas rows $20-$6f).
@@ -21,60 +23,78 @@ const LEDGE_DOWN = new Set([0x54, 0x94, 0x95, 0x9a, 0xcc, 0xcd, 0xce, 0xcf, 0xfe
 const STAIRS = new Set([0xd0]);
 
 export const CELL = { REGION: 0, CLIFF: 1, RAMP: 2 };
-const NORTH_DROP = 16; // assumed height of drops whose wall faces away from the camera
-const MAX_LEVEL = 96;
-const MIN_LEVEL = -48;
+export const STOREY = 16; // height of one cliff
+const MAX_LEVEL = STOREY * 6;
+const MIN_LEVEL = -STOREY * 3;
+const NONE = -32768;
 
 const QUARTER_BIT = [8, 4, 2, 1];
+const CLS_WATER = 2, CLS_BRIDGE = 5;
 
 export function computeElevation(map, collisionModeOf) {
-  const cw = map.mtW * 2, ch = map.mtH * 2;
-  const kind = new Uint8Array(cw * ch);
-  const ledge = new Uint8Array(cw * ch);
+  const cw = map.mtW * 2, ch = map.mtH * 2, n = cw * ch;
+  const kind = new Uint8Array(n);
+  const ledge = new Uint8Array(n);
+  const wet = new Uint8Array(n);
+  const bridge = new Uint8Array(n);
   for (let cy = 0; cy < ch; cy++) for (let cx = 0; cx < cw; cx++) {
     const mi = (cy >> 1) * map.mtW + (cx >> 1);
     const ts = map.tilesets[mi];
-    if (ts === 0xffff || collisionModeOf(ts) !== 0) continue;
+    if (ts === 0xffff) continue;
     const id = map.ids[mi];
     const m = map.models[ts];
+    const i = cy * cw + cx;
+    const pc = m ? m.cls[id * 256 + ((cy & 1) * 8 + 4) * 16 + (cx & 1) * 8 + 4] : 0;
+    if (pc === CLS_WATER) wet[i] = 1;
+    if (pc === CLS_BRIDGE) bridge[i] = 1;
+    if (collisionModeOf(ts) !== 0) continue;
     const c = m ? m.collisions[id] : 0;
     const q = (cy & 1) * 2 + (cx & 1);
-    const i = cy * cw + cx;
     if (STAIRS.has(id)) kind[i] = CELL.RAMP;
     else if (CLIFF_IDS.has(id) && c >= 1 && c <= 15 && (c & QUARTER_BIT[q])) {
       kind[i] = CELL.CLIFF;
       if (LEDGE_DOWN.has(id)) ledge[i] = 1;
     }
   }
+  const neighbours = (i) => {
+    const x = i % cw, out = [];
+    if (x > 0) out.push(i - 1);
+    if (x < cw - 1) out.push(i + 1);
+    if (i >= cw) out.push(i - cw);
+    if (i < n - cw) out.push(i + cw);
+    return out;
+  };
 
-  // Regions: 4-connected non-cliff, non-stairs cells.
-  const region = new Int32Array(cw * ch).fill(-1);
+  // ---- regions: connected land or connected water (not cliffs, stairs, bridges) ----
+  const region = new Int32Array(n).fill(-1);
   const sizes = [];
-  const stack = [];
-  for (let i = 0; i < cw * ch; i++) {
-    if (kind[i] !== CELL.REGION || region[i] >= 0) continue;
+  const regionWet = [];
+  const isOpen = (i) => kind[i] === CELL.REGION && !bridge[i];
+  for (let i = 0; i < n; i++) {
+    if (!isOpen(i) || region[i] >= 0) continue;
     const id = sizes.length;
-    let n = 0;
-    region[i] = id; stack.push(i);
+    let count = 0;
+    const stack = [i];
+    region[i] = id;
     while (stack.length) {
-      const j = stack.pop(); n++;
-      const x = j % cw, y = (j / cw) | 0;
-      if (x > 0) visit(j - 1); if (x < cw - 1) visit(j + 1);
-      if (y > 0) visit(j - cw); if (y < ch - 1) visit(j + cw);
+      const j = stack.pop(); count++;
+      for (const k of neighbours(j)) if (isOpen(k) && region[k] < 0 && wet[k] === wet[i]) { region[k] = id; stack.push(k); }
     }
-    sizes.push(n);
-    function visit(k) { if (kind[k] === CELL.REGION && region[k] < 0) { region[k] = id; stack.push(k); } }
+    sizes.push(count);
+    regionWet.push(wet[i]);
   }
 
-  // Votes from vertical cliff runs: level(north) - level(south).
-  const votes = new Map(); // "a,b" -> [sum, count]  (a < b)
-  const vote = (a, b, d) => {
-    if (a === b) return;
+  // ---- relations between regions: level(a) - level(b) = d, with a weight ----
+  const votes = new Map();
+  const vote = (a, b, d, w) => {
+    if (a < 0 || b < 0 || a === b) return;
     if (a > b) { [a, b] = [b, a]; d = -d; }
     const k = a * 1e6 + b;
     const v = votes.get(k);
-    if (v) { v[0] += d; v[1]++; } else votes.set(k, [d, 1]);
+    if (v) { v[0] += d * w; v[1] += w; } else votes.set(k, [d * w, w]);
   };
+
+  // Cliff bands, scanning each column of cells.
   for (let cx = 0; cx < cw; cx++) {
     let cy = 0;
     while (cy < ch) {
@@ -83,47 +103,94 @@ export function computeElevation(map, collisionModeOf) {
       while (e < ch && kind[e * cw + cx] === CELL.CLIFF) { if (ledge[e * cw + cx]) isLedge = true; e++; }
       if (cy > 0 && e < ch) {
         const a = region[(cy - 1) * cw + cx], b = region[e * cw + cx];
-        if (a >= 0 && b >= 0) {
-          const len = (e - cy) * 8;
-          if (isLedge || len >= 24) vote(a, b, Math.max(8, len - 8));
-          else vote(a, b, -NORTH_DROP);
-        }
+        const len = (e - cy) * 8;
+        if (isLedge || len >= 24) vote(a, b, STOREY, 1);
+        else vote(a, b, -STOREY, 0.5);
       }
       cy = e;
     }
   }
+  // Shores.
+  for (let i = 0; i < n; i++) {
+    if (region[i] < 0) continue;
+    const x = i % cw;
+    if (x < cw - 1 && region[i + 1] >= 0 && wet[i + 1] !== wet[i]) vote(region[i], region[i + 1], 0, 0.15);
+    if (i + cw < n && region[i + cw] >= 0 && wet[i + cw] !== wet[i]) vote(region[i], region[i + cw], 0, 0.15);
+  }
+  // Bridges: the land regions touching one bridge are level with each other.
+  const seen = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!bridge[i] || seen[i]) continue;
+    const lands = new Set();
+    const stack = [i];
+    seen[i] = 1;
+    while (stack.length) {
+      const j = stack.pop();
+      for (const k of neighbours(j)) {
+        if (bridge[k] && !seen[k]) { seen[k] = 1; stack.push(k); } else if (region[k] >= 0 && !regionWet[region[k]]) lands.add(region[k]);
+      }
+    }
+    const list = [...lands];
+    for (let a = 1; a < list.length; a++) vote(list[0], list[a], 0, 6);
+  }
 
-  // Solve: grow from the biggest region, always taking the best-supported edge next.
-  const n = sizes.length;
-  const level = new Float32Array(n);
-  const known = new Uint8Array(n);
-  const adj = Array.from({ length: n }, () => []);
-  for (const [k, [sum, count]] of votes) {
+  // ---- solve: grow from the biggest region, best-supported relation first ----
+  const R = sizes.length;
+  const level = new Float32Array(R);
+  const known = new Uint8Array(R);
+  const adj = Array.from({ length: R }, () => []);
+  for (const [k, [sum, w]] of votes) {
     const a = Math.floor(k / 1e6), b = k % 1e6;
-    adj[a].push([b, sum / count, count]);
-    adj[b].push([a, -sum / count, count]);
+    const d = Math.round(sum / w / STOREY) * STOREY; // whole storeys
+    adj[a].push([b, d, w]);
+    adj[b].push([a, -d, w]);
   }
   const order = [...sizes.keys()].sort((p, q) => sizes[q] - sizes[p]);
   for (const root of order) {
     if (known[root]) continue;
     known[root] = 1; level[root] = 0;
     const frontier = [];
-    const push = (r) => { for (const [o, d, c] of adj[r]) if (!known[o]) frontier.push([c, r, o, d]); };
+    const push = (r) => { for (const [o, d, w] of adj[r]) if (!known[o]) frontier.push([w, r, o, d]); };
     push(root);
     while (frontier.length) {
       let bi = 0;
-      for (let i = 1; i < frontier.length; i++) if (frontier[i][0] > frontier[bi][0]) bi = i;
+      for (let f = 1; f < frontier.length; f++) if (frontier[f][0] > frontier[bi][0]) bi = f;
       const [, from, to, d] = frontier[bi];
-      frontier.splice(bi, 1);
+      frontier[bi] = frontier[frontier.length - 1];
+      frontier.pop();
       if (known[to]) continue;
       known[to] = 1;
-      level[to] = level[from] - d; // adj stores d = level(from) - level(to)
+      level[to] = level[from] - d; // d = level(from) - level(to)
       push(to);
     }
   }
-  const out = new Int16Array(cw * ch).fill(-32768);
-  for (let i = 0; i < cw * ch; i++) {
+
+  // ---- per-cell output ----
+  const out = new Int16Array(n).fill(NONE);
+  for (let i = 0; i < n; i++) {
     if (region[i] >= 0) out[i] = Math.max(MIN_LEVEL, Math.min(MAX_LEVEL, Math.round(level[region[i]])));
   }
-  return { cw, ch, kind, level: out };
+  // Bridges: the deck sits at the land level at its ends; underneath is the water level.
+  const deck = new Int16Array(n).fill(NONE);
+  const spread = (target, pick) => {
+    const q = [];
+    for (let i = 0; i < n; i++) {
+      if (!bridge[i]) continue;
+      let best = NONE;
+      for (const k of neighbours(i)) if (region[k] >= 0 && pick(k)) best = Math.max(best, out[k]);
+      if (best !== NONE) { target[i] = best; q.push(i); }
+    }
+    for (let h = 0; h < q.length; h++) {
+      const i = q[h];
+      for (const k of neighbours(i)) if (bridge[k] && target[k] === NONE) { target[k] = target[i]; q.push(k); }
+    }
+  };
+  spread(deck, (k) => !wet[k]);
+  const under = new Int16Array(n).fill(NONE);
+  spread(under, (k) => wet[k]);
+  for (let i = 0; i < n; i++) {
+    if (!bridge[i]) continue;
+    out[i] = under[i] !== NONE ? under[i] : deck[i] !== NONE ? deck[i] - 4 : 0;
+  }
+  return { cw, ch, kind, level: out, deck };
 }
