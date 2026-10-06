@@ -192,6 +192,11 @@ function interiorMap(w, h) {
   return maps.interior;
 }
 
+// Unused overworld rooms are filled with a big "H" pattern of two tiles; leave them out.
+function isPlaceholderRoom(layout) {
+  return layout.every((v) => v === 0x04 || v === 0xf4);
+}
+
 function b64(s) { return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); }
 
 // Which captured season each overworld room shows. Rooms in the same room pack as
@@ -213,7 +218,8 @@ function refreshSeasons(map, livePack, liveSeason, liveRoom) {
     if (map.roomSeason[room] === s) continue;
     map.roomSeason[room] = s;
     const r = map.world.seasons[s][room];
-    map.setRoom(room & 15, room >> 4, r ? b64(r.layout) : null, r ? r.tileset : 0);
+    const layout = r ? b64(r.layout) : null;
+    map.setRoom(room & 15, room >> 4, layout && !isPlaceholderRoom(layout) ? layout : null, r ? r.tileset : 0);
   }
 }
 
@@ -242,8 +248,9 @@ function syncFromGame(gb) {
     map = interiorMap(layout.w, layout.h);
   }
 
-  // Live tileset: refresh the pixels every few frames (animated tiles), the 3D model
-  // only when the collision table changes.
+  // Live tileset: refresh the pixels every few frames (animated tiles). The 3D model
+  // is rebuilt when what it depends on changes: collisions, or the look of solid tiles
+  // (a new room's graphics arrive a few frames after the room switches).
   let collChanged = false;
   const coll = gb.s('w3TileCollisions');
   for (let i = 0; i < 256; i++) {
@@ -252,13 +259,22 @@ function syncFromGame(gb) {
   }
   if (roomChanged || collChanged || --live.atlasTimer <= 0) {
     const a = gb.metatileAtlas();
-    data.liveCollisionMode = gb.v('wActiveCollisions');
-    data.setLive(a.rgba, collChanged || roomChanged ? live.collisions : null);
-    live.atlasTimer = 8;
-    if (collChanged || roomChanged) {
-      map.markDirty(isOverworld ? room & 15 : 0, isOverworld ? room >> 4 : 0);
-      map.roomSeason && (map.roomSeason[room] = -2);
+    let key = 0;
+    for (let id = 0; id < 256; id++) {
+      const c = live.collisions[id];
+      if (c < 1 || c > 15) continue;
+      const ox = (id & 15) * 16, oy = (id >> 4) * 16;
+      for (let y = 0; y < 16; y++) for (let x = 0; x < 16; x++) {
+        const i = ((oy + y) * 256 + ox + x) * 4;
+        key = (Math.imul(key, 31) + (a.rgba[i] << 16 | a.rgba[i + 1] << 8 | a.rgba[i + 2])) | 0;
+      }
     }
+    const rebuild = roomChanged || collChanged || key !== live.shapeKey;
+    live.shapeKey = key;
+    data.liveCollisionMode = gb.v('wActiveCollisions');
+    data.setLive(a.rgba, rebuild ? live.collisions : null);
+    live.atlasTimer = 4;
+    if (rebuild) map.markDirty(isOverworld ? room & 15 : 0, isOverworld ? room >> 4 : 0);
   }
 
   const rx = isOverworld ? room & 15 : 0, ry = isOverworld ? room >> 4 : 0;

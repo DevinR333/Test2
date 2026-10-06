@@ -47,10 +47,14 @@ export class TilesetModel {
       const c = collisions[id];
       const px = tile(id);
       const hazard = c === 0x10 ? classifyHazard(px) : CLS.GROUND;
+      // Impassable deep water (the sea at the map's edge) is solid but should look like water.
+      const solidWater = c === 0x0f && isWaterTile(px);
       for (let py = 0; py < 16; py++) for (let qx = 0; qx < 16; qx++) {
         const p = py * 16 + qx;
         let k = CLS.GROUND;
-        if (c >= 1 && c <= 15) {
+        if (solidWater) {
+          k = CLS.WATER;
+        } else if (c >= 1 && c <= 15) {
           if (c & QUARTER_BIT[(py >> 3) * 2 + (qx >> 3)]) k = CLS.SOLID;
         } else if (c === 0x10) {
           k = hazard;
@@ -73,6 +77,16 @@ export class TilesetModel {
       if (n > groundTotal * 0.08 && luma > 60) this.ground.add(rgb);
     }
   }
+}
+
+// Mostly blue, like the game's water tiles.
+function isWaterTile(px) {
+  let blue = 0;
+  for (let i = 0; i < 256; i++) {
+    const r = px[i * 4], g = px[i * 4 + 1], b = px[i * 4 + 2];
+    if (b > r + 40 && b > g) blue++;
+  }
+  return blue > 110;
 }
 
 function classifyHazard(px) {
@@ -100,8 +114,18 @@ function isLeafy(rgb) {
   const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
   return g > r + 12 && g > b + 12 && g > 50;
 }
-const DOME_R = 7, DOME_CAP = 15;
-const domeHeight = (d) => Math.max(2, Math.round(DOME_CAP * Math.sqrt(Math.min(1, d / DOME_R))));
+// Pixels a crown may grow into: its dark outlines and green/yellow-green highlights
+// (not trunks, roofs or anything else that happens to touch a tree).
+function crownish(rgb) {
+  const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
+  const sat = Math.max(r, g, b) - Math.min(r, g, b);
+  return (luma(rgb) < 50 && sat < 60) || (g >= r - 8 && g >= b);
+}
+function luma(rgb) {
+  return 0.3 * (rgb >> 16) + 0.59 * ((rgb >> 8) & 255) + 0.11 * (rgb & 255);
+}
+const DOME_R = 8, DOME_CAP = 15, GROOVE = 3;
+const domeHeight = (d) => Math.max(1, Math.round(DOME_CAP * Math.sqrt(Math.min(1, d / DOME_R))));
 
 export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
   const W = cw * 16, H = ch * 16;
@@ -171,11 +195,27 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     cls[i] = CLS.GROUND;
   }
 
-  // ---- leafy mounds: distance from each leafy pixel to the nearest non-leafy one ----
-  // Dark outlines are not leafy, so every crown in a forest gets its own mound.
+  // ---- leafy mounds ----
+  // A crown is the leafy pixels plus the highlights and outlines inside it (anything
+  // but trunk browns), grown out from the leafy pixels. Its height is a smooth dome over
+  // the distance to the crown's edge; dark outline pixels inside are pressed in a little,
+  // which separates neighbouring crowns in a forest without breaking them into spikes.
   const dist = new Float32Array(ww * wh);
-  for (let i = 0; i < ww * wh; i++) {
-    if (kind[i] === P_OBJECT && isLeafy(rgbs[i])) { kind[i] = P_ORGANIC; dist[i] = 1e9; }
+  const dark = new Uint8Array(ww * wh);
+  {
+    const q = [];
+    for (let i = 0; i < ww * wh; i++) {
+      if (kind[i] === P_OBJECT && isLeafy(rgbs[i])) { kind[i] = P_ORGANIC; q.push(i); }
+    }
+    for (let h = 0; h < q.length; h++) {
+      const i = q[h], x = i % ww;
+      for (const j of [x > 0 ? i - 1 : -1, x < ww - 1 ? i + 1 : -1, i - ww, i + ww]) {
+        if (j < 0 || j >= ww * wh || kind[j] !== P_OBJECT || !crownish(rgbs[j])) continue;
+        kind[j] = P_ORGANIC;
+        q.push(j);
+      }
+    }
+    for (const i of q) { dist[i] = 1e9; dark[i] = luma(rgbs[i]) < 50 ? 1 : 0; }
   }
   const D1 = 1, D2 = 1.414;
   for (let y = 0; y < wh; y++) for (let x = 0; x < ww; x++) {
@@ -262,8 +302,54 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     return { fx: edgeCol };
   };
   const levelOr = (v, d) => (v === NO_LEVEL ? d : v);
+  // Under a bridge deck: show the nearest water instead of the planks.
+  const waterUnder = (x, r) => {
+    for (let d = 1; d < 40; d++) {
+      for (const [dx, dy] of [[0, -d], [0, d], [-d, 0], [d, 0]]) {
+        const xx = x + dx, rr = r + dy;
+        if (xx < 0 || rr < 0 || xx >= ww || rr >= wh) continue;
+        if (cls[W0(rr) + xx] === CLS.WATER) return dx ? { ox: dx } : { oy: dy };
+      }
+    }
+    return {};
+  };
   const rim = (i) => isRim(rgbs[i]);
   const side = new Uint8Array(ww * wh); // cliff pixels left for the row pass
+
+  // ---- one height per object: connected object pixels share the median column run ----
+  const comp = new Int32Array(ww * wh).fill(-1);
+  const compHt = [];
+  {
+    let next = 0;
+    const st = [];
+    for (let i = 0; i < ww * wh; i++) {
+      if (kind[i] !== P_OBJECT || comp[i] >= 0) continue;
+      comp[i] = next; st.push(i);
+      while (st.length) {
+        const j = st.pop(), x = j % ww;
+        for (const k of [x > 0 ? j - 1 : -1, x < ww - 1 ? j + 1 : -1, j - ww, j + ww]) {
+          if (k >= 0 && k < ww * wh && kind[k] === P_OBJECT && comp[k] < 0) { comp[k] = next; st.push(k); }
+        }
+      }
+      next++;
+    }
+    const runs = Array.from({ length: next }, () => []);
+    for (let x = 0; x < ww; x++) {
+      let r = 0;
+      while (r < wh) {
+        const i = W0(r) + x;
+        if (kind[i] !== P_OBJECT) { r++; continue; }
+        let e = r;
+        while (e < wh && kind[W0(e) + x] === P_OBJECT) e++;
+        runs[comp[i]].push(r === 0 || e === wh ? Math.max(e - r, 64) : e - r);
+        r = e;
+      }
+    }
+    for (const list of runs) {
+      list.sort((a, b) => a - b);
+      compHt.push(runHeight(list[Math.floor(list.length * 0.6)] || 1));
+    }
+  }
 
   // ---- column pass (all window columns, so the row pass has its inputs) ----
   for (let x = 0; x < ww; x++) {
@@ -275,14 +361,14 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
       const k0 = kind[at(r)];
       if (k0 === P_ORGANIC) {
         const lv = levelOr(lvl[at(r)], 0);
-        set(x, r, lv + domeHeight(dist[at(r)]), {});
+        set(x, r, lv + Math.max(1, domeHeight(dist[at(r)]) - (dark[at(r)] ? GROOVE : 0)), {});
         r++;
         continue;
       }
       if (k0 === P_GROUND) {
         const lv = levelOr(lvl[at(r)], 0);
         const c = cls[at(r)];
-        set(x, r, lv + (DEPTH[c] || 0), {});
+        set(x, r, lv + (DEPTH[c] || 0), c === CLS.BRIDGE ? waterUnder(x, r) : {});
         if (c === CLS.BRIDGE) {
           const i = cellOf(x, r);
           if (i >= 0) out.deck[i] = levelOr(deckLvl[at(r)], lv) + DECK_RAISE;
@@ -300,7 +386,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         // rows 1:1 and whose front wall shows the bottom ht rows. The strip behind it
         // (hidden in the 2D art) is ground, filled with the row above the object.
         const lv = levelOr(lvl[at(r)], levelOr(levelBelow(e), 0));
-        const ht = len <= 3 ? len : Math.min(runHeight((r === 0 || e === wh) ? Math.max(len, 64) : len), len - 2);
+        const ht = len <= 3 ? len : Math.min(compHt[comp[at(r)]], len - 2);
         for (let rr = r; rr < e; rr++) {
           if (rr - r < ht) set(x, rr, lv, fillY(x, rr, -ht, y0 - 1));
           else set(x, rr, lv + ht, { oy: -ht, sF: y1, sLen: ht, nF: y1 - 0.01, nLen: -ht });
@@ -437,9 +523,11 @@ export function meshChunk(c, neighbor) {
     }
   }
 
+  // Cells outside the map are flat ground with no art.
+  const VOID = { c: { h: [0], ox: [0], oy: [0], fx: [NONE], fy: [NONE], sF: [NONE], sLen: [0], nF: [NONE], nLen: [0], xF: [NONE], xLen: [0] }, i: 0 };
   const cell = (x, z) => {
     if (x >= 0 && z >= 0 && x < W && z < H) return { c, i: z * W + x };
-    return neighbor ? neighbor(ox0 + x, oz0 + z) : null;
+    return (neighbor && neighbor(ox0 + x, oz0 + z)) || VOID;
   };
   const hOf = (r) => (r ? r.c.h[r.i] : 0);
   const t = (e, lo, hi) => (hi > lo ? (e - lo) / (hi - lo) : 0);

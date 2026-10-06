@@ -110,6 +110,36 @@ export function computeElevation(map, collisionModeOf) {
       cy = e;
     }
   }
+  // East/west cliff strips, scanning each row of cells: the red rim sits on the
+  // plateau side of the strip.
+  const isRed = (rgb) => (rgb >> 16) > 150 && ((rgb >> 8) & 255) < 120 && (rgb & 255) < 120;
+  for (let cy = 0; cy < ch; cy++) {
+    let cx = 0;
+    while (cx < cw) {
+      if (kind[cy * cw + cx] !== CELL.CLIFF) { cx++; continue; }
+      let e = cx;
+      while (e < cw && kind[cy * cw + e] === CELL.CLIFF) e++;
+      if (cx > 0 && e < cw) {
+        const a = region[cy * cw + cx - 1], b = region[cy * cw + e];
+        if (a >= 0 && b >= 0 && a !== b) {
+          // Where along the strip are the red pixels? (sample the cells' middle row)
+          let sum = 0, cnt = 0;
+          const py = cy * 8 + 4;
+          for (let px = cx * 8; px < e * 8; px++) {
+            const mi = (py >> 4) * map.mtW + (px >> 4);
+            const m = map.models[map.tilesets[mi]];
+            if (m && isRed(m.color[map.ids[mi] * 256 + (py & 15) * 16 + (px & 15)])) { sum += px; cnt++; }
+          }
+          if (cnt) {
+            const mid = (cx + e) * 4;
+            const pos = sum / cnt;
+            if (Math.abs(pos - mid) > 1) vote(a, b, pos < mid ? STOREY : -STOREY, 1);
+          }
+        }
+      }
+      cx = e;
+    }
+  }
   // Shores.
   for (let i = 0; i < n; i++) {
     if (region[i] < 0) continue;
@@ -131,7 +161,7 @@ export function computeElevation(map, collisionModeOf) {
       }
     }
     const list = [...lands];
-    for (let a = 1; a < list.length; a++) vote(list[0], list[a], 0, 6);
+    for (let a = 1; a < list.length; a++) vote(list[0], list[a], 0, 50);
   }
 
   // ---- solve: grow from the biggest region, best-supported relation first ----
@@ -165,6 +195,23 @@ export function computeElevation(map, collisionModeOf) {
     }
   }
 
+  // Water never stands above the land around it: pull each water region down to its
+  // lowest neighbouring land.
+  const shoreMin = new Float32Array(R).fill(Infinity);
+  for (let i = 0; i < n; i++) {
+    if (region[i] < 0 || !wet[i]) continue;
+    for (const k of neighbours(i)) {
+      if (region[k] >= 0 && !wet[k]) shoreMin[region[i]] = Math.min(shoreMin[region[i]], level[region[k]]);
+    }
+  }
+  for (const k of votes.keys()) {
+    // land across a cliff from water counts too
+    const a = Math.floor(k / 1e6), b = k % 1e6;
+    if (regionWet[a] && !regionWet[b]) shoreMin[a] = Math.min(shoreMin[a], level[b]);
+    if (regionWet[b] && !regionWet[a]) shoreMin[b] = Math.min(shoreMin[b], level[a]);
+  }
+  for (let r = 0; r < R; r++) if (regionWet[r] && isFinite(shoreMin[r])) level[r] = Math.min(level[r], shoreMin[r]);
+
   // ---- per-cell output ----
   const out = new Int16Array(n).fill(NONE);
   for (let i = 0; i < n; i++) {
@@ -186,6 +233,19 @@ export function computeElevation(map, collisionModeOf) {
     }
   };
   spread(deck, (k) => !wet[k]);
+  // One height per bridge: the highest of its ends.
+  const done = new Uint8Array(n);
+  for (let i = 0; i < n; i++) {
+    if (!bridge[i] || done[i]) continue;
+    const comp = [i];
+    done[i] = 1;
+    let best = NONE;
+    for (let h = 0; h < comp.length; h++) {
+      best = Math.max(best, deck[comp[h]]);
+      for (const k of neighbours(comp[h])) if (bridge[k] && !done[k]) { done[k] = 1; comp.push(k); }
+    }
+    for (const j of comp) deck[j] = best;
+  }
   const under = new Int16Array(n).fill(NONE);
   spread(under, (k) => wet[k]);
   for (let i = 0; i < n; i++) {
