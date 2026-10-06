@@ -1,0 +1,60 @@
+{
+  "name": "oracle3d",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Oracle of Seasons in voxel 3D: the game runs in an emulator and Holodrum is drawn as one seamless 3D world built from the oracles-disasm decomp.",
+  "scripts": {
+    "capture": "node tools/capture-world.mjs",
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "desktop": "vite build && electron .",
+    "dist:win": "vite build && electron-builder --win",
+    "dist:linux": "vite build && electron-builder --linux",
+    "dist:mac": "vite build && electron-builder --mac",
+    "android": "vite build && cap sync android && cap open android"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.5.2",
+    "@capacitor/core": "^8.5.2",
+    "three": "^0.186.1",
+    "wasmboy": "^0.7.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.5.2",
+    "electron": "^44.5.1",
+    "electron-builder": "^26.15.3",
+    "playwright-core": "^1.63.0",
+    "pngjs": "^7.0.0",
+    "vite": "^8.3.3"
+  },
+  "main": "electron/main.cjs",
+  "build": {
+    "appId": "net.holodrum3d.app",
+    "productName": "Holodrum 3D",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "electron/**",
+      "dist/**"
+    ],
+    "win": {
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ]
+    },
+    "mac": {
+      "target": [
+        "dmg"
+      ]
+    }
+  }
+}

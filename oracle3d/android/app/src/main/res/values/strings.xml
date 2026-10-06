@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Holodrum 3D</string>
+    <string name="title_activity_main">Holodrum 3D</string>
+    <string name="package_name">net.holodrum3d.app</string>
+    <string name="custom_url_scheme">net.holodrum3d.app</string>
+</resources>

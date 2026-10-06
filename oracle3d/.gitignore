@@ -1,0 +1,12 @@
+node_modules/
+dist/
+# Everything derived from the ROM stays local: the ROM itself and the captured world.
+*.gbc
+*.sym
+dev-data/
+release/
+# Capacitor copies the built app into the Android project on `cap sync`
+android/app/src/main/assets/public/
+android/app/src/main/assets/capacitor.config.json
+android/app/src/main/assets/capacitor.plugins.json
+android/capacitor-cordova-android-plugins/

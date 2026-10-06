@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <title>Holodrum 3D</title>
+  <link rel="stylesheet" href="/src/style.css" />
+</head>
+<body>
+  <div id="app">
+    <canvas id="view"></canvas>
+    <canvas id="hud" width="160" height="16"></canvas>
+    <div id="pip"><canvas id="screen2d" width="160" height="144"></canvas></div>
+    <div id="toast"></div>
+
+    <div id="touch" hidden>
+      <div id="dpad"><div class="stick"></div></div>
+      <div id="buttons">
+        <button data-btn="B" class="round">B</button>
+        <button data-btn="A" class="round">A</button>
+      </div>
+      <div id="sysbuttons">
+        <button data-btn="SELECT">SELECT</button>
+        <button data-btn="START">START</button>
+      </div>
+    </div>
+
+    <div id="menu">
+      <div class="card">
+        <h1>Holodrum 3D</h1>
+        <p class="sub">Oracle of Seasons, rebuilt as one seamless voxel world from the
+          <a href="https://github.com/Stewmath/oracles-disasm" target="_blank" rel="noreferrer">oracles-disasm</a> decomp.</p>
+        <label class="pick">
+          <input id="romfile" type="file" accept=".gbc,.gb" />
+          <span>Choose <code>seasons.gbc</code></span>
+        </label>
+        <progress id="progress" max="1" value="0" hidden></progress>
+        <p id="status" class="status">Build the ROM with the decomp (<code>make seasons</code>) and pick it here.</p>
+        <details>
+          <summary>Controls</summary>
+          <table>
+            <tr><td>Move</td><td>Arrows / WASD</td></tr>
+            <tr><td>A / B</td><td>X or K / Z or J</td></tr>
+            <tr><td>Start / Select</td><td>Enter / Shift</td></tr>
+            <tr><td>Camera</td><td>Drag to orbit, wheel or pinch to zoom, C to reset</td></tr>
+            <tr><td>2D screen</td><td>Tab toggles the original screen</td></tr>
+            <tr><td>Save / load state</td><td>F5 / F9</td></tr>
+          </table>
+        </details>
+      </div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.js"></script>
+</body>
+</html>
