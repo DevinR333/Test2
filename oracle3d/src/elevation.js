@@ -31,12 +31,23 @@ const NONE = -32768;
 const QUARTER_BIT = [8, 4, 2, 1];
 const CLS_WATER = 2, CLS_BRIDGE = 5;
 
+// Colours of cliff art: browns of the face, reds and peach of the rim, black outlines.
+function cliffColour(rgb) {
+  const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
+  const l = 0.3 * r + 0.59 * g + 0.11 * b;
+  if (l < 40) return true;
+  if (r > 150 && g < 120 && b < 120) return true; // red
+  if (r > 90 && g < 60 && b < 80) return true; // dark red
+  return r >= g && g >= b && r - b > 50; // browns, tans, peach
+}
+
 export function computeElevation(map, collisionModeOf) {
   const cw = map.mtW * 2, ch = map.mtH * 2, n = cw * ch;
   const kind = new Uint8Array(n);
   const ledge = new Uint8Array(n);
   const wet = new Uint8Array(n);
   const bridge = new Uint8Array(n);
+  const maybeCliff = new Uint8Array(n);
   const blueLand = new Uint8Array(n); // walkable shallows drawn as water (Sunken City)
   for (let cy = 0; cy < ch; cy++) for (let cx = 0; cx < cw; cx++) {
     const mi = (cy >> 1) * map.mtW + (cx >> 1);
@@ -60,6 +71,35 @@ export function computeElevation(map, collisionModeOf) {
     else if (CLIFF_IDS.has(id) && c >= 1 && c <= 15 && (c & QUARTER_BIT[q])) {
       kind[i] = CELL.CLIFF;
       if (LEDGE_DOWN.has(id)) ledge[i] = 1;
+    } else if (c >= 1 && c <= 15 && (c & QUARTER_BIT[q]) && m) {
+      // Solid cell drawn in cliff colours (brown face, red rim, dark cave mouths):
+      // becomes cliff if it touches a known cliff (decided below).
+      let n2 = 0;
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+        const rgb = m.color[id * 256 + ((cy & 1) * 8 + y) * 16 + (cx & 1) * 8 + x];
+        if (cliffColour(rgb)) n2++;
+      }
+      // Not part of a tree or bush (any leafy green in the metatile).
+      let green = 0;
+      for (let p = 0; p < 256; p++) {
+        const rgb = m.color[id * 256 + p], r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
+        if (g > r + 12 && g > b + 12) green++;
+      }
+      if (n2 > 48 && green < 12) maybeCliff[i] = 1;
+    }
+  }
+  // Fill short gaps in a cliff band (cave mouths, doors in the face): a run of
+  // cliff-coloured solid cells with cliff on both sides of it in the same row.
+  for (let cy = 0; cy < ch; cy++) {
+    let cx = 0;
+    while (cx < cw) {
+      if (!maybeCliff[cy * cw + cx] || kind[cy * cw + cx] !== CELL.REGION) { cx++; continue; }
+      let e = cx;
+      while (e < cw && maybeCliff[cy * cw + e] && kind[cy * cw + e] === CELL.REGION) e++;
+      if (e - cx <= 6 && cx > 0 && e < cw && kind[cy * cw + cx - 1] === CELL.CLIFF && kind[cy * cw + e] === CELL.CLIFF) {
+        for (let k = cx; k < e; k++) kind[cy * cw + k] = CELL.CLIFF;
+      }
+      cx = e;
     }
   }
   const neighbours = (i) => {
@@ -245,20 +285,27 @@ export function computeElevation(map, collisionModeOf) {
   }
   for (let r = 0; r < R; r++) if (regionWet[r] && !shoreLevel.has(r) && isFinite(shoreMin[r])) level[r] = Math.min(level[r], shoreMin[r]);
 
-  // Islets: land whose edge is mostly water (a sandbank you swim onto) sits just above
-  // the water around it, whatever the cliffs say.
-  const touchW = new Map(), touchAll = new Map(), wlv = new Map();
+  // Islets: land whose edge (cliffs aside) is mostly water, and which no bridge or
+  // stairs reach, is a sandbank you swim onto: it sits just above the water.
+  // Walkable shallows drawn as water (Sunken City) lie level with the water.
+  const touchW = new Map(), touchAll = new Map(), wlv = new Map(), reached = new Set();
   for (let i = 0; i < n; i++) {
     const r = region[i];
     if (r < 0 || regionWet[r]) continue;
     for (const k of neighbours(i)) {
       if (region[k] === r) continue;
+      if (bridge[k] || kind[k] === CELL.RAMP) { reached.add(r); continue; }
+      if (region[k] < 0) continue;
       bump(touchAll, r);
-      if (region[k] >= 0 && regionWet[region[k]]) { bump(touchW, r); wlv.set(r, Math.max(wlv.get(r) ?? -1e9, level[region[k]])); }
+      if (regionWet[region[k]]) { bump(touchW, r); wlv.set(r, Math.max(wlv.get(r) ?? -1e9, level[region[k]])); }
     }
   }
   for (const [r, nW] of touchW) {
-    if (nW > 0.6 * touchAll.get(r) && sizes[r] < 400 && level[r] > wlv.get(r)) level[r] = wlv.get(r) + 3;
+    if (regionBlue[r] > 0.5) { level[r] = wlv.get(r); continue; }
+    // Every cliff it shares goes up from it: it is a beach at the foot of cliffs.
+    const underCliffs = adj[r].every(([o, , w]) => w < 0.5 || regionWet[o] || level[o] > level[r]);
+    const islet = nW > 0.6 * touchAll.get(r) && sizes[r] < 400;
+    if (((islet && !reached.has(r)) || (underCliffs && sizes[r] < 1200)) && level[r] > wlv.get(r)) level[r] = wlv.get(r) + 3;
   }
 
   // ---- per-cell output ----
