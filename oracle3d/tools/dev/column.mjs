@@ -20,6 +20,7 @@ for (let r = 0; r < 256; r++) {
   const lay = Buffer.from(rr.layout, 'base64'); if (lay.every((v) => v === 0x04 || v === 0xf4)) continue;
   for (let y = 0; y < 8; y++) for (let x = 0; x < 10; x++) { const mi = ((r >> 4) * 8 + y) * 160 + (r & 15) * 10 + x; map.ids[mi] = lay[y * 10 + x]; map.tilesets[mi] = rr.tileset; }
 }
+globalThis.DEBUG_HILL = process.env.HILL;
 globalThis.DEBUG_PX = process.env.PX ? JSON.parse(process.env.PX) : null;
 globalThis.DEBUG_COMP = process.env.COMP ? Number(process.env.COMP) : 0;
 globalThis.DEBUG_CELL = process.env.CELL ? Number(process.env.CELL) : 0;

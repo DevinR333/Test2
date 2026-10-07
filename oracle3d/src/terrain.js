@@ -15,7 +15,7 @@
 
 export const CLS = { GROUND: 0, SOLID: 1, WATER: 2, HOLE: 3, LAVA: 4, BRIDGE: 5 };
 
-const DEPTH = { [CLS.WATER]: -1, [CLS.HOLE]: -14, [CLS.LAVA]: -2, [CLS.BRIDGE]: -1 };
+const DEPTH = { [CLS.WATER]: -1, [CLS.HOLE]: -5, [CLS.LAVA]: -2, [CLS.BRIDGE]: -1 };
 const DECK_CLEAR = 12; // room to swim under a bridge
 const DECK_RAISE = 1; // bridges float this far above the ground they connect
 const DECK_THICK = 2;
@@ -29,9 +29,12 @@ const BRIDGES = new Set([0x11, 0x12, 0x13, 0x19, 0x1a, 0x1b]);
 export const NO_LEVEL = -32768;
 
 // How tall (in pixels) an object column that is `len` pixels long on screen stands.
+// Small props (logs, rocks, mushrooms) stand about 70% of their drawn size; big things
+// (houses) less, as more of their art is roof.
 export function runHeight(len) {
   if (len <= 3) return 2;
-  return Math.max(3, Math.min(22, Math.round(len * 0.45)));
+  if (len <= 20) return Math.round(len * 0.7);
+  return Math.max(14, Math.min(22, Math.round(len * 0.45)));
 }
 
 // Per-tileset lookups: the class and colour of every pixel of every metatile, and the
@@ -88,6 +91,27 @@ export class TilesetModel {
       const luma = 0.3 * (rgb >> 16) + 0.59 * ((rgb >> 8) & 255) + 0.11 * (rgb & 255);
       if (n > groundTotal * 0.08 && luma > 60) this.ground.add(rgb);
     }
+    // Inside solid tiles, ground showing through (between fence posts, above and below
+    // a row of logs) decided from the tile alone, so identical tiles always get the same
+    // shape: a full row in ground colours, or a column with no outline that is mostly
+    // ground colour, is open ground.
+    this.open = new Uint8Array(256 * 256);
+    for (let id = 0; id < 256; id++) {
+      const c = collisions[id];
+      if (c < 1 || c > 15) continue;
+      const g = (p) => this.ground.has(this.color[id * 256 + p]);
+      const dark = (p) => luma(this.color[id * 256 + p]) < 40;
+      for (let y = 0; y < 16; y++) {
+        let all = true;
+        for (let x = 0; x < 16; x++) if (!g(y * 16 + x)) { all = false; break; }
+        if (all) for (let x = 0; x < 16; x++) this.open[id * 256 + y * 16 + x] = 1;
+      }
+      for (let x = 0; x < 16; x++) {
+        let n = 0, blk = 0;
+        for (let y = 0; y < 16; y++) { if (g(y * 16 + x)) n++; if (dark(y * 16 + x)) blk++; }
+        if (blk === 0 && n >= 10) for (let y = 0; y < 16; y++) this.open[id * 256 + y * 16 + x] = 1;
+      }
+    }
   }
 }
 
@@ -117,8 +141,12 @@ function isWaterTile(px) {
 }
 
 function classifyHazard(px) {
-  let r = 0, g = 0, b = 0;
-  for (let i = 0; i < 256; i++) { r += px[i * 4]; g += px[i * 4 + 1]; b += px[i * 4 + 2]; }
+  let r = 0, g = 0, b = 0, black = 0;
+  for (let i = 0; i < 256; i++) {
+    r += px[i * 4]; g += px[i * 4 + 1]; b += px[i * 4 + 2];
+    if (px[i * 4] + px[i * 4 + 1] + px[i * 4 + 2] < 60) black++;
+  }
+  if (black > 100) return CLS.HOLE; // mostly black: a hole, in any season's palette
   r /= 256; g /= 256; b /= 256;
   if (b > r + 20 && b > g - 10) return CLS.WATER;
   if (r > 150 && r > b + 60 && g < r) return CLS.LAVA;
@@ -204,6 +232,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         if (elev.stub && elev.stub[ci] && c === CLS.BRIDGE) { c = CLS.GROUND; cls[i] = c; }
       }
       kind[i] = kd === 2 ? P_STAIRS : kd === 1 ? P_CLIFF : c === CLS.SOLID ? P_OBJECT : P_GROUND;
+      if (kind[i] === P_OBJECT && m && m.open[map.ids[mi] * 256 + (py & 15) * 16 + (px & 15)]) { kind[i] = P_GROUND; cls[i] = CLS.GROUND; c = CLS.GROUND; }
       if (kind[i] === P_OBJECT && rgbIsGround) ground[i] = 1;
     }
   }
@@ -211,10 +240,12 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
   // ---- silhouettes: ground-coloured object pixels reachable from walkable ground ----
   const queue = new Int32Array(ww * wh);
   let qh = 0, qt = 0;
-  const tryAdd = (j) => { if (ground[j] === 1 && kind[j] === P_OBJECT) { ground[j] = 2; queue[qt++] = j; } };
+  let fromRgb = 0;
+  const tryAdd = (j) => { if (ground[j] === 1 && kind[j] === P_OBJECT && rgbs[j] === fromRgb) { ground[j] = 2; queue[qt++] = j; } };
   for (let i = 0; i < ww * wh; i++) {
     if (kind[i] !== P_GROUND) continue;
     const x = i % ww;
+    fromRgb = rgbs[i];
     if (x > 0) tryAdd(i - 1);
     if (x < ww - 1) tryAdd(i + 1);
     if (i >= ww) tryAdd(i - ww);
@@ -223,6 +254,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
   while (qh < qt) {
     const i = queue[qh++];
     const x = i % ww;
+    fromRgb = rgbs[i];
     if (x > 0) tryAdd(i - 1);
     if (x < ww - 1) tryAdd(i + 1);
     if (i >= ww) tryAdd(i - ww);
@@ -326,7 +358,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         let inner = 0, innerDark = 0, colourful = 0, red = 0;
         for (const j of comp) {
           const rgb = rgbs[j], r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
-          const brown = r >= g && g >= b && g > 60 && r - b < 150; // wood, sand, roots, peach
+          const brown = r >= g && g >= b; // wood, logs, sand, roots, peach: never leaves
           if (r > 150 && g < 100) red++;
           if (!brown && Math.max(r, g, b) - Math.min(r, g, b) > 90 && luma(rgb) >= 50) colourful++;
           const x = j % ww;
@@ -523,7 +555,6 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
   // ---- one height per object: connected object pixels share the median column run ----
   const comp = new Int32Array(ww * wh).fill(-1);
   const compHt = [];
-  const compSmall = [];
   {
     let next = 0;
     const st = [];
@@ -538,7 +569,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
           // meet along dark outlines at the tile edge: don't join them there.
           const tileJ = (((wx0 + j % ww) >> 4) << 16) | ((wy0 + ((j / ww) | 0)) >> 4);
           const tileK = (((wx0 + k % ww) >> 4) << 16) | ((wy0 + ((k / ww) | 0)) >> 4);
-          if (tileJ !== tileK && (luma(rgbs[j]) < 50 || luma(rgbs[k]) < 50)) continue;
+          if (tileJ !== tileK && (luma(rgbs[j]) < 50 || luma(rgbs[k]) < 50 || isGroundRgb[j] || isGroundRgb[k])) continue;
           comp[k] = next; st.push(k);
         }
       }
@@ -558,11 +589,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     }
     for (const list of runs) {
       list.sort((a, b) => a - b);
-      const med = list[Math.floor(list.length * 0.6)] || 1;
-      // Small props (rocks, mushrooms, posts, stumps) stand taller for their size.
-      const area = list.reduce((t, v) => t + v, 0);
-      compHt.push(area < 400 ? Math.max(runHeight(med), Math.round(med * 0.7)) : runHeight(med));
-      compSmall.push(area < 600);
+      compHt.push(runHeight(list[Math.floor(list.length * 0.6)] || 1));
     }
   }
 
@@ -743,25 +770,6 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         // rows 1:1 and whose front wall shows the bottom ht rows. The strip behind it
         // (hidden in the 2D art) is ground, filled with the row above the object.
         const lv = levelOr(lvl[at(r)], levelOr(levelBelow(e), 0));
-        // Gaps between fence posts: within each tile, a column of an object that is
-        // mostly ground colour (crossed only by rails or outlines) stays on the ground.
-        // The rest of the run is shortened to what's left.
-        {
-          // the floor colour right next to the fence (below it, else above it)
-          const floorRgb = e < wh && kind[at(e)] === P_GROUND ? rgbs[at(e)] : r > 0 && kind[at(r - 1)] === P_GROUND ? rgbs[at(r - 1)] : -1;
-          let rr = r, cut = false;
-          while (rr < e) {
-            const tEnd = Math.min(e, rr + (16 - ((wy0 + rr) & 15)));
-            let g = 0;
-            for (let k = rr; k < tEnd; k++) if ((floorRgb >= 0 && rgbs[at(k)] === floorRgb) || luma(rgbs[at(k)]) < 40) g++;
-            if (floorRgb >= 0 && tEnd - rr >= 6 && g > (tEnd - rr) * 0.6) {
-              for (let k = rr; k < tEnd; k++) { kind[at(k)] = P_GROUND; cls[at(k)] = CLS.GROUND; }
-              cut = true;
-            }
-            rr = tEnd;
-          }
-          if (cut) continue; // re-scan this column from r with the gaps as ground
-        }
         const ht = len <= 3 ? len : Math.min(compHt[comp[at(r)]], len - 2);
         for (let rr = r; rr < e; rr++) {
           if (rr - r < ht) set(x, rr, lv, fillY(x, rr, -ht, y0 - 1));
@@ -872,7 +880,14 @@ export function meshChunk(c, neighbor) {
     if ((dir === 'e' || dir === 'w') && cc.xF[i] !== NONE) {
       return [cc.xF[i] + 0.01 + f * (cc.xLen[i] - 0.02), cc.fy[i] !== NONE ? cc.fy[i] + 0.5 : pz + cc.oy[i]];
     }
-    if (dir !== 'n' && cc.sF[i] !== NONE) {
+    if ((dir === 'e' || dir === 'w') && cc.sF[i] !== NONE) {
+      // Side of an object: wrap the front art round the corner, so the side shows
+      // the art next to that edge instead of one column stretched along the depth.
+      const dz = Math.max(0, cc.sF[i] - pz);
+      const sx = dir === 'e' ? px - dz : px + dz;
+      return [sx, cc.sF[i] - 0.01 - f * (cc.sLen[i] - 0.02)];
+    }
+    if (dir === 's' && cc.sF[i] !== NONE) {
       const sx = cc.fx[i] !== NONE ? cc.fx[i] + 0.5 : px + cc.ox[i];
       return [sx, cc.sF[i] - 0.01 - f * (cc.sLen[i] - 0.02)];
     }

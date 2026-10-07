@@ -41,6 +41,13 @@ function cliffColour(rgb) {
   return r >= g && g >= b && r - b > 50; // browns, tans, peach
 }
 
+// Cliff face browns (not the rim's red or light peach, not outlines).
+function isFaceColour(rgb) {
+  const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
+  const l = 0.3 * r + 0.59 * g + 0.11 * b;
+  return r >= g && g >= b && r - b > 60 && l > 40 && l < 175 && g > 0.35 * r;
+}
+
 export function computeElevation(map, collisionModeOf) {
   const cw = map.mtW * 2, ch = map.mtH * 2, n = cw * ch;
   const kind = new Uint8Array(n);
@@ -60,9 +67,14 @@ export function computeElevation(map, collisionModeOf) {
     if (pc === CLS_WATER) wet[i] = 1;
     if (pc === CLS_BRIDGE) bridge[i] = 1;
     if (m && pc === 0) {
-      const rgb = m.color[id * 256 + ((cy & 1) * 8 + 4) * 16 + (cx & 1) * 8 + 4];
-      const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
-      if (b > r + 40 && b > g) { blueLand[i] = 1; wet[i] = 1; } // ice, shallows: water level
+      // ice, shallows: mostly blue over the whole 8x8 patch, so they lie at water level
+      let blue = 0;
+      for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
+        const rgb = m.color[id * 256 + ((cy & 1) * 8 + y) * 16 + (cx & 1) * 8 + x];
+        const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
+        if (b > r + 40 && b > g) blue++;
+      }
+      if (blue >= 32) { blueLand[i] = 1; wet[i] = 1; }
     }
     if (collisionModeOf(ts) !== 0) continue;
     const c = m ? m.collisions[id] : 0;
@@ -139,7 +151,6 @@ export function computeElevation(map, collisionModeOf) {
   for (let i = 0; i < n; i++) if (region[i] >= 0 && blueLand[i]) regionBlue[region[i]]++;
   for (let r = 0; r < sizes.length; r++) regionBlue[r] /= sizes[r];
 
-  if (globalThis.DEBUG_CELL) { const c = globalThis.DEBUG_CELL; const r = region[c]; console.log('cell', c, 'region', r, 'size', sizes[r], 'blue', regionBlue[r], 'wet', wet[c], 'blueLand', blueLand[c], 'kind', kind[c]); }
   // ---- relations between regions: level(a) - level(b) = d, with a weight ----
   const votes = new Map();
   const vote = (a, b, d, w) => {
@@ -169,7 +180,23 @@ export function computeElevation(map, collisionModeOf) {
         const a = region[(cy - 1) * cw + cx], b = region[e * cw + cx];
         const len = (e - cy) * 8;
         cliffNote(a, b);
-        if (isLedge || len >= 24) vote(a, b, STOREY, 1);
+        // Where is the red rim line within the band? At the top: the plateau's edge with
+        // its face below, a wall facing south, so north is higher. At the bottom: the far
+        // edge of a drop, north is lower. (Works in every season's palette.)
+        let ySum = 0, nRed = 0;
+        for (const px of [cx * 8 + 2, cx * 8 + 5]) {
+          for (let py = cy * 8; py < e * 8; py++) {
+            const mi = (py >> 4) * map.mtW + (px >> 4);
+            const m = map.models[map.tilesets[mi]];
+            if (!m) continue;
+            const rgb = m.color[map.ids[mi] * 256 + (py & 15) * 16 + (px & 15)];
+            const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
+            if (r > 150 && g < 110 && b < 110) { ySum += py - cy * 8; nRed++; }
+          }
+        }
+        const frac = nRed ? ySum / nRed / len : -1;
+        const faceBelow = nRed ? frac < 0.45 : len >= 24;
+        if (isLedge || faceBelow) vote(a, b, STOREY, 1);
         else vote(a, b, -STOREY, 0.5);
       }
       cy = e;
@@ -308,7 +335,8 @@ export function computeElevation(map, collisionModeOf) {
   for (const [r, nW] of touchW) {
     if (regionBlue[r] > 0.5) { level[r] = wlv.get(r); continue; }
     // Every cliff it shares goes up from it: it is a beach at the foot of cliffs.
-    const underCliffs = adj[r].every(([o, , w]) => w < 0.5 || regionWet[o] || level[o] > level[r]);
+    const landCliffs = adj[r].filter(([o, , w]) => w >= 0.5 && !regionWet[o]);
+    const underCliffs = landCliffs.length > 0 && landCliffs.every(([o]) => level[o] > level[r]);
     const islet = nW > 0.6 * touchAll.get(r) && sizes[r] < 400;
     if (((islet && !reached.has(r)) || (underCliffs && sizes[r] < 1200)) && level[r] > wlv.get(r)) level[r] = wlv.get(r) + 3;
   }
@@ -330,7 +358,11 @@ export function computeElevation(map, collisionModeOf) {
         if (kind[cy * cw + cx] !== CELL.CLIFF) { cy++; continue; }
         let e = cy;
         while (e < ch && kind[e * cw + cx] === CELL.CLIFF) e++;
-        if (cy > 0 && e < ch && e - cy >= 3) {
+        // A south-facing face: a short band that runs sideways (not the long side wall
+        // of a pond or plateau, which also has the same ground at both ends).
+        const sideways = cx > 1 && cx < cw - 2 && kind[cy * cw + cx - 1] === CELL.CLIFF && kind[cy * cw + cx + 1] === CELL.CLIFF
+          && kind[cy * cw + cx - 2] === CELL.CLIFF && kind[cy * cw + cx + 2] === CELL.CLIFF;
+        if (cy > 0 && e < ch && e - cy >= 3 && e - cy <= 6 && sideways) {
           const a = cy * cw - cw + cx, b = e * cw + cx;
           if (region[a] >= 0 && region[a] === region[b] && !regionWet[region[a]]) {
             const r = region[a];
@@ -348,7 +380,7 @@ export function computeElevation(map, collisionModeOf) {
       for (const i of seeds) { d.set(i, 0); q.push(i); }
       for (let h = 0; h < q.length; h++) {
         const i = q[h], di = d.get(i);
-        if (di > 80) continue;
+        if (di > 40) continue;
         for (const k of neighbours(i)) if (region[k] === r && !d.has(k)) { d.set(k, di + 1); q.push(k); }
       }
       return d;
@@ -356,14 +388,15 @@ export function computeElevation(map, collisionModeOf) {
     for (const [r, tops] of topSeed) {
       if (tops.length < 3) continue;
       const dt = bfs(tops, r), df = bfs(footSeed.get(r), r);
-      // Flat top at full height, with a short ramp where the two sides meet.
-      const RAMP = 4; // cells either side of the midpoint
+      // A cell is on the raised ledge when walking to the cliff's foot (round the end
+      // of the cliff) is much longer than walking to its top. Far from the cliff both
+      // are about equal, so open fields stay flat; the ramp is where the gap begins.
+      const M1 = 3, M2 = 7;
       for (const [i, a] of dt) {
-        const b = df.has(i) ? df.get(i) : 81;
-        const t = Math.max(0, Math.min(1, (b - a) / (2 * RAMP) + 0.5));
-        let hgt = STOREY * t;
-        if (a > 72) hgt *= Math.max(0, 1 - (a - 72) / 8);
-        out[i] += Math.round(hgt);
+        if (a > 8) continue; // a ledge: only the strip just above the cliff
+        const b = df.has(i) ? df.get(i) : 200;
+        const t = Math.max(0, Math.min(1, (b - a - M1) / (M2 - M1))) * Math.max(0, Math.min(1, (8 - a) / 2));
+        if (t > 0) out[i] += Math.round(STOREY * t);
       }
     }
   }

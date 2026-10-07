@@ -21,6 +21,9 @@ await page.evaluate(() => window.__oracle3d.run(2700, (f) => {
   if (f > 300 && f % 120 > 60 && f % 120 < 65) b |= 1 << 4;
   return b;
 }));
+// Mid-game seasons: clear GLOBALFLAG_SEASON_ALWAYS_SPRING (set until Din is captured),
+// so areas show their own seasons as in normal play. SPRING=1 keeps the intro state.
+if (!process.env.SPRING) await page.evaluate(() => { const gb = window.__oracle3d.emu.gb; gb.setv('wGlobalFlags', gb.v('wGlobalFlags', 6) & ~1, 6); });
 const shots = plan ? JSON.parse(fs.readFileSync(plan, 'utf8')) : [{ name: 'start' }];
 for (const s of shots) {
   await page.evaluate((s) => {

@@ -202,8 +202,16 @@ function b64(s) { return Uint8Array.from(atob(s), (c) => c.charCodeAt(0)); }
 // Which captured season each overworld room shows. Rooms in the same room pack as
 // Link share his current season (the Rod of Seasons changes it); others use their
 // pack's default season.
+// GLOBALFLAG_SEASON_ALWAYS_SPRING ($30): before Din is captured and after Onox is
+// beaten, the game shows every area in spring.
+const FLAG_ALWAYS_SPRING = 0x30;
+function alwaysSpring(gb) {
+  return (gb.v('wGlobalFlags', FLAG_ALWAYS_SPRING >> 3) & (1 << (FLAG_ALWAYS_SPRING & 7))) !== 0;
+}
+
 function seasonForRoom(map, room, livePack, liveSeason) {
   if (map.world.seasons.length === 1) return 0;
+  if (live.spring) return 0;
   const r = map.world.seasons[0][room];
   if (!r) return 0;
   if (r.pack === livePack) return liveSeason;
@@ -283,7 +291,9 @@ function syncFromGame(gb) {
   if (isOverworld) {
     map = overworldMap(group);
     const pack = gb.v('wRoomPack'), season = gb.v('wRoomStateModifier');
-    if (roomChanged || pack !== live.pack || season !== live.season) {
+    const spring = alwaysSpring(gb);
+    if (roomChanged || pack !== live.pack || season !== live.season || spring !== live.spring) {
+      live.spring = spring;
       // The room we just left goes back to its captured version.
       if (live.group === group && live.room >= 0 && live.room !== room) map.roomSeason[live.room] = -1;
       live.pack = pack; live.season = season;
