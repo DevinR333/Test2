@@ -37,6 +37,7 @@ export function computeElevation(map, collisionModeOf) {
   const ledge = new Uint8Array(n);
   const wet = new Uint8Array(n);
   const bridge = new Uint8Array(n);
+  const blueLand = new Uint8Array(n); // walkable shallows drawn as water (Sunken City)
   for (let cy = 0; cy < ch; cy++) for (let cx = 0; cx < cw; cx++) {
     const mi = (cy >> 1) * map.mtW + (cx >> 1);
     const ts = map.tilesets[mi];
@@ -47,6 +48,11 @@ export function computeElevation(map, collisionModeOf) {
     const pc = m ? m.cls[id * 256 + ((cy & 1) * 8 + 4) * 16 + (cx & 1) * 8 + 4] : 0;
     if (pc === CLS_WATER) wet[i] = 1;
     if (pc === CLS_BRIDGE) bridge[i] = 1;
+    if (m && pc === 0) {
+      const rgb = m.color[id * 256 + ((cy & 1) * 8 + 4) * 16 + (cx & 1) * 8 + 4];
+      const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
+      if (b > r + 40 && b > g) blueLand[i] = 1;
+    }
     if (collisionModeOf(ts) !== 0) continue;
     const c = m ? m.collisions[id] : 0;
     const q = (cy & 1) * 2 + (cx & 1);
@@ -84,6 +90,11 @@ export function computeElevation(map, collisionModeOf) {
     regionWet.push(wet[i]);
   }
 
+  const regionBlue = new Float32Array(sizes.length);
+  for (let i = 0; i < n; i++) if (region[i] >= 0 && blueLand[i]) regionBlue[region[i]]++;
+  for (let r = 0; r < sizes.length; r++) regionBlue[r] /= sizes[r];
+
+  if (globalThis.DEBUG_CELL) { const c = globalThis.DEBUG_CELL; const r = region[c]; console.log('cell', c, 'region', r, 'size', sizes[r], 'blue', regionBlue[r], 'wet', wet[c], 'blueLand', blueLand[c], 'kind', kind[c]); }
   // ---- relations between regions: level(a) - level(b) = d, with a weight ----
   const votes = new Map();
   const vote = (a, b, d, w) => {
@@ -92,6 +103,14 @@ export function computeElevation(map, collisionModeOf) {
     const k = a * 1e6 + b;
     const v = votes.get(k);
     if (v) { v[0] += d * w; v[1] += w; } else votes.set(k, [d * w, w]);
+  };
+
+  // How often each water region meets land across a cliff, and directly (a shore).
+  const cliffHits = new Map();
+  const bump = (m, k, n = 1) => m.set(k, (m.get(k) || 0) + n);
+  const cliffNote = (a, b) => {
+    if (a >= 0 && regionWet[a]) bump(cliffHits, a);
+    if (b >= 0 && regionWet[b]) bump(cliffHits, b);
   };
 
   // Cliff bands, scanning each column of cells.
@@ -104,6 +123,7 @@ export function computeElevation(map, collisionModeOf) {
       if (cy > 0 && e < ch) {
         const a = region[(cy - 1) * cw + cx], b = region[e * cw + cx];
         const len = (e - cy) * 8;
+        cliffNote(a, b);
         if (isLedge || len >= 24) vote(a, b, STOREY, 1);
         else vote(a, b, -STOREY, 0.5);
       }
@@ -121,6 +141,7 @@ export function computeElevation(map, collisionModeOf) {
       while (e < cw && kind[cy * cw + e] === CELL.CLIFF) e++;
       if (cx > 0 && e < cw) {
         const a = region[cy * cw + cx - 1], b = region[cy * cw + e];
+        if (a >= 0 && b >= 0 && a !== b) cliffNote(a, b);
         if (a >= 0 && b >= 0 && a !== b) {
           // Where along the strip are the red pixels? (sample the cells' middle row)
           let sum = 0, cnt = 0;
@@ -144,8 +165,12 @@ export function computeElevation(map, collisionModeOf) {
   for (let i = 0; i < n; i++) {
     if (region[i] < 0) continue;
     const x = i % cw;
-    if (x < cw - 1 && region[i + 1] >= 0 && wet[i + 1] !== wet[i]) vote(region[i], region[i + 1], 0, 0.15);
-    if (i + cw < n && region[i + cw] >= 0 && wet[i + cw] !== wet[i]) vote(region[i], region[i + cw], 0, 0.15);
+    for (const j of [x < cw - 1 ? i + 1 : -1, i + cw < n ? i + cw : -1]) {
+      if (j < 0 || region[j] < 0 || wet[j] === wet[i]) continue;
+      const l = wet[i] ? region[j] : region[i];
+      // Walkable shallows drawn as water (Sunken City, fords) are level with the water.
+      vote(region[i], region[j], 0, regionBlue[l] > 0.5 ? 6 : 0.15);
+    }
   }
   // Bridges: the land regions touching one bridge are level with each other.
   const seen = new Uint8Array(n);
@@ -195,6 +220,14 @@ export function computeElevation(map, collisionModeOf) {
     }
   }
 
+  // Water bordering walkable shallows keeps the level the shallows gave it.
+  const shoreLevel = new Set();
+  for (const k of votes.keys()) {
+    const a = Math.floor(k / 1e6), b = k % 1e6;
+    if (regionWet[a] && regionBlue[b] > 0.5) shoreLevel.add(a);
+    if (regionWet[b] && regionBlue[a] > 0.5) shoreLevel.add(b);
+  }
+
   // Water never stands above the land around it: pull each water region down to its
   // lowest neighbouring land.
   const shoreMin = new Float32Array(R).fill(Infinity);
@@ -210,7 +243,23 @@ export function computeElevation(map, collisionModeOf) {
     if (regionWet[a] && !regionWet[b]) shoreMin[a] = Math.min(shoreMin[a], level[b]);
     if (regionWet[b] && !regionWet[a]) shoreMin[b] = Math.min(shoreMin[b], level[a]);
   }
-  for (let r = 0; r < R; r++) if (regionWet[r] && isFinite(shoreMin[r])) level[r] = Math.min(level[r], shoreMin[r]);
+  for (let r = 0; r < R; r++) if (regionWet[r] && !shoreLevel.has(r) && isFinite(shoreMin[r])) level[r] = Math.min(level[r], shoreMin[r]);
+
+  // Islets: land whose edge is mostly water (a sandbank you swim onto) sits just above
+  // the water around it, whatever the cliffs say.
+  const touchW = new Map(), touchAll = new Map(), wlv = new Map();
+  for (let i = 0; i < n; i++) {
+    const r = region[i];
+    if (r < 0 || regionWet[r]) continue;
+    for (const k of neighbours(i)) {
+      if (region[k] === r) continue;
+      bump(touchAll, r);
+      if (region[k] >= 0 && regionWet[region[k]]) { bump(touchW, r); wlv.set(r, Math.max(wlv.get(r) ?? -1e9, level[region[k]])); }
+    }
+  }
+  for (const [r, nW] of touchW) {
+    if (nW > 0.6 * touchAll.get(r) && sizes[r] < 400 && level[r] > wlv.get(r)) level[r] = wlv.get(r) + 3;
+  }
 
   // ---- per-cell output ----
   const out = new Int16Array(n).fill(NONE);

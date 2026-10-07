@@ -5,6 +5,7 @@ import { BTN } from './gb.js';
 const KEYS = {
   ArrowUp: 'UP', KeyW: 'UP', ArrowDown: 'DOWN', KeyS: 'DOWN',
   ArrowLeft: 'LEFT', KeyA: 'LEFT', ArrowRight: 'RIGHT', KeyD: 'RIGHT',
+  KeyQ: 'CAM_LEFT', KeyE: 'CAM_RIGHT',
   KeyX: 'A', KeyK: 'A', KeyZ: 'B', KeyJ: 'B',
   Enter: 'START', ShiftLeft: 'SELECT', ShiftRight: 'SELECT', Backspace: 'SELECT',
 };
@@ -15,6 +16,7 @@ export class Input {
     this.touchDir = [0, 0];
     this.touchButtons = new Set();
     this.onKey = null; // (code) => bool consumed, for app shortcuts
+    this.camAxes = [0, 0]; // right stick / Q-E keys: camera orbit
 
     addEventListener('keydown', (e) => {
       if (this.onKey && this.onKey(e.code)) { e.preventDefault(); return; }
@@ -77,10 +79,14 @@ export class Input {
 
     const pads = navigator.getGamepads ? navigator.getGamepads() : [];
     const extra = new Set();
+    let cx = (this.held.has('CAM_RIGHT') ? 1 : 0) - (this.held.has('CAM_LEFT') ? 1 : 0), cy = 0;
     for (const gp of pads) {
       if (!gp) continue;
       const ax = gp.axes[0] || 0, ay = gp.axes[1] || 0;
       if (Math.hypot(ax, ay) > 0.3) { ix += ax; iy -= ay; }
+      const rx = gp.axes[2] || 0, ry = gp.axes[3] || 0;
+      if (Math.abs(rx) > 0.15) cx += rx;
+      if (Math.abs(ry) > 0.15) cy += ry;
       const pressed = (i) => gp.buttons[i] && gp.buttons[i].pressed;
       if (pressed(12)) iy += 1;
       if (pressed(13)) iy -= 1;
@@ -92,6 +98,7 @@ export class Input {
       if (pressed(8)) extra.add('SELECT');
     }
 
+    this.camAxes = [Math.max(-1, Math.min(1, cx)), Math.max(-1, Math.min(1, cy))];
     let bits = 0;
     const len = Math.hypot(ix, iy);
     if (len > 0.3) {

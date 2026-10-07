@@ -20,7 +20,7 @@ for (let room = 0; room < 256; room++) {
   for (let y = 0; y < 8; y++) for (let x = 0; x < 10; x++) { const mi = ((room >> 4) * 8 + y) * 160 + (room & 15) * 10 + x; map.ids[mi] = lay[y * 10 + x]; map.tilesets[mi] = r.tileset; }
 }
 const elev = computeElevation(map, (ts) => w.tilesets[ts].collisionMode);
-const S = 2;
+const S = Number(process.env.S || 2);
 const out = new PNG({ width: rw * 160 * S, height: rh * 128 * S });
 const pal = [[0, 0, 255], [0, 160, 255], [0, 200, 120], [120, 220, 0], [255, 220, 0], [255, 120, 0], [255, 0, 0], [200, 0, 200]];
 for (let y = 0; y < rh * 128; y++) for (let x = 0; x < rw * 160; x++) {

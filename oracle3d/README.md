@@ -71,7 +71,7 @@ full screen, with on-screen controls. Pick the ROM on first launch.
 | Move | Arrows / WASD | Left stick | Stick / d-pad |
 | A / B | X or K / Z or J | A / B | A / B |
 | Start / Select | Enter / Shift | START / SELECT | Start / Back |
-| Orbit camera | Drag | Drag | |
+| Orbit camera | Drag, or Q / E | Drag | Right stick |
 | Zoom | Wheel | Pinch | |
 | Reset camera | C | | |
 | Show the 2D screen | Tab | | |

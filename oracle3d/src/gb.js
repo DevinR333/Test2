@@ -17,7 +17,7 @@ export const SYMBOL_NAMES = [
   'wRoomCollisions', 'wRoomLayout', 'w3TileMappingData', 'w3TileCollisions',
   'wWarpDestGroup', 'wWarpDestRoom', 'wWarpTransition', 'wWarpDestPos', 'wWarpTransition2',
   'w1Link', 'hCameraY', 'hCameraX', 'wPaletteThread_mode', 'roomPackSeasonTable',
-  'wLinkObjectIndex', 'wTextIsActive', 'wDungeonIndex', 'wOpenedMenuType',
+  'wLinkObjectIndex', 'wTextIsActive', 'wDungeonIndex', 'wOpenedMenuType', 'wLinkSwimmingState',
 ];
 
 // The 5-bit GBC colour channels, with the usual curve to look like a GBC screen

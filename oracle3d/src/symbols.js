@@ -2,6 +2,7 @@
 // as listed in its seasons.sym. Used when no .sym is given (an unmodified ROM or a
 // matching decomp build). tools/capture-world.mjs can take a .sym for modified builds.
 export const DEFAULT_SYMBOLS = {
+  "wLinkSwimmingState":{"bank":0,"addr":52344},
   "wPaletteThread_mode":{"bank":0,"addr":50347},
   "wTextIsActive":{"bank":0,"addr":52128},
   "wOpenedMenuType":{"bank":0,"addr":52171},

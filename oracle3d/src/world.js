@@ -1,7 +1,7 @@
 // GPU-side world: the metatile pool, tileset tables, tile maps and the chunk meshes
 // built from them by terrain.js.
 import * as THREE from 'three';
-import { TilesetModel, buildChunkHeights, meshChunk } from './terrain.js';
+import { TilesetModel, buildChunkHeights, meshChunk, markGrass } from './terrain.js';
 import { computeElevation } from './elevation.js';
 
 export const EMPTY_TS = 0xffff;
@@ -106,6 +106,7 @@ export class WorldData {
     let m = this.models.get(ts);
     if (!m) {
       m = new TilesetModel((id) => this.tilePixels(ts, id), this.collisions[ts]);
+      markGrass(m, this.collisionModes[ts]);
       this.models.set(ts, m);
     }
     return m;
@@ -128,7 +129,9 @@ export class WorldData {
         for (let y = 0; y < 16; y++) out.set(this.livePixels.subarray((y * 4096 + id * 16) * 4, (y * 4096 + id * 16 + 16) * 4), y * 64);
         return out;
       };
-      this.models.set(this.liveTs, new TilesetModel(tile, collisions));
+      const m = new TilesetModel(tile, collisions);
+      markGrass(m, this.liveCollisionMode);
+      this.models.set(this.liveTs, m);
     }
   }
 }
@@ -161,13 +164,14 @@ export class TileMap {
     this.models = new Proxy({}, { get: (_, k) => data.model(Number(k)) });
   }
 
-  // Write one room's metatiles. layout: Uint8Array(roomW*roomH); ts: tileset index.
+  // Write one room's metatiles. layout: Uint8Array(roomW*roomH); ts: tileset index, or
+  // an array with one per metatile.
   setRoom(rx, ry, layout, ts) {
     let changed = false;
     for (let y = 0; y < this.roomH; y++) for (let x = 0; x < this.roomW; x++) {
       const mi = (ry * this.roomH + y) * this.mtW + rx * this.roomW + x;
       const id = layout ? layout[y * this.roomW + x] : 0;
-      const t = layout ? ts : EMPTY_TS;
+      const t = layout ? (typeof ts === 'number' ? ts : ts[y * this.roomW + x]) : EMPTY_TS;
       if (this.ids[mi] !== id || this.tilesets[mi] !== t) {
         this.ids[mi] = id; this.tilesets[mi] = t;
         this.texData[mi * 4] = id; this.texData[mi * 4 + 1] = t & 255; this.texData[mi * 4 + 2] = t >> 8;
@@ -195,14 +199,15 @@ export class TileMap {
   }
 
   // Terrain height at a map pixel (x, z relative to this map's origin).
-  heightAt(px, pz) {
+  // belowDeck: the height under a bridge deck (Link swimming under it).
+  heightAt(px, pz, belowDeck = false) {
     const rx = Math.floor(px / (this.roomW * 16)), ry = Math.floor(pz / (this.roomH * 16));
     const c = this.chunks.get(ry * this.roomsW + rx);
     if (!c || !c.heights) return 0;
     const lx = Math.floor(px) - rx * this.roomW * 16, lz = Math.floor(pz) - ry * this.roomH * 16;
     if (lx < 0 || lz < 0 || lx >= c.heights.W || lz >= c.heights.H) return 0;
     const i = lz * c.heights.W + lx;
-    return Math.max(c.heights.h[i], c.heights.deck[i]);
+    return belowDeck ? c.heights.walk[i] : Math.max(c.heights.walk[i], c.heights.deck[i]);
   }
 
   // Build or refresh room meshes within `radius` rooms of (rx, ry); drop far ones.

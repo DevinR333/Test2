@@ -24,7 +24,7 @@ const app = {};
 async function boot(romBytes) {
   const world = await loadWorld(romBytes);
   data = new WorldData(world.json, world.pool);
-  emu = await createEmulator(romBytes, data.symbols);
+  emu = await createEmulator(romBytes, { ...DEFAULT_SYMBOLS, ...data.symbols });
   store.set('rom', romBytes);
   $('#menu').classList.add('hidden');
   start();
@@ -224,6 +224,49 @@ function refreshSeasons(map, livePack, liveSeason, liveRoom) {
 }
 
 const DIR_DELTA = [-16, 1, 16, -1];
+const BRIDGE_COLLISIONS = new Set([0x11, 0x12, 0x13, 0x19, 0x1a, 0x1b]);
+const capturedLayouts = new Map();
+function capturedRoom(map, season, room) {
+  const rec = map.world.seasons[Math.min(season, map.world.seasons.length - 1)][room];
+  if (!rec) return null;
+  const key = `${map.world.group}:${season}:${room}`;
+  if (!capturedLayouts.has(key)) capturedLayouts.set(key, b64(rec.layout));
+  return { tileset: rec.tileset, layout: capturedLayouts.get(key) };
+}
+
+// In the 2D game you can't go under a bridge. While Link is swimming, the bridge tiles
+// of his room are swapped for water in the game's own room data (layout and collision),
+// so he swims underneath; they are put back once he climbs out. The 3D view keeps
+// drawing the bridge from the saved originals.
+function updateBridgeSwap(gb, roomChanged, isOverworld) {
+  if (roomChanged) live.swap = null; // the game reloaded the room itself
+  const swimming = isOverworld && (gb.v('wLinkSwimmingState') & 0x0f) !== 0;
+  app.swimming = swimming;
+  const lay = gb.s('wRoomLayout'), col = gb.s('wRoomCollisions');
+  if (swimming && !live.swap) {
+    let waterId = -1;
+    const m = data.models.get(data.liveTs);
+    for (let id = 0; id < 256 && m; id++) {
+      if (live.collisions[id] === 0x10 && m.cls[id * 256 + 8 * 16 + 8] === 2) { waterId = id; break; }
+    }
+    if (waterId < 0) return;
+    const swap = [];
+    for (let i = 0; i < 0xb0; i++) {
+      const id = gb.rd(lay.addr + i, lay.bank);
+      if ((i & 15) >= 10 || !BRIDGE_COLLISIONS.has(live.collisions[id])) continue;
+      swap.push([i, id, gb.rd(col.addr + i, col.bank)]);
+      gb.wr(lay.addr + i, waterId, lay.bank);
+      gb.wr(col.addr + i, live.collisions[waterId], col.bank);
+    }
+    live.swap = swap.length ? swap : null;
+  } else if (!swimming && live.swap) {
+    for (const [i, id, c] of live.swap) {
+      gb.wr(lay.addr + i, id, lay.bank);
+      gb.wr(col.addr + i, c, col.bank);
+    }
+    live.swap = null;
+  }
+}
 const live = { group: -1, room: -1, layout: null, collisions: new Uint8Array(256), atlasTimer: 0, pack: -1, season: -1 };
 
 // Called after every emulated frame: keep the current room in sync with the game.
@@ -231,8 +274,10 @@ function syncFromGame(gb) {
   const group = gb.v('wActiveGroup');
   const room = gb.v('wActiveRoom');
   const isOverworld = !!worldFor(group);
-  const layout = gb.roomLayout();
   const roomChanged = group !== live.group || room !== live.room;
+  updateBridgeSwap(gb, roomChanged, isOverworld);
+  const layout = gb.roomLayout();
+  if (live.swap) for (const [i, id] of live.swap) layout.tiles[(i >> 4) * layout.w + (i & 15)] = id;
 
   let map;
   if (isOverworld) {
@@ -278,7 +323,13 @@ function syncFromGame(gb) {
   }
 
   const rx = isOverworld ? room & 15 : 0, ry = isOverworld ? room >> 4 : 0;
-  map.setRoom(rx, ry, layout.tiles, data.liveTs);
+  // Metatiles that are unchanged from the captured room use the captured tileset, so
+  // water and flowers animate in step with the neighbouring rooms. Changed ones (a cut
+  // bush, an opened door) come from the live tileset.
+  let ts = data.liveTs;
+  const cap = isOverworld ? capturedRoom(map, group === 0 ? gb.v('wRoomStateModifier') : 0, room) : null;
+  if (cap && layout.w === map.roomW) ts = Array.from(layout.tiles, (id, i) => (cap.layout[i] === id ? cap.tileset : data.liveTs));
+  map.setRoom(rx, ry, layout.tiles, ts);
 
   if (map !== activeMap) {
     if (activeMap) scene.remove(activeMap.group);
@@ -386,8 +437,11 @@ function start() {
     playing3d = drawScreens(emu.gb);
 
     if (activeMap) {
-      const ground = activeMap.heightAt(app.link.x, app.link.z);
-      app.linkWorld.set(app.link.x, Math.max(0, ground), app.link.z);
+      const ground = activeMap.heightAt(app.link.x, app.link.z, app.swimming);
+      app.linkWorld.set(app.link.x, ground, app.link.z);
+      // Right stick (or Q/E): orbit the camera.
+      cam.yaw -= input.camAxes[0] * dt * 2.4;
+      cam.pitch = Math.min(1.45, Math.max(0.25, cam.pitch + input.camAxes[1] * dt * 1.4));
       const rx = Math.floor(app.link.x / (activeMap.roomW * 16)), ry = Math.floor(app.link.z / (activeMap.roomH * 16));
       activeMap.update(rx, ry, activeMap.roomsW > 1 ? 2 : 0, 2);
       if (activeMap.uniforms) activeMap.uniforms.uTime.value = now / 1000;
@@ -396,7 +450,8 @@ function start() {
         baseX: app.base.x, baseZ: app.base.z,
         camX: emu.gb.v('hCameraX') | (emu.gb.v('hCameraX', 1) << 8),
         camY: emu.gb.v('hCameraY') | (emu.gb.v('hCameraY', 1) << 8),
-        heightAt: (x, z) => Math.max(0, activeMap.heightAt(x, z)),
+        // Things near Link sink under a bridge with him while he swims.
+        heightAt: (x, z) => activeMap.heightAt(x, z, app.swimming && Math.abs(x - app.link.x) < 12 && Math.abs(z - app.link.z) < 12),
         yaw: cam.yaw,
       });
     }

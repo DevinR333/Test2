@@ -15,7 +15,8 @@
 
 export const CLS = { GROUND: 0, SOLID: 1, WATER: 2, HOLE: 3, LAVA: 4, BRIDGE: 5 };
 
-const DEPTH = { [CLS.WATER]: -3, [CLS.HOLE]: -14, [CLS.LAVA]: -2, [CLS.BRIDGE]: -3 };
+const DEPTH = { [CLS.WATER]: -1, [CLS.HOLE]: -14, [CLS.LAVA]: -2, [CLS.BRIDGE]: -1 };
+const DECK_CLEAR = 12; // room to swim under a bridge
 const DECK_RAISE = 1; // bridges float this far above the ground they connect
 const DECK_THICK = 2;
 
@@ -42,6 +43,8 @@ export class TilesetModel {
     this.color = new Uint32Array(256 * 256);
     this.collisions = collisions;
     const groundCount = new Map();
+    // Impassable rocky water (dark wave bands): luma below which a pixel pokes out.
+    this.wavy = new Float32Array(256);
     let groundTotal = 0;
     for (let id = 0; id < 256; id++) {
       const c = collisions[id];
@@ -49,6 +52,15 @@ export class TilesetModel {
       const hazard = c === 0x10 ? classifyHazard(px) : CLS.GROUND;
       // Impassable deep water (the sea at the map's edge) is solid but should look like water.
       const solidWater = c === 0x0f && isWaterTile(px);
+      if (solidWater) {
+        let sum = 0, dark = 0;
+        for (let p = 0; p < 256; p++) {
+          const l = 0.3 * px[p * 4] + 0.59 * px[p * 4 + 1] + 0.11 * px[p * 4 + 2];
+          sum += l;
+          if (l < 90) dark++;
+        }
+        if (dark > 256 * 0.3) this.wavy[id] = sum / 256;
+      }
       for (let py = 0; py < 16; py++) for (let qx = 0; qx < 16; qx++) {
         const p = py * 16 + qx;
         let k = CLS.GROUND;
@@ -76,6 +88,20 @@ export class TilesetModel {
       const luma = 0.3 * (rgb >> 16) + 0.59 * ((rgb >> 8) & 255) + 0.11 * (rgb & 255);
       if (n > groundTotal * 0.08 && luma > 60) this.ground.add(rgb);
     }
+  }
+}
+
+// Tall grass (overworld and Subrosia metatiles $f8/$f9, TILETYPE_GRASS): its darker
+// blades stand up a few pixels. model.grass[id] holds the luma below which a pixel is a
+// blade (0 = not grass).
+export function markGrass(model, collisionMode) {
+  model.grass = new Float32Array(256);
+  if (collisionMode > 1) return;
+  for (const id of [0xf8, 0xf9]) {
+    if (model.collisions[id] !== 0) continue;
+    let sum = 0;
+    for (let p = 0; p < 256; p++) sum += luma(model.color[id * 256 + p]);
+    model.grass[id] = sum / 256;
   }
 }
 
@@ -112,20 +138,25 @@ const P_GROUND = 0, P_OBJECT = 1, P_CLIFF = 2, P_STAIRS = 3, P_ORGANIC = 4;
 // Leafy pixels (tree crowns, bushes) are modelled as rounded mounds instead of walls.
 function isLeafy(rgb) {
   const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
-  return g > r + 12 && g > b + 12 && g > 50;
+  if (g > r + 12 && g > b + 12 && g > 50) return true; // green crowns
+  return b > r + 40 && b > g + 20 && b > 90; // blue crowns (Sunken City)
 }
 // Pixels a crown may grow into: its dark outlines and green/yellow-green highlights
 // (not trunks, roofs or anything else that happens to touch a tree).
 function crownish(rgb) {
   const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
   const sat = Math.max(r, g, b) - Math.min(r, g, b);
-  return (luma(rgb) < 50 && sat < 60) || (g >= r - 8 && g >= b);
+  return (luma(rgb) < 50 && sat < 60) || (g >= r - 8 && g >= b) || (b >= r + 20 && b >= g - 10);
 }
 function luma(rgb) {
   return 0.3 * (rgb >> 16) + 0.59 * ((rgb >> 8) & 255) + 0.11 * (rgb & 255);
 }
-const DOME_R = 8, DOME_CAP = 15, GROOVE = 3;
-const domeHeight = (d) => Math.max(1, Math.round(DOME_CAP * Math.sqrt(Math.min(1, d / DOME_R))));
+// Parabolic profile: low, gentle steps at the crown's edge, rounded top.
+const DOME_R = 9, DOME_CAP = 16, GROOVE = 2;
+const domeHeight = (d) => {
+  const t = Math.min(1, d / DOME_R);
+  return Math.max(1, Math.round(DOME_CAP * (1 - (1 - t) * (1 - t))));
+};
 
 export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
   const W = cw * 16, H = ch * 16;
@@ -140,6 +171,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
   const deckLvl = new Int16Array(ww * wh).fill(NO_LEVEL);
   const ground = new Uint8Array(ww * wh); // object pixel showing plain ground colour
   const rgbs = new Uint32Array(ww * wh);
+  const blade = new Int8Array(ww * wh); // raised detail on walkable/water ground: grass blades, rocks in rapids
   for (let y = 0; y < wh; y++) {
     const py = wy0 + y;
     if (py < 0 || py >= mapPxH) continue;
@@ -155,6 +187,8 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         c = m.cls[p];
         rgbs[i] = m.color[p];
         rgbIsGround = m.ground.has(m.color[p]);
+        if (m.grass && m.grass[map.ids[mi]]) blade[i] = luma(m.color[p]) < m.grass[map.ids[mi]] ? 4 : 1;
+        else if (m.wavy[map.ids[mi]] && luma(m.color[p]) < m.wavy[map.ids[mi]]) blade[i] = 3;
       }
       cls[i] = c;
       let kd = 0;
@@ -189,10 +223,25 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     if (i >= ww) tryAdd(i - ww);
     if (i < ww * (wh - 1)) tryAdd(i + ww);
   }
-  for (let i = 0; i < ww * wh; i++) {
-    if (ground[i] !== 2) continue;
-    kind[i] = P_GROUND; // stays at the ground level of its 8x8 cell
-    cls[i] = CLS.GROUND;
+  // A metatile that would lose most of its solid pixels this way (a pale stump or rock
+  // drawn in the path's colours) is an object made of ground colours: keep it whole.
+  {
+    const mw = Math.ceil(ww / 16) + 1, mh = Math.ceil(wh / 16) + 1;
+    const solid = new Int32Array(mw * mh), lost = new Int32Array(mw * mh);
+    const mOf = (i) => (((wy0 + Math.floor(i / ww)) >> 4) - (wy0 >> 4)) * mw + (((wx0 + (i % ww)) >> 4) - (wx0 >> 4));
+    for (let i = 0; i < ww * wh; i++) {
+      if (kind[i] !== P_OBJECT) continue;
+      const k = mOf(i);
+      solid[k]++;
+      if (ground[i] === 2) lost[k]++;
+    }
+    for (let i = 0; i < ww * wh; i++) {
+      if (ground[i] !== 2) continue;
+      const k = mOf(i);
+      if (lost[k] > solid[k] * 0.7) { ground[i] = 1; continue; }
+      kind[i] = P_GROUND; // stays at the ground level of its 8x8 cell
+      cls[i] = CLS.GROUND;
+    }
   }
 
   // ---- leafy mounds ----
@@ -213,6 +262,37 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         if (j < 0 || j >= ww * wh || kind[j] !== P_OBJECT || !crownish(rgbs[j])) continue;
         kind[j] = P_ORGANIC;
         q.push(j);
+      }
+    }
+    // Leafy objects of any colour (autumn crowns, the Sunken City tree-hut): colourful
+    // pixels speckled with dark leaf detail inside, unlike smooth roofs or plain rocks.
+    {
+      const seen = new Uint8Array(ww * wh);
+      for (let i0 = 0; i0 < ww * wh; i0++) {
+        if (kind[i0] !== P_OBJECT || seen[i0]) continue;
+        const comp = [i0];
+        seen[i0] = 1;
+        for (let h = 0; h < comp.length; h++) {
+          const j = comp[h], x = j % ww;
+          for (const k of [x > 0 ? j - 1 : -1, x < ww - 1 ? j + 1 : -1, j - ww, j + ww]) {
+            if (k >= 0 && k < ww * wh && kind[k] === P_OBJECT && !seen[k]) { seen[k] = 1; comp.push(k); }
+          }
+        }
+        if (comp.length < 48) continue;
+        let inner = 0, innerDark = 0, colourful = 0;
+        for (const j of comp) {
+          const rgb = rgbs[j], r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
+          const brown = r >= g && g >= b && g > 0.3 * r; // wood, sand, roots
+          if (!brown && Math.max(r, g, b) - Math.min(r, g, b) > 90 && luma(rgb) >= 50) colourful++;
+          const x = j % ww;
+          if (x > 0 && x < ww - 1 && kind[j - 1] === P_OBJECT && kind[j + 1] === P_OBJECT && kind[j - ww] === P_OBJECT && kind[j + ww] === P_OBJECT) {
+            inner++;
+            if (luma(rgb) < 50) innerDark++;
+          }
+        }
+        if (inner > 0 && innerDark / inner > 0.12 && colourful / comp.length > 0.45) {
+          for (const j of comp) { kind[j] = P_ORGANIC; q.push(j); }
+        }
       }
     }
     for (const i of q) { dist[i] = 1e9; dark[i] = luma(rgbs[i]) < 50 ? 1 : 0; }
@@ -262,6 +342,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     nF: new Float32Array(N).fill(NONE), nLen: new Float32Array(N),
     xF: new Float32Array(N).fill(NONE), xLen: new Float32Array(N),
     deck: new Int16Array(N).fill(NO_LEVEL),
+    walk: new Int16Array(N), // height Link stands at (tall grass is walked through)
   };
   const cellOf = (wx, wy) => {
     const x = wx - MARGIN_X, z = wy - MARGIN_Y;
@@ -271,6 +352,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     const i = cellOf(wx, wy);
     if (i < 0) return;
     out.h[i] = height;
+    out.walk[i] = o.walk ?? height;
     out.ox[i] = o.ox || 0; out.oy[i] = o.oy || 0;
     out.fx[i] = o.fx ?? NONE; out.fy[i] = o.fy ?? NONE;
     out.sF[i] = o.sF ?? NONE; out.sLen[i] = o.sLen || 0;
@@ -290,6 +372,11 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
       if (sr < 0 || sr >= wh) break;
       if (openGround(W0(sr) + x)) return { oy: d };
     }
+    // Nothing that way (a wall or water behind): borrow ground from the side.
+    for (let d = 1; d < 48; d++) {
+      if (x - d >= 0 && openGround(W0(rr) + x - d)) return { ox: -d };
+      if (x + d < ww && openGround(W0(rr) + x + d)) return { ox: d };
+    }
     return { fy: edgeRow };
   };
   const fillX = (k, y, dx, edgeCol) => {
@@ -302,13 +389,20 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     return { fx: edgeCol };
   };
   const levelOr = (v, d) => (v === NO_LEVEL ? d : v);
-  // Under a bridge deck: show the nearest water instead of the planks.
+  // Under a bridge deck: show water. Shifting by whole metatiles to the nearest
+  // all-water metatile keeps the ripple pattern continuous with the river around it.
   const waterUnder = (x, r) => {
-    for (let d = 1; d < 40; d++) {
-      for (const [dx, dy] of [[0, -d], [0, d], [-d, 0], [d, 0]]) {
-        const xx = x + dx, rr = r + dy;
-        if (xx < 0 || rr < 0 || xx >= ww || rr >= wh) continue;
-        if (cls[W0(rr) + xx] === CLS.WATER) return dx ? { ox: dx } : { oy: dy };
+    const isWaterMt = (xx, rr) => {
+      const bx = xx - ((wx0 + xx) & 15), by = rr - ((wy0 + rr) & 15);
+      for (const [u, v] of [[1, 1], [14, 1], [1, 14], [14, 14], [8, 8]]) {
+        const X = bx + u, Y = by + v;
+        if (X < 0 || Y < 0 || X >= ww || Y >= wh || cls[W0(Y) + X] !== CLS.WATER) return false;
+      }
+      return true;
+    };
+    for (let d = 1; d < 5; d++) {
+      for (const [dx, dy] of [[0, -d], [0, d], [-d, 0], [d, 0], [-d, -d], [d, -d], [-d, d], [d, d]]) {
+        if (isWaterMt(x + dx * 16, r + dy * 16)) return { ox: dx * 16, oy: dy * 16 };
       }
     }
     return {};
@@ -351,6 +445,30 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     }
   }
 
+  // ---- cliff orientation: pixels of tall, narrow strips are east/west sides ----
+  {
+    const hl = new Uint16Array(ww * wh), vl = new Uint16Array(ww * wh);
+    for (let y = 0; y < wh; y++) {
+      let x = 0;
+      while (x < ww) {
+        if (kind[W0(y) + x] !== P_CLIFF) { x++; continue; }
+        let e = x; while (e < ww && kind[W0(y) + e] === P_CLIFF) e++;
+        for (let k = x; k < e; k++) hl[W0(y) + k] = e - x;
+        x = e;
+      }
+    }
+    for (let x = 0; x < ww; x++) {
+      let y = 0;
+      while (y < wh) {
+        if (kind[W0(y) + x] !== P_CLIFF) { y++; continue; }
+        let e = y; while (e < wh && kind[W0(e) + x] === P_CLIFF) e++;
+        for (let k = y; k < e; k++) vl[W0(k) + x] = e - y;
+        y = e;
+      }
+    }
+    for (let i = 0; i < ww * wh; i++) if (kind[i] === P_CLIFF && vl[i] > hl[i] + 8) side[i] = 1;
+  }
+
   // ---- column pass (all window columns, so the row pass has its inputs) ----
   for (let x = 0; x < ww; x++) {
     const at = (r) => W0(r) + x;
@@ -368,16 +486,29 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
       if (k0 === P_GROUND) {
         const lv = levelOr(lvl[at(r)], 0);
         const c = cls[at(r)];
-        set(x, r, lv + (DEPTH[c] || 0), c === CLS.BRIDGE ? waterUnder(x, r) : {});
+        const base = lv + (DEPTH[c] || 0);
+        if (blade[at(r)]) set(x, r, base + blade[at(r)], { walk: base });
+        else set(x, r, base, c === CLS.BRIDGE ? waterUnder(x, r) : {});
         if (c === CLS.BRIDGE) {
           const i = cellOf(x, r);
-          if (i >= 0) out.deck[i] = levelOr(deckLvl[at(r)], lv) + DECK_RAISE;
+          if (i >= 0) out.deck[i] = Math.max(levelOr(deckLvl[at(r)], lv), base + DECK_CLEAR) + DECK_RAISE;
         }
         r++;
         continue;
       }
+      if (k0 === P_CLIFF && side[at(r)]) {
+        // east/west strip: the row pass decides; meanwhile at the nearest ground level
+        let lv = NO_LEVEL;
+        for (let d = 1; d < 24 && lv === NO_LEVEL; d++) {
+          if (x - d >= 0 && lvl[at(r) - d] !== NO_LEVEL) lv = lvl[at(r) - d];
+          else if (x + d < ww && lvl[at(r) + d] !== NO_LEVEL) lv = lvl[at(r) + d];
+        }
+        set(x, r, levelOr(lv, 0), {});
+        r++;
+        continue;
+      }
       let e = r;
-      while (e < wh && kind[at(e)] === k0) e++;
+      while (e < wh && kind[at(e)] === k0 && !(k0 === P_CLIFF && side[at(e)])) e++;
       const len = e - r;
       const y0 = wy0 + r, y1 = wy0 + e; // map rows of the run
 
@@ -448,15 +579,14 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         // Rim pixels next to the plateau, brown face toward the lowland.
         let rimW = 0;
         if (L > R) {
-          for (let k = x; k < e && rim(W0(y) + k); k++) rimW++;
-          if (rimW === 0) for (let k = x; k < Math.min(e, x + 3); k++) if (rim(W0(y) + k)) rimW = k - x + 1;
+          for (let k = x; k < e; k++) if (rim(W0(y) + k)) rimW = Math.min(w, k - x + 2);
           const faceW = w - rimW;
           for (let k = x; k < e; k++) {
             if (k >= e - rimW) set(k, y, L, { ox: -faceW, xF: x0 + rimW, xLen: Math.max(1, faceW) });
             else set(k, y, L, { ...fillX(k, y, -(w - rimW), x0 - 1), xF: x0 + rimW, xLen: Math.max(1, faceW) });
           }
         } else {
-          for (let k = e - 1; k >= x && rim(W0(y) + k); k--) rimW++;
+          for (let k = e - 1; k >= x; k--) if (rim(W0(y) + k)) rimW = Math.min(w, e - k + 1);
           const faceW = w - rimW;
           for (let k = x; k < e; k++) {
             if (k < x + rimW) set(k, y, R, { ox: faceW, xF: x1 - rimW - 0.01, xLen: -Math.max(1, faceW) });
@@ -548,7 +678,13 @@ export function meshChunk(c, neighbor) {
       const sx = cc.fx[i] !== NONE ? cc.fx[i] + 0.5 : px + cc.ox[i];
       return [sx, cc.nF[i] + 0.01 + f * (cc.nLen[i] - 0.02 * Math.sign(cc.nLen[i]))];
     }
-    return topS(cc, i, px, pz);
+    // No art for this wall: carry on the surface texture over the edge (like the
+    // voxels below the top), rather than repeating one pixel all the way down.
+    const k = hi - e;
+    if (dir === 's') return topS(cc, i, px, pz - k);
+    if (dir === 'n') return topS(cc, i, px, pz + k);
+    if (dir === 'e') return topS(cc, i, px - k, pz);
+    return topS(cc, i, px + k, pz);
   };
   // Wall attributes that must match for two neighbouring wall pieces to merge.
   const wallKey = (r) => (r ? [r.c.h[r.i], r.c.sF[r.i], r.c.sLen[r.i], r.c.nF[r.i], r.c.nLen[r.i], r.c.xF[r.i], r.c.xLen[r.i], r.c.ox[r.i], r.c.oy[r.i], r.c.fx[r.i], r.c.fy[r.i]].join() : '0');
