@@ -318,6 +318,54 @@ export function computeElevation(map, collisionModeOf) {
   for (let i = 0; i < n; i++) {
     if (region[i] >= 0) out[i] = Math.max(MIN_LEVEL, Math.min(MAX_LEVEL, Math.round(level[region[i]])));
   }
+  // Hills: a cliff whose top and foot are the same region (the field runs round the
+  // cliff's end) can't be a level change for the whole region. Raise the ground near
+  // the top instead, sloping back down towards the foot through the gap:
+  // height = STOREY * d_foot / (d_top + d_foot), fading out far from the cliff.
+  {
+    const topSeed = new Map(), footSeed = new Map(); // region -> cells
+    for (let cx = 0; cx < cw; cx++) {
+      let cy = 0;
+      while (cy < ch) {
+        if (kind[cy * cw + cx] !== CELL.CLIFF) { cy++; continue; }
+        let e = cy;
+        while (e < ch && kind[e * cw + cx] === CELL.CLIFF) e++;
+        if (cy > 0 && e < ch && e - cy >= 3) {
+          const a = cy * cw - cw + cx, b = e * cw + cx;
+          if (region[a] >= 0 && region[a] === region[b] && !regionWet[region[a]]) {
+            const r = region[a];
+            if (!topSeed.has(r)) { topSeed.set(r, []); footSeed.set(r, []); }
+            topSeed.get(r).push(a);
+            footSeed.get(r).push(b);
+          }
+        }
+        cy = e;
+      }
+    }
+    const bfs = (seeds, r) => {
+      const d = new Map();
+      const q = [];
+      for (const i of seeds) { d.set(i, 0); q.push(i); }
+      for (let h = 0; h < q.length; h++) {
+        const i = q[h], di = d.get(i);
+        if (di > 40) continue;
+        for (const k of neighbours(i)) if (region[k] === r && !d.has(k)) { d.set(k, di + 1); q.push(k); }
+      }
+      return d;
+    };
+    for (const [r, tops] of topSeed) {
+      if (tops.length < 3) continue;
+      const dt = bfs(tops, r), df = bfs(footSeed.get(r), r);
+      for (const [i, a] of dt) {
+        const b = df.has(i) ? df.get(i) : 41;
+        if (b <= a) continue; // nearer the foot: stays low
+        let hgt = STOREY * b / (a + b);
+        if (a > 16) hgt *= Math.max(0, 1 - (a - 16) / 16);
+        out[i] += Math.round(hgt);
+      }
+    }
+  }
+
   // Bridges: the deck sits at the land level at its ends; underneath is the water level.
   const deck = new Int16Array(n).fill(NONE);
   const spread = (target, pick) => {

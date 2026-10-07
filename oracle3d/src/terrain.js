@@ -280,6 +280,16 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
           }
         }
         if (comp.length < 48) continue;
+        // Trunks and roots under a green crown belong to that tree; they stay boxes.
+        let touchesCrown = false;
+        for (const j of comp) {
+          const x = j % ww;
+          for (const k of [x > 0 ? j - 1 : -1, x < ww - 1 ? j + 1 : -1, j - ww, j + ww]) {
+            if (k >= 0 && k < ww * wh && kind[k] === P_ORGANIC) { touchesCrown = true; break; }
+          }
+          if (touchesCrown) break;
+        }
+        if (touchesCrown) continue;
         let inner = 0, innerDark = 0, colourful = 0, red = 0;
         for (const j of comp) {
           const rgb = rgbs[j], r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
@@ -782,7 +792,13 @@ export function meshChunk(c, neighbor) {
     const f = t(e, lo, hi);
     if (cc.wx[i] || cc.wy[i]) {
       // cliff wall: from the rim (top) out across the face to its foot (bottom)
-      return [px + (1 - f) * cc.wx[i], pz + (1 - f) * cc.wy[i]];
+      // Sample straight out from the wall (along its facing), so corners read like the
+      // straight face next to them instead of smearing the curved corner art.
+      const L = (1 - f) * Math.hypot(cc.wx[i], cc.wy[i]);
+      if (dir === 's') return [px, pz + L];
+      if (dir === 'n') return [px, pz - L];
+      if (dir === 'e') return [px + L, pz];
+      return [px - L, pz];
     }
     if ((dir === 'e' || dir === 'w') && cc.xF[i] !== NONE) {
       return [cc.xF[i] + 0.01 + f * (cc.xLen[i] - 0.02), cc.fy[i] !== NONE ? cc.fy[i] + 0.5 : pz + cc.oy[i]];
