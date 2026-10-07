@@ -450,7 +450,7 @@ export function computeElevation(map, collisionModeOf) {
           if (bridge[k] && !done2[k]) { done2[k] = 1; comp.push(k); } else if (region[k] >= 0 && !regionWet[region[k]]) lands.add(region[k]);
         }
       }
-      if (lands.size <= 1) for (const j of comp) { stub[j] = 1; if (deck[j] !== NONE) out[j] = deck[j]; }
+      if (lands.size <= 1) for (const j of comp) stub[j] = 1; // still a deck over water
     }
   }
   return { cw, ch, kind, level: out, deck, stub };

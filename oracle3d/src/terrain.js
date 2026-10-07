@@ -229,7 +229,6 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         kd = elev.kind[ci];
         lvl[i] = elev.level[ci];
         deckLvl[i] = elev.deck[ci];
-        if (elev.stub && elev.stub[ci] && c === CLS.BRIDGE) { c = CLS.GROUND; cls[i] = c; }
       }
       kind[i] = kd === 2 ? P_STAIRS : kd === 1 ? P_CLIFF : c === CLS.SOLID ? P_OBJECT : P_GROUND;
       if (kind[i] === P_OBJECT && m && m.open[map.ids[mi] * 256 + (py & 15) * 16 + (px & 15)]) { kind[i] = P_GROUND; cls[i] = CLS.GROUND; c = CLS.GROUND; }
@@ -602,31 +601,42 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
   // so a wall facing south, west or round a corner all read the right art.
   {
     const N2 = ww * wh;
-    const isRimPx = new Uint8Array(N2);
-    for (let i = 0; i < N2; i++) {
-      if (kind[i] !== P_CLIFF) continue;
-      if (!face(i) && luma(rgbs[i]) >= 40) isRimPx[i] = 1;
-    }
-    // Dark outline pixels touching the rim belong to it.
-    for (let i = 0; i < N2; i++) {
-      if (kind[i] !== P_CLIFF || isRimPx[i] || luma(rgbs[i]) >= 40) continue;
-      const x = i % ww;
-      if ((x > 0 && isRimPx[i - 1] === 1) || (x < ww - 1 && isRimPx[i + 1] === 1) || (i >= ww && isRimPx[i - ww] === 1) || (i + ww < N2 && isRimPx[i + ww] === 1)) isRimPx[i] = 2;
-    }
-    // Plateau level of rim pixels: the level of the nearest ground (BFS through rim).
-    const hi = new Int16Array(N2).fill(NO_LEVEL);
-    const q = [];
-    for (let i = 0; i < N2; i++) if (kind[i] !== P_CLIFF && lvl[i] !== NO_LEVEL) { hi[i] = lvl[i]; q.push(i); }
-    const seen = new Uint8Array(N2);
-    for (let h = 0; h < q.length; h++) {
-      const i = q[h], x = i % ww;
-      for (const j of [x > 0 ? i - 1 : -1, x < ww - 1 ? i + 1 : -1, i - ww, i + ww]) {
-        if (j < 0 || j >= N2 || kind[j] !== P_CLIFF || !isRimPx[j] || seen[j]) continue;
-        seen[j] = 1;
-        hi[j] = Math.max(hi[j] === NO_LEVEL ? -32767 : hi[j], hi[i]);
-        q.push(j);
+    // The red line is the plateau's edge. Flood from the ground into the band, highest
+    // ground first: the higher side claims everything up to and including the red line
+    // (and stops at brown face pixels, for rims drawn without red); the rest of the band
+    // is face, beyond the edge, and belongs to the lower ground. No land past the red.
+    const isRed = (i) => { const r = rgbs[i] >> 16, g = (rgbs[i] >> 8) & 255, b = rgbs[i] & 255; return r > 150 && g < 110 && b < 110; };
+    const claim = new Int16Array(N2).fill(NO_LEVEL);
+    {
+      const byLv = new Map();
+      for (let i = 0; i < N2; i++) {
+        if (kind[i] === P_CLIFF || lvl[i] === NO_LEVEL) continue;
+        if (!byLv.has(lvl[i])) byLv.set(lvl[i], []);
+        byLv.get(lvl[i]).push(i);
+      }
+      for (const lev of [...byLv.keys()].sort((p, q) => q - p)) {
+        const q0 = byLv.get(lev).slice();
+        const dist = new Map();
+        for (let h = 0; h < q0.length; h++) {
+          const i = q0[h], x = i % ww;
+          const d = dist.get(i) || 0;
+          if (kind[i] === P_CLIFF && isRed(i)) continue; // the edge: stop here
+          if (d >= 10) continue; // the top is only a few pixels deep before the red line
+          for (const j of [x > 0 ? i - 1 : -1, x < ww - 1 ? i + 1 : -1, i - ww, i + ww]) {
+            if (j < 0 || j >= N2 || kind[j] !== P_CLIFF || claim[j] !== NO_LEVEL) continue;
+            if (!isRed(j) && face(j)) continue; // brown face: beyond the edge
+            claim[j] = lev;
+            dist.set(j, d + 1);
+            q0.push(j);
+          }
+        }
       }
     }
+    // Rim: claimed by a higher ground than the one the band drops to (refined below once
+    // the lowest ground is known).
+    const isRimPx = new Uint8Array(N2);
+    for (let i = 0; i < N2; i++) if (kind[i] === P_CLIFF && claim[i] !== NO_LEVEL) isRimPx[i] = 1;
+    const hi = claim;
     // Face pixels: nearest rim pixel (feature transform, 8-connected).
     const near = new Int32Array(N2).fill(-1);
     const fq = [];
@@ -661,38 +671,45 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         }
       }
     }
-    // Face pixels lie beyond the rim, on the lower ground: find, through the face, the
-    // nearest plain ground on the far side (feature transform from that ground).
-    // A face always drops to the lowest ground it touches, so the lowest level claims
-    // the face first; the nearest pixel of that ground supplies the texture.
+    // The rest of each band (beyond the red line) is claimed by the ground on its far
+    // side, flooding in from that ground; each face pixel remembers which ground pixel
+    // reached it, for its level and texture. Within a band, pixels claimed by the band's
+    // highest ground are rim (the top, own art); the others are face (lower ground).
     const low = new Int32Array(N2).fill(-1);
     {
-      const byLevel = new Map();
-      for (let i = 0; i < N2; i++) {
-        if (kind[i] === P_CLIFF || lvl[i] === NO_LEVEL) continue;
-        if (!byLevel.has(lvl[i])) byLevel.set(lvl[i], []);
-        byLevel.get(lvl[i]).push(i);
-      }
-      for (const lev of [...byLevel.keys()].sort((p, q) => p - q)) {
-        const q3 = [];
-        for (const i of byLevel.get(lev)) { low[i] = i; q3.push(i); }
-        for (let h = 0; h < q3.length; h++) {
-          const i = q3[h], x = i % ww, y = (i / ww) | 0;
-          const src = low[i], sx = src % ww, sy = (src / ww) | 0;
-          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-            if (!dx && !dy) continue;
-            const X = x + dx, Y = y + dy;
-            if (X < 0 || Y < 0 || X >= ww || Y >= wh) continue;
-            const j = Y * ww + X;
-            if (kind[j] !== P_CLIFF || isRimPx[j]) continue;
-            if (low[j] >= 0) {
-              if (lvl[low[j]] < lev) continue; // claimed by lower ground
-              const o = low[j], ox = o % ww, oy = (o / ww) | 0;
-              if ((ox - X) ** 2 + (oy - Y) ** 2 <= (sx - X) ** 2 + (sy - Y) ** 2) continue;
-            }
-            low[j] = src;
-            q3.push(j);
+      // band components: rim = claimed by the band's highest level
+      const comp2 = new Int32Array(N2).fill(-1);
+      const top = [];
+      for (let i0 = 0; i0 < N2; i0++) {
+        if (kind[i0] !== P_CLIFF || comp2[i0] >= 0) continue;
+        const id = top.length, st = [i0];
+        comp2[i0] = id;
+        let mx = NO_LEVEL;
+        for (let h = 0; h < st.length; h++) {
+          const i = st[h], x = i % ww;
+          if (claim[i] !== NO_LEVEL) mx = Math.max(mx, claim[i]);
+          for (const j of [x > 0 ? i - 1 : -1, x < ww - 1 ? i + 1 : -1, i - ww, i + ww]) {
+            if (j >= 0 && j < N2 && kind[j] === P_CLIFF && comp2[j] < 0) { comp2[j] = id; st.push(j); }
           }
+        }
+        top.push(mx);
+      }
+      // only the band's highest side owns pixels; the rest is face
+      for (let i = 0; i < N2; i++) {
+        if (kind[i] !== P_CLIFF) continue;
+        if (claim[i] !== NO_LEVEL && claim[i] < top[comp2[i]]) claim[i] = NO_LEVEL;
+        isRimPx[i] = claim[i] !== NO_LEVEL ? 1 : 0;
+      }
+      // nearest ground wins (one breadth-first flood from all ground at once)
+      const lows = new Uint8Array(N2);
+      const q3 = [];
+      for (let i = 0; i < N2; i++) if (kind[i] !== P_CLIFF && lvl[i] !== NO_LEVEL && cls[i] !== CLS.BRIDGE) { low[i] = i; q3.push(i); }
+      for (let h = 0; h < q3.length; h++) {
+        const i = q3[h], x = i % ww;
+        for (const j of [x > 0 ? i - 1 : -1, x < ww - 1 ? i + 1 : -1, i - ww, i + ww]) {
+          if (j < 0 || j >= N2 || kind[j] !== P_CLIFF || claim[j] !== NO_LEVEL || lows[j]) continue;
+          lows[j] = 1; low[j] = low[i];
+          q3.push(j);
         }
       }
     }
@@ -716,6 +733,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         set(x, y, level, o);
         continue;
       }
+      if (globalThis.DEBUG_FACE && wx0 + x === globalThis.DEBUG_FACE[0] && wy0 + y === globalThis.DEBUG_FACE[1]) { const sr = low[i]; console.log('face', 'claim', claim[i], 'src', sr >= 0 ? [wx0 + sr % ww, wy0 + ((sr / ww) | 0), lvl[sr], kind[sr], cls[sr]] : null); }
       // Face pixel: the lower ground at the foot of the wall, textured with that ground
       // itself (shifted by whole metatiles so its pattern lines up).
       const src = low[i];
@@ -751,11 +769,16 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         const c = cls[at(r)];
         const base = lv + (DEPTH[c] || 0);
         if (blade[at(r)]) set(x, r, base + blade[at(r)], { walk: base });
-        else set(x, r, base, c === CLS.BRIDGE ? waterUnder(x, r) : {});
-        if (c === CLS.BRIDGE) {
+        else if (c === CLS.BRIDGE) {
+          // Under the deck is the water it crosses, at that water's own level (the
+          // ends of a bridge lie over the banks' level in the cell grid).
+          const wu = waterUnder(x, r);
+          const wl = wu.ox !== undefined ? lvl[W0(r + wu.oy) + x + wu.ox] : NO_LEVEL;
+          const g = wl !== NO_LEVEL ? Math.min(base, wl + DEPTH[CLS.WATER]) : base;
+          set(x, r, g, wu);
           const i = cellOf(x, r);
-          if (i >= 0) out.deck[i] = Math.max(levelOr(deckLvl[at(r)], lv), base + DECK_CLEAR) + DECK_RAISE;
-        }
+          if (i >= 0) out.deck[i] = Math.max(levelOr(deckLvl[at(r)], lv), g + DECK_CLEAR) + DECK_RAISE;
+        } else set(x, r, base, {});
         r++;
         continue;
       }
