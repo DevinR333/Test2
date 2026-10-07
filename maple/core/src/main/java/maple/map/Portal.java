@@ -18,6 +18,9 @@ public final class Portal {
     }
 
     public boolean isSpawn() { return type == 0; }
+    /** Style of a hidden script portal's indicator (MapHelper.img/portal/game/psh/<image>). */
+    public String image = "default";
+
     public boolean isVisible() { return type == 2 || type == 7; }
     public boolean isTouch() { return type == 3 || type == 9; }
 

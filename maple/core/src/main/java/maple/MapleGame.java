@@ -960,7 +960,7 @@ public class MapleGame extends ApplicationAdapter {
             world.drawLayer(batch, layer, alpha);
             if (layer == playerLayer) player.draw(batch, alpha);
         }
-        field.drawPortals(batch, timeMs);
+        field.drawPortals(batch, timeMs, player.phys.x, player.phys.y);
         world.drawTop(batch, alpha);
         batch.setProjectionMatrix(cam.combined);
         field.drawForegrounds(batch, viewX, viewY, Ui.W, Ui.H, timeMs);

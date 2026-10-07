@@ -213,6 +213,6 @@ public final class MiniMapWindow extends Window {
         int mx = (((int) wx + centerX) >> mag) - cropX;
         int my = (((int) wy + centerY) >> mag) - cropY;
         if (mx < 0 || my < 0 || mx >= viewW || my >= viewH) return;
-        g.image(s, viewX + mx - (int) (s.w / 2), viewY + my - (int) (s.h / 2));
+        g.image(s, viewX + mx - (int) (s.w / 2), viewY + my); // centred across, hanging from the point (as the v83 client)
     }
 }

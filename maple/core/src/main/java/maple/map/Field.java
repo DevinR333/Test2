@@ -32,6 +32,8 @@ public final class Field {
     final List<Background> fronts = new ArrayList<>();
     final List<List<Piece>> layers = new ArrayList<>();
     final Animation portalAnim;
+    private Animation hiddenAnim;
+    private final java.util.Map<String, Animation> scriptHiddenAnims = new java.util.HashMap<>();
     public int tiles, objects;
 
     /** A tile or object: an animation at a fixed spot with a z order. */
@@ -170,6 +172,24 @@ public final class Field {
             portals.add(portal);
         }
         portalAnim = Animation.of(wz.get("Map/MapHelper.img/portal/game/pv"), bank);
+        // hidden portals (type 10, e.g. the Henesys signs) show this while you stand at them;
+        // hidden script portals (11) use psh in the style their "image" names
+        hiddenAnim = Animation.of(wz.get("Map/MapHelper.img/portal/game/ph/default/portalContinue"), bank);
+        for (WzNode p : src.get("portal").children()) {
+            WzNode r = p.resolve();
+            if (r.getInt("pt", 0) != 11) continue;
+            String img = r.getString("image", "default");
+            if (img.isEmpty() || img.equals("None")) img = "default";
+            if (scriptHiddenAnims.containsKey(img)) continue;
+            WzNode n = wz.get("Map/MapHelper.img/portal/game/psh/" + img + "/portalContinue");
+            if (!n.exists()) n = wz.get("Map/MapHelper.img/portal/game/psh/default/portalContinue");
+            scriptHiddenAnims.put(img, Animation.of(n, bank));
+        }
+        for (Portal portal : portals) {
+            WzNode r = src.get("portal").get(Integer.toString(portal.id)).resolve();
+            String img = r.getString("image", "default");
+            portal.image = img.isEmpty() || img.equals("None") ? "default" : img;
+        }
 
         for (WzNode n : withLife ? src.get("life").children() : java.util.Collections.<WzNode>emptyList()) {
             n = n.resolve();
@@ -237,8 +257,19 @@ public final class Field {
     }
 
     public void drawPortals(Batch batch, long now) {
-        if (portalAnim.isEmpty()) return;
-        for (Portal p : portals) if (p.isVisible()) portalAnim.draw(batch, p.x, p.y, false, now, 1f);
+        drawPortals(batch, now, Double.NaN, Double.NaN);
+    }
+
+    /** Visible portals always; hidden ones (types 10 and 11) while the player (px, py) stands in them. */
+    public void drawPortals(Batch batch, long now, double px, double py) {
+        for (Portal p : portals) {
+            if (p.isVisible()) {
+                if (!portalAnim.isEmpty()) portalAnim.draw(batch, p.x, p.y, false, now, 1f);
+            } else if ((p.type == 10 || p.type == 11) && px >= p.x - 25 && px <= p.x + 25 && py >= p.y - 100 && py <= p.y + 25) {
+                Animation a = p.type == 10 ? hiddenAnim : scriptHiddenAnims.get(p.image);
+                if (a != null && !a.isEmpty()) a.draw(batch, p.x, p.y, false, now, 1f);
+            }
+        }
     }
 
     public void drawDebug(ShapeRenderer sr) {
