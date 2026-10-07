@@ -19,6 +19,7 @@ for (let r = 0; r < 256; r++) {
   const lay = Buffer.from(rr.layout, 'base64');
   for (let y = 0; y < 8; y++) for (let x = 0; x < 10; x++) { const mi = ((r >> 4) * 8 + y) * 160 + (r & 15) * 10 + x; map.ids[mi] = lay[y * 10 + x]; map.tilesets[mi] = rr.tileset; }
 }
+globalThis.DEBUG_ORG = process.env.DEBUG_ORG;
 const elev = computeElevation(map, (ts) => w.tilesets[ts].collisionMode);
 const c = buildChunkHeights(map, map.models, (room & 15) * 10, (room >> 4) * 8, 10, 8, elev);
 const S = 4, out = new PNG({ width: 160 * S * 3, height: 128 * S });

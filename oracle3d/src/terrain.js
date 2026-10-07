@@ -105,14 +105,15 @@ export function markGrass(model, collisionMode) {
   }
 }
 
-// Mostly blue, like the game's water tiles.
+// Water tiles are mostly the bright water blue. (Sunken City's blue trees are mostly a
+// dark blue, so they stay solid objects.)
 function isWaterTile(px) {
-  let blue = 0;
+  let bright = 0;
   for (let i = 0; i < 256; i++) {
-    const r = px[i * 4], g = px[i * 4 + 1], b = px[i * 4 + 2];
-    if (b > r + 40 && b > g) blue++;
+    const r = px[i * 4], b = px[i * 4 + 2];
+    if (b > 200 && r < 100) bright++;
   }
-  return blue > 110;
+  return bright >= 80;
 }
 
 function classifyHazard(px) {
@@ -279,10 +280,11 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
           }
         }
         if (comp.length < 48) continue;
-        let inner = 0, innerDark = 0, colourful = 0;
+        let inner = 0, innerDark = 0, colourful = 0, red = 0;
         for (const j of comp) {
           const rgb = rgbs[j], r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
-          const brown = r >= g && g >= b && g > 0.3 * r; // wood, sand, roots
+          const brown = r >= g && g >= b && g > 60 && r - b < 150; // wood, sand, roots, peach
+          if (r > 150 && g < 100) red++;
           if (!brown && Math.max(r, g, b) - Math.min(r, g, b) > 90 && luma(rgb) >= 50) colourful++;
           const x = j % ww;
           if (x > 0 && x < ww - 1 && kind[j - 1] === P_OBJECT && kind[j + 1] === P_OBJECT && kind[j - ww] === P_OBJECT && kind[j + ww] === P_OBJECT) {
@@ -290,7 +292,10 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
             if (luma(rgb) < 50) innerDark++;
           }
         }
-        if (inner > 0 && innerDark / inner > 0.12 && colourful / comp.length > 0.45) {
+        const dk = inner > 0 ? innerDark / inner : 0, col = colourful / comp.length;
+        // Leafy and speckled (autumn crowns), or bark-like and very dark-veined (the
+        // Sunken City tree-hut). Red roofs are speckled too but much less veined.
+        if ((dk > 0.12 && col > 0.45 && red < 0.3 * comp.length) || (dk > 0.35 && col > 0.2)) {
           for (const j of comp) { kind[j] = P_ORGANIC; q.push(j); }
         }
       }
@@ -308,7 +313,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
       if (x > 0) d = Math.min(d, dist[i - ww - 1] + D2);
       if (x < ww - 1) d = Math.min(d, dist[i - ww + 1] + D2);
     }
-    if (x === 0 || y === 0 || x === ww - 1) d = Math.min(d, DOME_R); // window edge: assume more crown beyond
+    if (x === 0 || y === 0 || x === ww - 1) d = Math.min(d, 16); // window edge: assume more crown beyond
     dist[i] = d;
   }
   for (let y = wh - 1; y >= 0; y--) for (let x = ww - 1; x >= 0; x--) {
@@ -321,9 +326,38 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
       if (x < ww - 1) d = Math.min(d, dist[i + ww + 1] + D2);
       if (x > 0) d = Math.min(d, dist[i + ww - 1] + D2);
     }
-    if (y === wh - 1) d = Math.min(d, DOME_R);
+    if (y === wh - 1) d = Math.min(d, 16);
     dist[i] = d;
   }
+
+  // Crown size: the largest distance-to-edge nearby (a 2D max filter). A small bush
+  // stays low; a full tree crown stands tree-tall with steep, rounded sides.
+  const crownR = new Float32Array(ww * wh);
+  {
+    const tmp = new Float32Array(ww * wh);
+    const RAD = 14;
+    for (let y = 0; y < wh; y++) for (let x = 0; x < ww; x++) {
+      const i = y * ww + x;
+      if (kind[i] !== P_ORGANIC) continue;
+      let m = 0;
+      for (let k = Math.max(0, x - RAD); k <= Math.min(ww - 1, x + RAD); k++) if (kind[y * ww + k] === P_ORGANIC) m = Math.max(m, dist[y * ww + k]);
+      tmp[i] = m;
+    }
+    for (let y = 0; y < wh; y++) for (let x = 0; x < ww; x++) {
+      const i = y * ww + x;
+      if (kind[i] !== P_ORGANIC) continue;
+      let m = 0;
+      for (let k = Math.max(0, y - RAD); k <= Math.min(wh - 1, y + RAD); k++) if (kind[k * ww + x] === P_ORGANIC) m = Math.max(m, tmp[k * ww + x]);
+      crownR[i] = Math.max(1, Math.min(16, m));
+    }
+  }
+  const crownHeight = (i) => {
+    const R = crownR[i];
+    const H = Math.max(3, Math.min(30, R * 1.9));
+    const t = Math.min(1, dist[i] / R);
+    const h = H * Math.sqrt(1 - (1 - t) * (1 - t));
+    return Math.max(1, Math.round(h - (dark[i] ? GROOVE : 0)));
+  };
 
   // ---- outputs, one per pixel cell of the chunk ----
   // Every cell has a top at height h. Its texture is the map pixel
@@ -341,6 +375,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     sF: new Float32Array(N).fill(NONE), sLen: new Float32Array(N),
     nF: new Float32Array(N).fill(NONE), nLen: new Float32Array(N),
     xF: new Float32Array(N).fill(NONE), xLen: new Float32Array(N),
+    wx: new Float32Array(N), wy: new Float32Array(N), // cliff walls: offset to the rim
     deck: new Int16Array(N).fill(NO_LEVEL),
     walk: new Int16Array(N), // height Link stands at (tall grass is walked through)
   };
@@ -358,6 +393,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     out.sF[i] = o.sF ?? NONE; out.sLen[i] = o.sLen || 0;
     out.nF[i] = o.nF ?? NONE; out.nLen[i] = o.nLen || 0;
     out.xF[i] = o.xF ?? NONE; out.xLen[i] = o.xLen || 0;
+    out.wx[i] = o.wx || 0; out.wy[i] = o.wy || 0;
   };
   const W0 = (r) => r * ww; // row start in the window
   // Ground hidden in the 2D art (behind objects, on cliff tops) is filled from the
@@ -440,7 +476,6 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     return {};
   };
   const face = (i) => isFace(rgbs[i]);
-  const side = new Uint8Array(ww * wh); // cliff pixels left for the row pass
 
   // ---- one height per object: connected object pixels share the median column run ----
   const comp = new Int32Array(ww * wh).fill(-1);
@@ -477,30 +512,88 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     }
   }
 
-  // ---- cliff orientation: pixels of tall, narrow strips are east/west sides ----
+  // ---- cliffs, in 2D so straight runs and corners follow the same rule ----
+  // A cliff band is drawn as the red rim (the plateau's edge, seen from above) and the
+  // brown face below it (a wall, which in the oblique art takes up screen rows). In 3D
+  // the whole band is plateau: rim pixels show their own art on top, face pixels show
+  // plateau ground, and where the band meets lower ground a vertical wall stands. Each
+  // wall shows the face art found by walking from the wall towards the nearest rim pixel,
+  // so a wall facing south, west or round a corner all read the right art.
   {
-    const hl = new Uint16Array(ww * wh), vl = new Uint16Array(ww * wh);
-    for (let y = 0; y < wh; y++) {
-      let x = 0;
-      while (x < ww) {
-        if (kind[W0(y) + x] !== P_CLIFF) { x++; continue; }
-        let e = x; while (e < ww && kind[W0(y) + e] === P_CLIFF) e++;
-        for (let k = x; k < e; k++) hl[W0(y) + k] = e - x;
-        x = e;
+    const N2 = ww * wh;
+    const isRimPx = new Uint8Array(N2);
+    for (let i = 0; i < N2; i++) {
+      if (kind[i] !== P_CLIFF) continue;
+      if (!face(i) && luma(rgbs[i]) >= 40) isRimPx[i] = 1;
+    }
+    // Dark outline pixels touching the rim belong to it.
+    for (let i = 0; i < N2; i++) {
+      if (kind[i] !== P_CLIFF || isRimPx[i] || luma(rgbs[i]) >= 40) continue;
+      const x = i % ww;
+      if ((x > 0 && isRimPx[i - 1] === 1) || (x < ww - 1 && isRimPx[i + 1] === 1) || (i >= ww && isRimPx[i - ww] === 1) || (i + ww < N2 && isRimPx[i + ww] === 1)) isRimPx[i] = 2;
+    }
+    // Plateau level of rim pixels: the level of the nearest ground (BFS through rim).
+    const hi = new Int16Array(N2).fill(NO_LEVEL);
+    const q = [];
+    for (let i = 0; i < N2; i++) if (kind[i] !== P_CLIFF && lvl[i] !== NO_LEVEL) { hi[i] = lvl[i]; q.push(i); }
+    const seen = new Uint8Array(N2);
+    for (let h = 0; h < q.length; h++) {
+      const i = q[h], x = i % ww;
+      for (const j of [x > 0 ? i - 1 : -1, x < ww - 1 ? i + 1 : -1, i - ww, i + ww]) {
+        if (j < 0 || j >= N2 || kind[j] !== P_CLIFF || !isRimPx[j] || seen[j]) continue;
+        seen[j] = 1;
+        hi[j] = Math.max(hi[j] === NO_LEVEL ? -32767 : hi[j], hi[i]);
+        q.push(j);
       }
     }
-    for (let x = 0; x < ww; x++) {
-      let y = 0;
-      while (y < wh) {
-        if (kind[W0(y) + x] !== P_CLIFF) { y++; continue; }
-        let e = y; while (e < wh && kind[W0(e) + x] === P_CLIFF) e++;
-        for (let k = y; k < e; k++) vl[W0(k) + x] = e - y;
-        y = e;
+    // Face pixels: nearest rim pixel (feature transform, 8-connected).
+    const near = new Int32Array(N2).fill(-1);
+    const fq = [];
+    for (let i = 0; i < N2; i++) if (kind[i] === P_CLIFF && isRimPx[i]) { near[i] = i; fq.push(i); }
+    for (let h = 0; h < fq.length; h++) {
+      const i = fq[h], x = i % ww, y = (i / ww) | 0;
+      const src = near[i], sx = src % ww, sy = (src / ww) | 0;
+      for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+        if (!dx && !dy) continue;
+        const X = x + dx, Y = y + dy;
+        if (X < 0 || Y < 0 || X >= ww || Y >= wh) continue;
+        const j = Y * ww + X;
+        if (kind[j] !== P_CLIFF) continue;
+        if (near[j] >= 0) {
+          const o = near[j], ox = o % ww, oy = (o / ww) | 0;
+          if ((ox - X) ** 2 + (oy - Y) ** 2 <= (sx - X) ** 2 + (sy - Y) ** 2) continue;
+        }
+        near[j] = src;
+        fq.push(j);
       }
     }
-    for (let i = 0; i < ww * wh; i++) if (kind[i] === P_CLIFF && vl[i] > hl[i] + 8) side[i] = 1;
+    // Fallback level for bands with no rim in view: the higher of the nearby ground.
+    const anyLv = new Int16Array(N2).fill(NO_LEVEL);
+    {
+      const q2 = [];
+      for (let i = 0; i < N2; i++) if (kind[i] !== P_CLIFF && lvl[i] !== NO_LEVEL) { anyLv[i] = lvl[i]; q2.push(i); }
+      for (let h = 0; h < q2.length; h++) {
+        const i = q2[h], x = i % ww;
+        for (const j of [x > 0 ? i - 1 : -1, x < ww - 1 ? i + 1 : -1, i - ww, i + ww]) {
+          if (j < 0 || j >= N2 || kind[j] !== P_CLIFF) continue;
+          if (anyLv[j] === NO_LEVEL || anyLv[i] > anyLv[j]) { if (anyLv[j] === NO_LEVEL) q2.push(j); anyLv[j] = Math.max(anyLv[j], anyLv[i]); }
+        }
+      }
+    }
+    for (let y = MARGIN_Y; y < MARGIN_Y + H; y++) for (let x = MARGIN_X; x < MARGIN_X + W; x++) {
+      const i = W0(y) + x;
+      if (kind[i] !== P_CLIFF) continue;
+      const src = near[i];
+      let level = src >= 0 && hi[src] !== NO_LEVEL ? hi[src] : levelOr(anyLv[i], 0);
+      if (isRimPx[i]) {
+        set(x, y, level, {});
+        continue;
+      }
+      const sx = src >= 0 ? src % ww : x, sy = src >= 0 ? (src / ww) | 0 : y;
+      const o = { ...(plainFill(x, y, level) || {}), wx: sx - x, wy: sy - y };
+      set(x, y, level, o);
+    }
   }
-
   // ---- column pass (all window columns, so the row pass has its inputs) ----
   for (let x = 0; x < ww; x++) {
     const at = (r) => W0(r) + x;
@@ -511,7 +604,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
       const k0 = kind[at(r)];
       if (k0 === P_ORGANIC) {
         const lv = levelOr(lvl[at(r)], 0);
-        set(x, r, lv + Math.max(1, domeHeight(dist[at(r)]) - (dark[at(r)] ? GROOVE : 0)), {});
+        set(x, r, lv + crownHeight(at(r)), {});
         r++;
         continue;
       }
@@ -528,19 +621,9 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         r++;
         continue;
       }
-      if (k0 === P_CLIFF && side[at(r)]) {
-        // east/west strip: the row pass decides; meanwhile at the nearest ground level
-        let lv = NO_LEVEL;
-        for (let d = 1; d < 24 && lv === NO_LEVEL; d++) {
-          if (x - d >= 0 && lvl[at(r) - d] !== NO_LEVEL) lv = lvl[at(r) - d];
-          else if (x + d < ww && lvl[at(r) + d] !== NO_LEVEL) lv = lvl[at(r) + d];
-        }
-        set(x, r, levelOr(lv, 0), {});
-        r++;
-        continue;
-      }
+      if (k0 === P_CLIFF) { r++; continue; } // done by the cliff pass
       let e = r;
-      while (e < wh && kind[at(e)] === k0 && !(k0 === P_CLIFF && side[at(e)])) e++;
+      while (e < wh && kind[at(e)] === k0) e++;
       const len = e - r;
       const y0 = wy0 + r, y1 = wy0 + e; // map rows of the run
 
@@ -553,36 +636,6 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         for (let rr = r; rr < e; rr++) {
           if (rr - r < ht) set(x, rr, lv, fillY(x, rr, -ht, y0 - 1));
           else set(x, rr, lv + ht, { oy: -ht, sF: y1, sLen: ht, nF: y1 - 0.01, nLen: -ht });
-        }
-      } else if (k0 === P_CLIFF) {
-        const a = levelAbove(r), b = levelBelow(e);
-        if (a !== NO_LEVEL && b !== NO_LEVEL && a > b) {
-          // South-facing cliff: plateau (a) north, lowland (b) south. The red rim lies
-          // at the plateau edge; the brown face below it is the wall, at the bottom row.
-          // The rim runs from the plateau edge until the brown face begins.
-          let rimEnd = r;
-          while (rimEnd < e && !face(at(rimEnd))) rimEnd++;
-          if (rimEnd === e) rimEnd = r + Math.min(e - r, 8); // no face art: assume a thin rim
-          const rimLen = rimEnd - r, faceLen = e - rimEnd;
-          for (let rr = r; rr < e; rr++) {
-            if (rr >= e - rimLen) set(x, rr, a, { oy: -faceLen, sF: y1, sLen: Math.max(1, faceLen) });
-            else set(x, rr, a, { ...fillY(x, rr, -(e - r - rimLen), y0 - 1), sF: y1, sLen: Math.max(1, faceLen) });
-          }
-        } else if (a !== NO_LEVEL && b !== NO_LEVEL && a < b) {
-          // North edge of a plateau (b): brown band north, rim south of it. The band is
-          // the plateau's back wall, standing on its north edge.
-          let rimStart = e;
-          while (rimStart > r && !face(at(rimStart - 1))) rimStart--;
-          if (rimStart === r) rimStart = e - Math.min(e - r, 8);
-          const wallLen = rimStart - r, rimLen = e - rimStart;
-          for (let rr = r; rr < e; rr++) {
-            if (rr < r + rimLen) set(x, rr, b, { oy: wallLen, nF: y0, nLen: Math.max(1, wallLen) });
-            else set(x, rr, b, { ...fillY(x, rr, e - r - rimLen, y1), nF: y0, nLen: Math.max(1, wallLen) });
-          }
-        } else {
-          // Same level north and south: a side wall, worked out by the row pass.
-          const lv = levelOr(a, levelOr(b, 0));
-          for (let rr = r; rr < e; rr++) { side[at(rr)] = 1; set(x, rr, lv, {}); }
         }
       } else {
         // Stairs: steps from the level above down to the level below.
@@ -599,37 +652,6 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     }
   }
 
-  // ---- row pass: east/west cliff sides ----
-  for (let y = MARGIN_Y; y < MARGIN_Y + H; y++) {
-    let x = 0;
-    while (x < ww) {
-      if (!side[W0(y) + x]) { x++; continue; }
-      let e = x;
-      while (e < ww && side[W0(y) + e]) e++;
-      const L = x > 0 ? lvl[W0(y) + x - 1] : NO_LEVEL, R = e < ww ? lvl[W0(y) + e] : NO_LEVEL;
-      const x0 = wx0 + x, x1 = wx0 + e, w = e - x;
-      if (L !== NO_LEVEL && R !== NO_LEVEL && L !== R) {
-        // Rim pixels next to the plateau, brown face toward the lowland.
-        let rimW = 0;
-        if (L > R) {
-          while (rimW < w && !face(W0(y) + x + rimW)) rimW++;
-          const faceW = w - rimW;
-          for (let k = x; k < e; k++) {
-            if (k >= e - rimW) set(k, y, L, { ox: -faceW, xF: x0 + rimW, xLen: Math.max(1, faceW) });
-            else set(k, y, L, { ...fillX(k, y, -(w - rimW), x0 - 1), xF: x0 + rimW, xLen: Math.max(1, faceW) });
-          }
-        } else {
-          while (rimW < w && !face(W0(y) + e - 1 - rimW)) rimW++;
-          const faceW = w - rimW;
-          for (let k = x; k < e; k++) {
-            if (k < x + rimW) set(k, y, R, { ox: faceW, xF: x1 - rimW - 0.01, xLen: -Math.max(1, faceW) });
-            else set(k, y, R, { ...fillX(k, y, w - rimW, x1), xF: x1 - rimW - 0.01, xLen: -Math.max(1, faceW) });
-          }
-        }
-      }
-      x = e;
-    }
-  }
   return out;
 }
 
@@ -694,7 +716,7 @@ export function meshChunk(c, neighbor) {
   }
 
   // Cells outside the map are flat ground with no art.
-  const VOID = { c: { h: [0], ox: [0], oy: [0], fx: [NONE], fy: [NONE], sF: [NONE], sLen: [0], nF: [NONE], nLen: [0], xF: [NONE], xLen: [0] }, i: 0 };
+  const VOID = { c: { h: [0], ox: [0], oy: [0], fx: [NONE], fy: [NONE], sF: [NONE], sLen: [0], nF: [NONE], nLen: [0], xF: [NONE], xLen: [0], wx: [0], wy: [0] }, i: 0 };
   const cell = (x, z) => {
     if (x >= 0 && z >= 0 && x < W && z < H) return { c, i: z * W + x };
     return (neighbor && neighbor(ox0 + x, oz0 + z)) || VOID;
@@ -707,6 +729,10 @@ export function meshChunk(c, neighbor) {
   const wallS = (r, dir, px, pz, e, lo, hi) => {
     const cc = r.c, i = r.i;
     const f = t(e, lo, hi);
+    if (cc.wx[i] || cc.wy[i]) {
+      // cliff wall: walk from the wall towards the rim as the wall rises
+      return [px + f * cc.wx[i], pz + f * cc.wy[i]];
+    }
     if ((dir === 'e' || dir === 'w') && cc.xF[i] !== NONE) {
       return [cc.xF[i] + 0.01 + f * (cc.xLen[i] - 0.02), cc.fy[i] !== NONE ? cc.fy[i] + 0.5 : pz + cc.oy[i]];
     }
@@ -727,7 +753,7 @@ export function meshChunk(c, neighbor) {
     return topS(cc, i, px + k, pz);
   };
   // Wall attributes that must match for two neighbouring wall pieces to merge.
-  const wallKey = (r) => (r ? [r.c.h[r.i], r.c.sF[r.i], r.c.sLen[r.i], r.c.nF[r.i], r.c.nLen[r.i], r.c.xF[r.i], r.c.xLen[r.i], r.c.ox[r.i], r.c.oy[r.i], r.c.fx[r.i], r.c.fy[r.i]].join() : '0');
+  const wallKey = (r) => (r ? [r.c.h[r.i], r.c.sF[r.i], r.c.sLen[r.i], r.c.nF[r.i], r.c.nLen[r.i], r.c.xF[r.i], r.c.xLen[r.i], r.c.wx[r.i], r.c.wy[r.i], r.c.ox[r.i], r.c.oy[r.i], r.c.fx[r.i], r.c.fy[r.i]].join() : '0');
 
   // ---- walls between columns (facing +x / -x); this chunk owns its left edge ----
   for (let x = 0; x < W; x++) {
