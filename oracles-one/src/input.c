@@ -35,6 +35,7 @@ static Uint32 key_button(SDL_Scancode sc) {
   case SDL_SCANCODE_EQUALS: case SDL_SCANCODE_KP_PLUS: return BTN_ZOOM_IN;
   case SDL_SCANCODE_MINUS: case SDL_SCANCODE_KP_MINUS: return BTN_ZOOM_OUT;
   case SDL_SCANCODE_F2: return BTN_ASPECT;
+  case SDL_SCANCODE_T: return BTN_TOUCH_TOGGLE;
   default: return 0;
   }
 }
@@ -45,7 +46,7 @@ static Uint32 pad_button(SDL_JoystickID which, int b) {
     case SDL_GAMEPAD_BUTTON_LABEL_A: case SDL_GAMEPAD_BUTTON_LABEL_CROSS: return BTN_A;
     case SDL_GAMEPAD_BUTTON_LABEL_B: case SDL_GAMEPAD_BUTTON_LABEL_CIRCLE: return BTN_B;
     case SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN: return b == SDL_GAMEPAD_BUTTON_SOUTH ? BTN_A : b == SDL_GAMEPAD_BUTTON_EAST ? BTN_B : 0;
-    default: return 0;   // X/Y, square/triangle: free for later (extra item buttons)
+    default: return BTN_TOUCH_TOGGLE;   // X/Y, square/triangle (only the menu uses them for now)
     }
   }
   switch (b) {
@@ -134,7 +135,8 @@ void input_event(Input *in, const SDL_Event *ev, int win_w, int win_h) {
     if (!f) break;
     f->x = ev->tfinger.x * (float)win_w;
     f->y = ev->tfinger.y * (float)win_h;
-    if (inside(dpad_circle(win_w, win_h), f->x, f->y, 1.3f)) f->role = ROLE_DPAD;
+    if (in->touch_hidden) f->role = ROLE_FREE;   // hidden controls don't take touches
+    else if (inside(dpad_circle(win_w, win_h), f->x, f->y, 1.3f)) f->role = ROLE_DPAD;
     else {
       f->role = ROLE_FREE;
       for (size_t i = 0; i < SDL_arraysize(touch_buttons); i++)
@@ -197,7 +199,7 @@ static void draw_circle(SDL_Renderer *ren, Circle c, Uint8 a) {
 }
 
 void input_draw_touch(SDL_Renderer *ren, const Input *in, int win_w, int win_h) {
-  if (!in->touch_ui) return;
+  if (!in->touch_ui || in->touch_hidden) return;
   Circle d = dpad_circle(win_w, win_h);
   draw_circle(ren, d, 50);
   float arm = d.r * 0.3f;

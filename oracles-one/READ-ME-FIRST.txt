@@ -1,13 +1,13 @@
 ORACLES ONE: build the APK for your Android handheld or phone
 ==============================================================
 
-This folder holds the game's source. One script turns it into OraclesOne.apk.
+This folder holds the game's source. "Build APK.exe" turns it into OraclesOne.apk.
 
 WINDOWS
   1. Install Git:      https://git-scm.com/download/win
   2. Install Python 3: https://www.python.org/downloads/  (tick "Add python.exe to PATH")
   3. Unzip this folder somewhere with a short path, e.g. C:\oracles
-  4. Double-click build_apk.bat
+  4. Double-click "Build APK.exe"  (it runs build_apk.bat, which you can also double-click)
      It downloads Java, the Android SDK/NDK, SDL and the oracles-disasm game data by itself.
      The first build takes 15-30 minutes and about 6 GB of disk space.
   5. When it says Done, OraclesOne.apk is in this folder.
@@ -31,7 +31,8 @@ CONTROLS
     Start                inventory (both games' item pages; Select switches page)
     L / R shoulders      zoom out / in
   On a touchscreen: on-screen d-pad and buttons; pinch to zoom. They hide while a controller is
-  used. The back button opens the inventory.
+  used. To turn them off for good, open the inventory (Start) and tap TOUCH CONTROLS above it, or
+  press X or Y; the back button opens the inventory to turn them on again.
 
 This is an early build: both overworlds, the town houses between them, shared hearts, rupees and
 items, and the inventory work; NPCs, enemies, caves and dungeons are not in yet (see README.md).

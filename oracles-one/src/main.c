@@ -115,6 +115,29 @@ static View make_view(const App *a, int w, int h) {
   return v;
 }
 
+// Settings that belong to the device rather than the save: settings.txt in the app's folder.
+static char settings_path[1024];
+static void settings_load(App *a) {
+  char *dir = SDL_GetPrefPath("oracles-one", "oracles-one");
+  snprintf(settings_path, sizeof settings_path, "%ssettings.txt", dir ? dir : "");
+  SDL_free(dir);
+  size_t n;
+  char *d = SDL_LoadFile(settings_path, &n);
+  if (!d) return;
+  if (SDL_strstr(d, "touch_controls=off")) a->in.touch_hidden = true;
+  SDL_free(d);
+}
+static void settings_save(const App *a) {
+  char buf[64];
+  int n = snprintf(buf, sizeof buf, "touch_controls=%s\n", a->in.touch_hidden ? "off" : "on");
+  SDL_SaveFile(settings_path, buf, (size_t)n);
+}
+
+static void toggle_touch(App *a) {
+  a->in.touch_hidden = !a->in.touch_hidden;
+  settings_save(a);
+}
+
 static void enter_world(App *a, WorldId id, bool via_door) {
   a->world = &a->worlds[id];
   game.world = (uint8_t)id;
@@ -156,7 +179,11 @@ static void update(App *a) {
     else menu_open(&a->menu, a->world->id);
     return;
   }
-  if (a->menu.open) { menu_update(&a->menu, in->pressed); return; }
+  if (a->menu.open) {
+    if (in->pressed & BTN_TOUCH_TOGGLE) toggle_touch(a);
+    menu_update(&a->menu, in->pressed);
+    return;
+  }
 
   if (in->pressed & BTN_A) items_use((Item)game.equip_a, &a->link, a->world);
   if (in->pressed & BTN_B) items_use((Item)game.equip_b, &a->link, a->world);
@@ -191,8 +218,8 @@ static void render(App *a) {
   float px = hud_scale(w, h);
   items_draw(a->ren, &a->link, &v, px);
   SDL_SetRenderClipRect(a->ren, NULL);
-  if (a->menu.open) menu_draw(a->ren, &a->menu, &a->art, w, h);
-  hud_draw(a->ren, &a->art, w, h, a->in.touch_ui && !a->menu.open);
+  if (a->menu.open) menu_draw(a->ren, &a->menu, &a->art, w, h, a->in.touch_hidden);
+  hud_draw(a->ren, &a->art, w, h, a->in.touch_ui && !a->in.touch_hidden && !a->menu.open);
   if (a->banner_frames && !a->menu.open) {
     int t = a->banner_frames, since = BANNER_FRAMES - t;
     float alpha = since < BANNER_FADE ? (float)since / BANNER_FADE : t < BANNER_FADE ? (float)t / BANNER_FADE : 1.0f;
@@ -224,7 +251,7 @@ int main(int argc, char **argv) {
   const char *shot = NULL, *hold = NULL;
   int frames = 0, win_w = 1280, win_h = 720, start_world = -1, menu_page = -1;
   float start_x = -1, start_y = -1, zoom = 1;
-  bool all_items = false, touch = false;
+  bool all_items = false, touch = false, touch_hidden = false;
   int aspect = ASPECT_FILL;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
@@ -238,6 +265,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--menu") && i + 1 < argc) menu_page = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--all-items")) all_items = true;
     else if (!strcmp(argv[i], "--touch")) touch = true;
+    else if (!strcmp(argv[i], "--touch-hidden")) touch_hidden = true;
   }
   SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight Portrait");
   SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");   // back opens the menu instead of quitting
@@ -254,6 +282,8 @@ int main(int argc, char **argv) {
   if (!SDL_CreateWindowAndRenderer("Oracles One", win_w, win_h, flags, &a.win, &a.ren)) { SDL_Log("window: %s", SDL_GetError()); return 1; }
   if (!shot) SDL_SetRenderVSync(a.ren, 1);
   input_init();
+  settings_load(&a);
+  if (touch_hidden) a.in.touch_hidden = true;
   SDL_DisableScreenSaver();   // keeps a phone or handheld awake while playing with a controller
   if (!image_load(a.ren, "metatiles.rgba", &a.atlas) || !image_load(a.ren, "link.rgba", &a.link_sheet) ||
       !hud_art_load(a.ren, &a.art) ||
@@ -282,6 +312,11 @@ int main(int argc, char **argv) {
     SDL_GetWindowSizeInPixels(a.win, &w, &h);
     while (SDL_PollEvent(&ev)) {
       input_event(&a.in, &ev, w, h);
+      if (a.menu.open && ev.type == SDL_EVENT_FINGER_DOWN) {
+        SDL_FRect sw = menu_touch_switch(w, h);
+        SDL_FPoint p = {ev.tfinger.x * (float)w, ev.tfinger.y * (float)h};
+        if (SDL_PointInRectFloat(&p, &sw)) toggle_touch(&a);
+      }
       if (ev.type == SDL_EVENT_WILL_ENTER_BACKGROUND || ev.type == SDL_EVENT_TERMINATING) game_save();
     }
     Uint64 now = SDL_GetTicksNS();

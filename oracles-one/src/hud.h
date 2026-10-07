@@ -31,4 +31,6 @@ typedef struct {
 // page, like the originals' Select moves between subscreens. A/B equip the highlighted item.
 void menu_open(Menu *m, WorldId world);
 void menu_update(Menu *m, Uint32 pressed);
-void menu_draw(SDL_Renderer *ren, const Menu *m, const HudArt *art, int win_w, int win_h);
+void menu_draw(SDL_Renderer *ren, const Menu *m, const HudArt *art, int win_w, int win_h, bool touch_hidden);
+// The "TOUCH CONTROLS" switch under the page, in window pixels (tap it to toggle).
+SDL_FRect menu_touch_switch(int win_w, int win_h);

@@ -160,16 +160,33 @@ static void draw_page(SDL_Renderer *ren, const Menu *m, const HudArt *art, Page 
   }
 }
 
-void menu_draw(SDL_Renderer *ren, const Menu *m, const HudArt *art, int win_w, int win_h) {
+// The page at a whole-pixel scale, with room above it for the touch-controls switch (between the
+// hearts and the A/B badges) and below it for the on-screen Select/Start.
+static float page_scale(int win_w, int win_h) {
+  float px = SDL_floorf(SDL_min((float)win_w / PAGE_W, (float)win_h / (PAGE_H + 44)));
+  return px < 1 ? 1 : px;
+}
+static float page_top(int win_h, float px) { return ((float)win_h - (PAGE_H + 44) * px) / 2 + 20 * px; }
+
+SDL_FRect menu_touch_switch(int win_w, int win_h) {
+  float px = page_scale(win_w, win_h);
+  float w = 21 * 8 * px * 0.75f, h = 16 * px * 0.75f;
+  return (SDL_FRect){((float)win_w - w) / 2, page_top(win_h, px) - h - 4 * px, w, h};
+}
+
+void menu_draw(SDL_Renderer *ren, const Menu *m, const HudArt *art, int win_w, int win_h, bool touch_hidden) {
   if (!m->open) return;
-  // the page at a whole-pixel scale, leaving room above it for the hearts like the originals
-  float px = SDL_floorf(SDL_min((float)win_w / PAGE_W, (float)win_h / (PAGE_H + 24)));
-  if (px < 1) px = 1;
-  float pw = PAGE_W * px, ox = ((float)win_w - pw) / 2, oy = ((float)win_h - PAGE_H * px) / 2 + 8 * px;
+  float px = page_scale(win_w, win_h);
+  float pw = PAGE_W * px, ox = ((float)win_w - pw) / 2, oy = page_top(win_h, px);
   fill_rect(ren, 0, 0, (float)win_w, (float)win_h, 0, 0, 0, 200);
   SDL_Rect clip = {(int)ox, 0, (int)pw, win_h};
   SDL_SetRenderClipRect(ren, &clip);
   // the two games' pages sit side by side and slide like the originals' subscreens
   for (int i = 0; i < PAGE_COUNT; i++) draw_page(ren, m, art, m->order[i], ox + (i - m->slide) * pw, oy, px);
   SDL_SetRenderClipRect(ren, NULL);
+  SDL_FRect sw = menu_touch_switch(win_w, win_h);
+  const char *label = touch_hidden ? "TOUCH CONTROLS: OFF" : "TOUCH CONTROLS: ON ";
+  fill_rect(ren, sw.x, sw.y, sw.w, sw.h, 0, 0, 0, 160);
+  float tp = px * 0.75f;
+  draw_game_text(ren, art, label, sw.x + (sw.w - 8 * tp * (float)strlen(label)) / 2, sw.y - 5 * tp, tp);
 }

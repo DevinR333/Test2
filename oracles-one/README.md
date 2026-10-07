@@ -80,10 +80,15 @@ the shoulder buttons zooming.
 
 ### Android APK in one step
 
-`build_apk.bat` (Windows, double-click) or `./build_apk.sh` (macOS/Linux) downloads Java, the
+`Build APK.exe` (Windows, double-click; it runs `build_apk.bat`) or `./build_apk.sh` (macOS/Linux)
+downloads Java, the
 Android SDK and NDK, and the disassembly, builds the game data, and writes `OraclesOne.apk`
-(see `READ-ME-FIRST.txt`). `tools/make_zip.sh` packs the source with both scripts into
+(see `READ-ME-FIRST.txt`). `tools/make_zip.sh` compiles `Build APK.exe` (from
+`tools/launcher/`, with MinGW) and packs it, the source and both scripts into
 `dist/OraclesOne-source.zip`.
+
+The on-screen touch controls can be turned off: in the inventory, tap TOUCH CONTROLS above the
+page or press X/Y (T on a keyboard). The choice is kept in `settings.txt` in the app's folder.
 
 Controllers work over USB or Bluetooth (Xbox, PlayStation, Switch Pro, 8BitDo...), as do
 handhelds' built-in controls (Retroid Pocket, AYN, AYANEO). Face buttons go by their printed
