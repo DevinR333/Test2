@@ -22,7 +22,10 @@ or emulates the hardware.
   cursor and font. The page of the world you're in comes first: Seasons' page in Holodrum,
   Ages' page in Labrynna. Select slides to the other one, and A or B equips the highlighted
   item.
-- **Always a linked game**, starting from the first save.
+- **A normal game from the start**, not a linked one.
+- **Linked secrets without typing** (`src/secrets.c`). Once someone tells you a secret, walk up to
+  the person who takes it and they recognise it and give their reward. All 20 originals' secrets
+  are there, with their rewards taken from the original scripts.
 - **Floating HUD** like *The Minish Cap*: hearts at top left, B and A at top right, rupees at
   bottom right. There's no status bar.
 - **Place names.** Walking into a new area fades its name in and out, using the names the
@@ -49,8 +52,9 @@ inventory work. Most of the game itself isn't in yet:
 | Link walking, the originals' tile collision, sliding around corners | Ledges, holes, water, stairs, bushes and rocks |
 | The two town houses' doors, in both directions | Sprites for NPCs, enemies and Seasons' Maku Tree |
 | Shared hearts, rupees and items; extra hearts become rupees (tested) | Enemies, NPCs, scripts, text, chests, shops |
-| Both games' original item pages, A/B equip, floating HUD | The other subscreens (rings, essences, map), linked secrets that NPCs recognise when you walk up to them, final boss |
-| Roc's Feather and Cape jumps, Rod of Seasons, Magnetic Gloves polarity | Swinging the sword with its real animation; the other items' effects |
+| Both games' original item pages, A/B equip, floating HUD | The other subscreens (rings, essences, map), final boss |
+| The 20 secrets, their rewards and how they're recognised (tested) | The NPCs who tell and take them |
+| Roc's Feather and Cape jumps, Rod of Seasons, Magnetic Gloves polarity | Every other item's effect (sword, boomerang, bombs, seeds, Switch Hook, Cane, Shovel, Bracelet, Harp...). Each is one piece of code for both worlds, written as the objects it acts on go in |
 | Keyboard, gamepad, touch and pinch zoom, any aspect ratio | Sound and music |
 
 `--all-items` gives every item of both games, for testing.

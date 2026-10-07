@@ -48,7 +48,8 @@ typedef struct {
   uint8_t equip_a, equip_b;
   // ammunition and collectables, one count whichever world they were found in
   uint8_t seeds[5];               // ember, scent, pegasus, gale, mystery
-  uint8_t bombs, bombchus;
+  uint8_t bombs, bomb_max, bombchus;
+  bool biggoron_sword;
   uint8_t gasha_seeds;
   uint16_t ore_chunks;
   // rings: both games' 64 rings are the same set, so one collection and one ring box
@@ -57,10 +58,10 @@ typedef struct {
   uint8_t ring_box[5];            // ring ids, 0xff empty
   uint8_t ring_worn;              // 0xff none
   // story
-  bool linked;                    // always a linked game
+  bool linked;                    // a linked game (new files start as a normal game)
   uint8_t essences[PAGE_COUNT];   // bit per essence (8 per game)
-  uint32_t secrets_earned;        // a bit per linked secret: an NPC on the other side recognises it
-  uint32_t secrets_told;
+  uint32_t secrets_earned;        // a bit per Secret heard: its taker recognises it (secrets.h)
+  uint32_t secrets_told;          // a bit per Secret whose reward Link has had
   // where Link is
   uint8_t world;
   float x, y;

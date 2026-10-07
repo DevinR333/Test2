@@ -1,5 +1,6 @@
 // Checks the shared-state rules: hearts and rupees are one pool, extra hearts turn into rupees.
 #include "../src/game.h"
+#include "../src/secrets.h"
 #include <stdio.h>
 
 static int failures;
@@ -7,7 +8,7 @@ static int failures;
 
 int main(void) {
   game_new();
-  CHECK(game.linked);
+  CHECK(!game.linked);
   CHECK(game.max_hearts == 3 && game.health == 12);
 
   // pieces of heart make a container every fourth piece
@@ -43,6 +44,21 @@ int main(void) {
   CHECK(!game_all_essences());
   game.essences[PAGE_AGES] = 0xff;
   CHECK(game_all_essences());
+
+  // secrets: hearing one is enough, its taker recognises it and rewards once
+  game_new();
+  CHECK(!secret_redeem(SECRET_FAIRY));             // not heard yet
+  secret_hear(SECRET_FAIRY);
+  CHECK(secret_redeem(SECRET_FAIRY) && game.max_hearts == 4);
+  CHECK(!secret_redeem(SECRET_FAIRY) && game.max_hearts == 4);
+  secret_hear(SECRET_KING_ZORA);
+  CHECK(secret_redeem(SECRET_KING_ZORA) && game.item_level[ITEM_SWORD] == 2);
+  secret_hear(SECRET_MAMAMU);
+  CHECK(secret_redeem(SECRET_MAMAMU) && (game.rings_owned >> 0x21 & 1));
+  secret_hear(SECRET_PIRATE);
+  CHECK(secret_redeem(SECRET_PIRATE) && game.bomb_max == 20);
+  secret_hear(SECRET_RUUL);
+  CHECK(secret_redeem(SECRET_RUUL) && game.ring_box_size == 3);
 
   printf(failures ? "%d failures\n" : "all passed\n", failures);
   return failures != 0;

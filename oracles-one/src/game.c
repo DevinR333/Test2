@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SAVE_VERSION 1
+#define SAVE_VERSION 2
 
 GameState game;
 
@@ -48,7 +48,8 @@ static const char *path(void) {
 void game_new(void) {
   memset(&game, 0, sizeof game);
   game.version = SAVE_VERSION;
-  game.linked = true;           // every file is a linked game from the start
+  game.linked = false;          // a normal game from the start
+  game.bomb_max = 10;
   game.max_hearts = 3;
   game.health = 3 * 4;
   game.world = WORLD_HOLODRUM;

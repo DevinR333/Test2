@@ -25,7 +25,7 @@ if(NOT SDL3_FOUND)
   FetchContent_MakeAvailable(SDL3)
 endif()
 
-set(SOURCES src/main.c src/gfx.c src/world.c src/link.c src/game.c src/input.c src/hud.c src/items.c)
+set(SOURCES src/main.c src/gfx.c src/world.c src/link.c src/game.c src/input.c src/hud.c src/items.c src/secrets.c)
 
 if(ANDROID)
   add_library(main SHARED ${SOURCES})      # SDLActivity loads libmain.so
@@ -44,7 +44,7 @@ endif()
 
 if(NOT ANDROID)
   enable_testing()
-  add_executable(test_game tests/test_game.c src/game.c)
+  add_executable(test_game tests/test_game.c src/game.c src/secrets.c)
   target_link_libraries(test_game PRIVATE SDL3::SDL3)
   add_test(NAME game COMMAND test_game)
 endif()
