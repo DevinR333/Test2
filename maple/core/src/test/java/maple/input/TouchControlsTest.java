@@ -71,8 +71,16 @@ public class TouchControlsTest {
         tap(t, t.toolCenter("Smaller"));
         tap(t, t.toolCenter("Smaller"));
         assertTrue("smaller", ctrl.size < size);
-        tap(t, t.toolCenter("Fade"));
-        assertTrue("faded", ctrl.alpha < 1f);
+        assertNull("no Fade button any more", t.toolCenter("Fade"));
+        float[] half = t.sliderPoint(0.5f);
+        t.touchDown(0, half[0], half[1]);
+        t.touchUp(0, half[0], half[1]);
+        assertEquals("slider: half", 0.5f, ctrl.alpha, 0.03f);
+        float[] zero = t.sliderPoint(0f);
+        t.touchDown(0, half[0], half[1]);
+        t.touchDragged(0, zero[0] - 30, zero[1]);
+        t.touchUp(0, zero[0] - 30, zero[1]);
+        assertEquals("slider dragged to fully invisible", 0f, ctrl.alpha, 0.001f);
 
         // rebind to L-Click through the key picker
         tap(t, t.toolCenter("Key"));
@@ -160,5 +168,39 @@ public class TouchControlsTest {
         t.touchUp(0, c[0], c[1]);
         assertEquals(TouchControls.RIGHT_CLICK, fired[0]);
         assertFalse("a mouse button is not a key", t.held(TouchControls.RIGHT_CLICK));
+    }
+
+    @Test
+    public void invisibleControlsStillWorkAndDiagonalsMoveYou() {
+        Map<String, Object> store = new HashMap<>();
+        TouchControls t = fresh(store, 1067);
+        t.editing = true;
+        // nothing selected: the slider sets every control, down to invisible
+        float[] zero = t.sliderPoint(0f);
+        t.touchDown(0, zero[0], zero[1]);
+        t.touchUp(0, zero[0], zero[1]);
+        for (TouchControls.Item it : t.items) assertEquals("all invisible", 0f, it.alpha, 0.001f);
+        tap(t, t.toolCenter("Done"));
+        assertFalse(t.editing);
+        // an invisible button still presses its key
+        TouchControls.Item jump = null;
+        for (TouchControls.Item it : t.items) if (!it.stick && it.slot >= 0 && it.slot < 90) { jump = it; break; }
+        assertNotNull(jump);
+        float[] c = t.center(jump);
+        assertTrue("touch taken", t.touchDown(1, c[0], c[1]));
+        assertTrue("key held", t.held(jump.slot));
+        t.touchUp(1, c[0], c[1]);
+        // the stick pushed up and to the right (about 60 degrees up) still moves right
+        TouchControls.Item s = stick(t);
+        float[] sc = t.center(s);
+        float r = t.radius(s);
+        t.touchDown(2, sc[0], sc[1]);
+        t.touchDragged(2, sc[0] + r * 0.45f, sc[1] - r * 0.8f);
+        assertTrue("right while pushing up", t.right());
+        assertTrue("and up", t.up());
+        t.touchUp(2, sc[0], sc[1]);
+        // and it survives a restart
+        TouchControls again = fresh(store, 1067);
+        for (TouchControls.Item it : again.items) assertEquals("saved", 0f, it.alpha, 0.001f);
     }
 }

@@ -33,6 +33,6 @@ public final class Foothold {
 
     /** A wall that overlaps the vertical range [top, bottom]. */
     public boolean isBlocking(int top, int bottom) {
-        return isWall() && t() <= bottom && b() >= top;
+        return id != 0 && isWall() && t() <= bottom && b() >= top; // id 0 is "no foothold", not a wall at (0, 0)
     }
 }

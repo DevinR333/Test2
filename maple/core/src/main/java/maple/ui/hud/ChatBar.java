@@ -21,6 +21,10 @@ public final class ChatBar extends Widget {
     private final Ui ui;
     private final List<String> lines = new ArrayList<>();
     private final List<Integer> colors = new ArrayList<>();
+    private final List<Long> times = new ArrayList<>();
+    private long clock;
+    /** Collapsed chat: new lines show above the bar for a while, then fade (the log keeps them). */
+    private static final long SHOW = 8000, FADE = 1500;
     private boolean expanded;
     private int expandedHeight = 70;
     private int scroll; // lines scrolled up from the newest
@@ -97,8 +101,16 @@ public final class ChatBar extends Widget {
     public void copyLog(ChatBar other) {
         lines.addAll(other.lines);
         colors.addAll(other.colors);
+        times.addAll(other.times);
+        clock = other.clock;
         expanded = other.expanded;
         updateButtons();
+    }
+
+    @Override
+    public void update(long ms) {
+        super.update(ms);
+        clock += ms;
     }
 
     public void toggleExpanded() {
@@ -110,10 +122,12 @@ public final class ChatBar extends Widget {
         for (String part : text.split("\n")) {
             lines.add(part);
             colors.add(color);
+            times.add(clock);
         }
         while (lines.size() > MAX_LINES) {
             lines.remove(0);
             colors.remove(0);
+            times.remove(0);
         }
         scroll = 0;
     }
@@ -200,8 +214,17 @@ public final class ChatBar extends Widget {
         int start = Math.max(0, end - rows);
         float y = top + (rows - (end - start)) * 13;
         for (int i = start; i < end; i++) {
-            if (!expanded) g.outlined(lines.get(i), 6, y, 12, false, colors.get(i), 0xA0000000);
-            else g.text(lines.get(i), 6, y, 12, false, colors.get(i));
+            if (!expanded) {
+                long age = clock - times.get(i);
+                if (age < SHOW) {
+                    float a = age < SHOW - FADE ? 1f : (SHOW - age) / (float) FADE;
+                    int alpha = Math.max(0, Math.min(255, (int) (a * 255)));
+                    int color = (colors.get(i) & 0xFFFFFF) | (alpha << 24);
+                    g.outlined(lines.get(i), 6, y, 12, false, color, ((int) (alpha * 0xA0 / 255f)) << 24);
+                }
+            } else {
+                g.text(lines.get(i), 6, y, 12, false, colors.get(i));
+            }
             y += 13;
         }
         drawChildren(g);

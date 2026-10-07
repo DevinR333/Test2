@@ -2078,12 +2078,50 @@ public final class World {
 
     /** Quest.wz pages one after another (Prev/Next); the last one asks (accept/decline) or just ends. */
     private void questPages(int npcId, List<String> pages, int i, boolean ask, Runnable done, Runnable declined) {
+        questPages(npcId, 0, -1, pages, i, ask, done, declined);
+    }
+
+    /**
+     * Plays Say.img pages of quest q's stage. A page with choices (#L) is a menu; when
+     * Say.img/q/stage/stop/<page> has an "answer" it is a quiz: the right choice (answer - 1) goes on,
+     * a wrong one shows that choice's reply from the same node and ends the talk.
+     */
+    private void questPages(int npcId, int q, int stage, List<String> pages, int i, boolean ask, Runnable done, Runnable declined) {
         if (pages.isEmpty()) {
             if (done != null) done.run();
             return;
         }
         boolean last = i == pages.size() - 1;
-        NpcTalk t = localTalk(npcId, last && ask ? 0x0C : 0, pages.get(i), i > 0, !last);
+        String page = pages.get(i);
+        boolean choices = page.contains("#L");
+        Runnable next = () -> {
+            if (last) {
+                if (done != null) done.run();
+            } else {
+                questPages(npcId, q, stage, pages, i + 1, ask, done, declined);
+            }
+        };
+        if (choices) {
+            NpcTalk t = localTalk(npcId, 4, page, false, false);
+            t.local = (action, selection, text) -> {
+                if (action != 1) {
+                    if (last && ask && declined != null) declined.run();
+                    return;
+                }
+                WzNode quiz = stage < 0 ? WzNode.MISSING : wz.get("Quest/Say.img/" + q + "/" + stage + "/stop/" + i);
+                int answer = quiz.getInt("answer", 0);
+                if (answer > 0 && selection != answer - 1) {
+                    String wrong = quiz.getString(Integer.toString(selection), "");
+                    if (wrong.isEmpty()) wrong = "That's not right. Think about it and talk to me again.";
+                    questPages(npcId, java.util.Collections.singletonList(wrong), 0, false, null, null);
+                    return;
+                }
+                next.run();
+            };
+            showLocal(t);
+            return;
+        }
+        NpcTalk t = localTalk(npcId, last && ask ? 0x0C : 0, page, i > 0, !last);
         t.local = (action, selection, text) -> {
             if (last && ask) {
                 if (action == 1) {
@@ -2094,13 +2132,9 @@ public final class World {
                 return;
             }
             if (action == 1) {
-                if (last) {
-                    if (done != null) done.run();
-                } else {
-                    questPages(npcId, pages, i + 1, ask, done, declined);
-                }
+                next.run();
             } else if (action == 0 && i > 0) {
-                questPages(npcId, pages, i - 1, ask, done, declined);
+                questPages(npcId, q, stage, pages, i - 1, ask, done, declined);
             }
         };
         showLocal(t);
@@ -2112,7 +2146,7 @@ public final class World {
             return;
         }
         boolean ask = quests.asks(q);
-        questPages(n.id, quests.say(q, 0, ""), 0, ask, () -> {
+        questPages(n.id, q, 0, quests.say(q, 0, ""), 0, ask, () -> {
             questAction(1, q, n.id, 0);
             List<String> yes = quests.say(q, 0, "yes");
             if (!yes.isEmpty()) questPages(n.id, yes, 0, false, null, null);
@@ -2136,7 +2170,7 @@ public final class World {
         List<String> pages = quests.say(q, 1, "");
         Runnable complete = () -> questAction(2, q, n.id, -1);
         if (pages.isEmpty()) complete.run();
-        else questPages(n.id, pages, 0, false, complete, null);
+        else questPages(n.id, q, 1, pages, 0, false, complete, null);
     }
 
     /** The NPC's own conversation (its server script, shop, storage...). */

@@ -315,4 +315,69 @@ public class FootholdPhysicsTest {
         }
         return null;
     }
+
+    /**
+     * Walking to the end of every platform on every map: you either step off it or stop at a wall that
+     * really rises above your feet (more than a few pixels). Prints and fails on places you get stuck.
+     */
+    @Test
+    public void noLedgeStopsYouWithoutAWall() {
+        Wz wz = wz();
+        int ends = 0;
+        StringBuilder stuck = new StringBuilder();
+        int stuckCount = 0;
+        for (int folder = 0; folder <= 9; folder++) {
+            for (maple.wz.WzNode img : wz.get("Map/Map/Map" + folder).children()) {
+                maple.wz.WzNode fhNode = img.get("foothold");
+                if (!fhNode.exists() || fhNode.childCount() == 0) continue;
+                FootholdTree t = new FootholdTree(fhNode);
+                for (Foothold fh : t.all()) {
+                    if (fh.isWall() || fh.r() - fh.l() < 8 || Math.abs(fh.slope()) > 0.9) continue;
+                    for (int dir : new int[]{-1, 1}) {
+                        PhysicsObject p = new PhysicsObject();
+                        double sx = dir > 0 ? Math.max(fh.l() + 2, fh.r() - 30) : Math.min(fh.r() - 2, fh.l() + 30);
+                        p.setPosition(sx, fh.groundBelow(sx) - 2);
+                        for (int i = 0; i < 20 && !p.onGround; i++) t.move(p);
+                        if (!p.onGround || p.fhid != fh.id) continue;
+                        double lastX = p.x;
+                        int still = 0;
+                        boolean fell = false;
+                        for (int i = 0; i < 2000; i++) {
+                            p.walkDir = dir;
+                            t.move(p);
+                            if (!p.onGround) { fell = true; break; }
+                            if (Math.abs(p.x - lastX) < 0.01) still++;
+                            else still = 0;
+                            lastX = p.x;
+                            if (still > 60) break;
+                            if (p.x <= t.wallLeft + 1 || p.x >= t.wallRight - 1) break;
+                        }
+                        ends++;
+                        if (fell || still <= 60) continue;
+                        if (p.x <= t.wallLeft + 2 || p.x >= t.wallRight - 2) continue; // the map's own side
+                        // stopped: by what? a wall attached to the platform you stand on
+                        Foothold on = t.get(p.fhid);
+                        double rise = 0;
+                        for (int id : new int[]{on.prev, on.next}) {
+                            if (id == 0) continue;
+                            Foothold w = t.get(id);
+                            if (w.isWall()) rise = Math.max(rise, p.y - w.t());
+                            if (w.isWall()) for (int id2 : new int[]{w.prev, w.next}) {
+                                if (id2 == 0) continue;
+                                Foothold w2 = t.get(id2);
+                                if (w2.isWall()) rise = Math.max(rise, p.y - w2.t());
+                            }
+                        }
+                        if (rise >= 1) continue; // a wall reaching above your feet stops you (v83: any wall in the 50px above them)
+                        stuckCount++;
+                        if (stuckCount <= 40) stuck.append(img.name).append(" fh ").append(on.id).append(" dir ").append(dir)
+                                .append(" at x=").append((int) p.x).append(" y=").append((int) p.y).append(" rise ").append(rise)
+                                .append(" prev ").append(on.prev).append(" next ").append(on.next).append('\n');
+                    }
+                }
+            }
+        }
+        System.out.println("ends walked " + ends + ", stuck " + stuckCount + "\n" + stuck);
+        assertEquals("stuck at " + stuckCount + " ledges:\n" + stuck, 0, stuckCount);
+    }
 }

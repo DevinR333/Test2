@@ -25,6 +25,8 @@ public final class MiniMapWindow extends Window {
     private int fieldId = -1;
     private Sprite canvas;
     private Animation mark;
+    private float followX = Float.NaN, followY = Float.NaN, groundY = Float.NaN;
+    private int followField = -2;
     private int centerX, centerY, mag, mapW, mapH;
     private String mapName = "", street = "";
     private Button btMap, btMax, btMin;
@@ -176,8 +178,20 @@ public final class MiniMapWindow extends Window {
         }
         if (canvas == null) return;
         float px = (float) world.player.phys.x, py = (float) world.player.phys.y;
-        int cropX = crop(px, centerX, mapW, (int) viewW, (int) canvas.w);
-        int cropY = crop(py, centerY, mapH, (int) viewH, (int) canvas.h);
+        // the view follows the player steadily: only when near its edges, and not up and down with jumps
+        if (world.player.phys.onGround || Float.isNaN(groundY)) groundY = py;
+        float halfW = ((int) viewW << mag) / 2f, halfH = ((int) viewH << mag) / 2f;
+        if (Float.isNaN(followX) || fieldId != followField) {
+            followX = px;
+            followY = groundY;
+            followField = fieldId;
+        }
+        if (px < followX - halfW / 2) followX = px + halfW / 2;
+        if (px > followX + halfW / 2) followX = px - halfW / 2;
+        if (groundY < followY - halfH / 2) followY = groundY + halfH / 2;
+        if (groundY > followY + halfH / 2) followY = groundY - halfH / 2;
+        int cropX = crop(followX, centerX, mapW, (int) viewW, (int) canvas.w);
+        int cropY = crop(followY, centerY, mapH, (int) viewH, (int) canvas.h);
         g.part(canvas, viewX, viewY, cropX, cropY, (int) Math.min(viewW, canvas.w - cropX), (int) Math.min(viewH, canvas.h - cropY));
         Sprite npcM = ui.assets.sprite(ui.assets.wz.get("Map/MapHelper.img/minimap/npc"));
         Sprite portalM = ui.assets.sprite(ui.assets.wz.get("Map/MapHelper.img/minimap/portal"));

@@ -650,12 +650,63 @@ public class OfflineExtrasTest {
         if (warp != null) enterMap(warp[0]);
     }
 
+    /** A quiz quest (Rain's Maple Quiz 1): the choices can be picked; a wrong one is answered, the right one completes it. */
+    @Test(timeout = 120000)
+    public void quizQuestChoices() throws Exception {
+        final int Q = 1009, RAIN = 12101;
+        client.Character chr = server();
+        warp = null;
+        chr.changeMap(1000000);
+        pump(() -> warp != null);
+        enterMap(warp[0]);
+        stepUntil(() -> npc(RAIN) != null, 5000);
+        server.quest.Quest.getInstance(Q).forceStart(chr, RAIN);
+        stepUntil(() -> world.quests.state(Q) == 1, 5000);
+        assertEquals(1, world.quests.state(Q));
+        player.spawn(npc(RAIN).x, npc(RAIN).y - 10);
+        for (int i = 0; i < 50; i++) step();
+        sendMove();
+        for (int i = 0; i < 50; i++) step();
+        // wrong answer: K
+        openQuest(npc(RAIN), world.quests.name(Q));
+        stepUntil(() -> world.talk != null && world.talk.type == 4, 3000);
+        assertNotNull("the question", world.talk);
+        assertEquals("a menu: the choices can be picked", 4, world.talk.type);
+        assertTrue(world.talk.text, world.talk.text.contains("#L1#"));
+        world.answer(1, 1, null);
+        assertNotNull("Rain answers the wrong choice", world.talk);
+        assertTrue(world.talk.text, world.talk.text.startsWith("K is for the Skill Window"));
+        world.answer(1, 0, null);
+        for (int i = 0; i < 50; i++) step();
+        assertEquals("still in progress", 1, world.quests.state(Q));
+        // right answer: I
+        openQuest(npc(RAIN), world.quests.name(Q));
+        stepUntil(() -> world.talk != null && world.talk.type == 4, 3000);
+        world.answer(1, 0, null);
+        assertNotNull(world.talk);
+        assertTrue(world.talk.text, world.talk.text.startsWith("That's right"));
+        assertTrue("an OK to finish", !world.talk.next);
+        world.answer(1, 0, null);
+        stepUntil(() -> world.quests.state(Q) == 2, 5000);
+        assertEquals("completed", 2, world.quests.state(Q));
+    }
+
     static Npc npc(int id) {
         for (Npc n : world.npcs.values()) if (n.id == id) return n;
         return null;
     }
 
     /** Taps through a client-side quest conversation: picks menu entry `choice`, then Next/Accept/OK. */
+    /** Picks the quest in the NPC's quest menu and stops there. */
+    static void openQuest(Npc n, String questName) {
+        world.talkTo(n);
+        NpcTalk menu = world.talk;
+        assertNotNull("quest menu shown", menu);
+        java.util.regex.Matcher m = java.util.regex.Pattern.compile("#L(\\d+)##b" + java.util.regex.Pattern.quote(questName)).matcher(menu.text);
+        assertTrue("quest listed: " + menu.text, m.find());
+        world.answer(1, Integer.parseInt(m.group(1)), null);
+    }
+
     static void talkThrough(Npc n, String questName) throws InterruptedException {
         world.talkTo(n);
         NpcTalk menu = world.talk;

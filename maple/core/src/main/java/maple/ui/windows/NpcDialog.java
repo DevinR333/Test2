@@ -106,7 +106,7 @@ public final class NpcDialog extends Window {
             case 0:
                 if (talk.prev) button("BtPrev", edge - 122, h - 77, () -> reply(0, 0, null));
                 if (talk.next) button("BtNext", edge - 68, h - 77, () -> reply(1, 0, null));
-                if (!talk.prev && !talk.next) button("BtOK", w - 54, h - 26, () -> reply(1, 0, null));
+                if (!talk.next) button("BtOK", w - 54, h - 26, () -> reply(1, 0, null)); // last page (also after Prev)
                 break;
             case 1:
                 button("BtYes", w - 108, h - 26, () -> reply(1, 0, null));

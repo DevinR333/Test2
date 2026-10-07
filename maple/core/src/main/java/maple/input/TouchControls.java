@@ -14,7 +14,7 @@ import java.util.List;
 /**
  * On-screen controls for touch screens: an analog stick for the arrow keys and round buttons that each
  * press one v83 key slot, showing the icon of whatever that key is bound to. The gear button opens the
- * editor: drag to move, and Key / Bigger / Smaller / Fade / Delete / Add / Reset. Each control is anchored
+ * editor: drag to move, Key / Bigger / Smaller / Delete / Add / Reset, and an opacity slider (0% = invisible). Each control is anchored
  * to its nearer side of the screen: its distance from that side and its size are kept in screen
  * heights, its height as a fraction, so it keeps its shape and spacing on any screen (4:3 or wide).
  * Besides keys, a button can be a mouse action (left/right/middle click, wheel up/down) done at the
@@ -175,8 +175,10 @@ public final class TouchControls {
         return slot >= 0 && slot < 90 && held[slot];
     }
 
-    public boolean left() { return stickX < -0.4f; }
-    public boolean right() { return stickX > 0.4f; }
+    // a diagonal push (up-right while jumping) still moves you sideways: only about 75 degrees off
+    // the horizontal and beyond counts as straight up or down
+    public boolean left() { return stickX < -0.25f; }
+    public boolean right() { return stickX > 0.25f; }
     public boolean up() { return stickY < -0.5f; }
     public boolean down() { return stickY > 0.5f; }
 
@@ -223,6 +225,10 @@ public final class TouchControls {
     public boolean touchDragged(int pointer, float ux, float uy) {
         if (pointer >= owner.length) return false;
         if (editing) {
+            if (pointer == sliderPointer) {
+                slide(ux);
+                return true;
+            }
             if (pointer == dragPointer && selected >= 0) {
                 Item it = items.get(selected);
                 float nx = Math.max(left, Math.min(left + width, ux - dragDX));
@@ -250,6 +256,7 @@ public final class TouchControls {
         if (pointer >= owner.length) return false;
         if (editing) {
             if (pointer == dragPointer) dragPointer = -1;
+            if (pointer == sliderPointer) sliderPointer = -1;
             return true;
         }
         Item it = owner[pointer];
@@ -290,7 +297,7 @@ public final class TouchControls {
     private String[] toolbar() {
         if (selected >= 0) {
             boolean stick = items.get(selected).stick;
-            return stick ? new String[]{"Bigger", "Smaller", "Fade", "Delete", "Done"} : new String[]{"Key", "Bigger", "Smaller", "Fade", "Delete", "Done"};
+            return stick ? new String[]{"Bigger", "Smaller", "Delete", "Done"} : new String[]{"Key", "Bigger", "Smaller", "Delete", "Done"};
         }
         for (Item it : items) if (it.stick) return new String[]{"Add button", "Reset", "Done"};
         return new String[]{"Add button", "Add stick", "Reset", "Done"};
@@ -304,6 +311,38 @@ public final class TouchControls {
     }
 
     private float toolY() { return top + 8; }
+
+    // ---- opacity slider (under the toolbar): the selected control, or every control when none is ----
+    private static final float SLIDER_W = 420, SLIDER_H = 30;
+    private int sliderPointer = -1;
+
+    private float sliderX() { return left + (width - SLIDER_W) / 2; }
+
+    private float sliderY() { return toolY() + TOOL_H + 40; }
+
+    private boolean onSlider(float ux, float uy) {
+        return ux >= sliderX() - 14 && ux < sliderX() + SLIDER_W + 14 && uy >= sliderY() - 8 && uy < sliderY() + SLIDER_H + 8;
+    }
+
+    /** Opacity shown on the slider: the selected control's, else the first control's. */
+    public float sliderValue() {
+        Item it = selectedItem();
+        if (it == null && !items.isEmpty()) it = items.get(0);
+        return it == null ? 1f : it.alpha;
+    }
+
+    private void slide(float ux) {
+        float v = Math.max(0, Math.min(1, (ux - sliderX()) / SLIDER_W));
+        v = Math.round(v * 20) / 20f; // 5% steps
+        Item it = selectedItem();
+        if (it != null) it.alpha = v;
+        else for (Item i : items) i.alpha = v;
+    }
+
+    /** Point on the slider for an opacity (tests). */
+    public float[] sliderPoint(float value) {
+        return new float[]{sliderX() + value * SLIDER_W, sliderY() + SLIDER_H / 2};
+    }
 
     private void editorDown(int pointer, float ux, float uy) {
         if (picker) {
@@ -319,6 +358,11 @@ public final class TouchControls {
             }
             picker = false;
             addAfterPick = false;
+            return;
+        }
+        if (onSlider(ux, uy)) {
+            sliderPointer = pointer;
+            slide(ux);
             return;
         }
         String[] tools = toolbar();
@@ -353,9 +397,6 @@ public final class TouchControls {
                 break;
             case "Smaller":
                 if (it != null) it.size = Math.max(0.05f, it.size / 1.15f);
-                break;
-            case "Fade":
-                if (it != null) it.alpha = it.alpha > 0.9f ? 0.6f : it.alpha > 0.5f ? 0.35f : it.alpha > 0.25f ? 0.15f : 1f;
                 break;
             case "Delete":
                 if (it != null) items.remove(it);
@@ -483,6 +524,8 @@ public final class TouchControls {
             Item it = items.get(i);
             float cx = x(it), cy = y(it), r = r(it);
             float a = it.alpha;
+            if (editing) a = Math.max(a, 0.2f); // invisible controls stay findable in the editor
+            else if (a <= 0.001f) continue; // fully invisible: works, draws nothing
             boolean pressed = false;
             for (Item o : owner) if (o == it) pressed = true;
             boolean sel = editing && i == selected;
@@ -529,7 +572,19 @@ public final class TouchControls {
             g.text(tools[i], tx, toolY() + 10, TOOL_W, Align.center, false, 14, true, 0xFFFFFFFF);
         }
         if (selected < 0 && !picker) {
-            g.text("Drag a control to move it. Tap one to change its key, size or fade.", left, toolY() + TOOL_H + 8, width, Align.center, false, 14, false, 0xFFFFFFFF);
+            g.text("Drag a control to move it. Tap one to change its key or size.", left, toolY() + TOOL_H + 8, width, Align.center, false, 14, false, 0xFFFFFFFF);
+        }
+        if (!picker) {
+            float v = sliderValue();
+            String label = (selected >= 0 ? "Opacity of this control: " : "Opacity of all controls: ")
+                    + Math.round(v * 100) + "%" + (v <= 0.001f ? " (invisible, still works)" : "");
+            g.text(label, left, sliderY() - 20, width, Align.center, false, 14, true, 0xFFFFFFFF);
+            g.fill(sliderX(), sliderY() + SLIDER_H / 2 - 4, SLIDER_W, 8, 0xE0203040);
+            g.fill(sliderX(), sliderY() + SLIDER_H / 2 - 4, SLIDER_W * v, 8, 0xFFC0D0E0);
+            g.outline(sliderX(), sliderY() + SLIDER_H / 2 - 4, SLIDER_W, 8, 0xFFC0D0E0);
+            float kx = sliderX() + SLIDER_W * v;
+            disc(g, kx, sliderY() + SLIDER_H / 2, 14, 0xFFFFFF, 0.95f);
+            disc(g, kx, sliderY() + SLIDER_H / 2, 11, 0x3A4A5A, 1f);
         }
         if (picker) {
             g.fill(left, top, width, height, 0xC0000000);
