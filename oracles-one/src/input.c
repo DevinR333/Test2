@@ -2,8 +2,13 @@
 #include "gfx.h"
 
 // Keyboard: arrows/WASD move, X = A, Z = B, Enter = Start, Right Shift/Backspace = Select,
-// +/- or the mouse wheel zoom, F2 cycles the aspect ratio. Gamepads use their usual layout
-// (south = A... east = B), shoulders zoom. Touch: d-pad and buttons on screen, pinch to zoom.
+// +/- or the mouse wheel zoom, F2 cycles the aspect ratio. Gamepads (Xbox, PlayStation, Switch,
+// and handhelds' built-in controls such as the Retroid Pocket's, via SDL's controller database):
+// the face buttons go by their printed label, so the button marked A is A whatever the layout
+// (on Nintendo-style handhelds that is exactly the Game Boy's); PlayStation's cross is A and
+// circle B. D-pad or left stick move, Start/Menu is Start, Back/View/Select is Select, the
+// shoulders zoom. Touch: d-pad and buttons on screen, pinch to zoom; they hide while a controller
+// is in use. Android's back button opens the menu.
 
 #define MAX_FINGERS 10
 typedef enum { ROLE_NONE, ROLE_DPAD, ROLE_BUTTON, ROLE_FREE } Role;
@@ -12,7 +17,8 @@ typedef struct { SDL_FingerID id; bool down; float x, y; Role role; Uint32 butto
 static Finger fingers[MAX_FINGERS];
 static Uint32 key_held, pad_held, touch_held, prev_held;
 static float pinch_dist;
-static SDL_Gamepad *pads[4];
+#define MAX_PADS 8
+static SDL_Gamepad *pads[MAX_PADS];
 
 void input_init(void) { SDL_memset(fingers, 0, sizeof fingers); }
 
@@ -24,7 +30,7 @@ static Uint32 key_button(SDL_Scancode sc) {
   case SDL_SCANCODE_RIGHT: case SDL_SCANCODE_D: return BTN_RIGHT;
   case SDL_SCANCODE_X: case SDL_SCANCODE_K: return BTN_A;
   case SDL_SCANCODE_Z: case SDL_SCANCODE_J: return BTN_B;
-  case SDL_SCANCODE_RETURN: case SDL_SCANCODE_ESCAPE: return BTN_START;
+  case SDL_SCANCODE_RETURN: case SDL_SCANCODE_ESCAPE: case SDL_SCANCODE_AC_BACK: return BTN_START;
   case SDL_SCANCODE_RSHIFT: case SDL_SCANCODE_BACKSPACE: case SDL_SCANCODE_TAB: return BTN_SELECT;
   case SDL_SCANCODE_EQUALS: case SDL_SCANCODE_KP_PLUS: return BTN_ZOOM_IN;
   case SDL_SCANCODE_MINUS: case SDL_SCANCODE_KP_MINUS: return BTN_ZOOM_OUT;
@@ -33,14 +39,20 @@ static Uint32 key_button(SDL_Scancode sc) {
   }
 }
 
-static Uint32 pad_button(int b) {
+static Uint32 pad_button(SDL_JoystickID which, int b) {
+  if (b <= SDL_GAMEPAD_BUTTON_NORTH) {
+    switch (SDL_GetGamepadButtonLabel(SDL_GetGamepadFromID(which), (SDL_GamepadButton)b)) {
+    case SDL_GAMEPAD_BUTTON_LABEL_A: case SDL_GAMEPAD_BUTTON_LABEL_CROSS: return BTN_A;
+    case SDL_GAMEPAD_BUTTON_LABEL_B: case SDL_GAMEPAD_BUTTON_LABEL_CIRCLE: return BTN_B;
+    case SDL_GAMEPAD_BUTTON_LABEL_UNKNOWN: return b == SDL_GAMEPAD_BUTTON_SOUTH ? BTN_A : b == SDL_GAMEPAD_BUTTON_EAST ? BTN_B : 0;
+    default: return 0;   // X/Y, square/triangle: free for later (extra item buttons)
+    }
+  }
   switch (b) {
   case SDL_GAMEPAD_BUTTON_DPAD_UP: return BTN_UP;
   case SDL_GAMEPAD_BUTTON_DPAD_DOWN: return BTN_DOWN;
   case SDL_GAMEPAD_BUTTON_DPAD_LEFT: return BTN_LEFT;
   case SDL_GAMEPAD_BUTTON_DPAD_RIGHT: return BTN_RIGHT;
-  case SDL_GAMEPAD_BUTTON_SOUTH: return BTN_A;
-  case SDL_GAMEPAD_BUTTON_EAST: return BTN_B;
   case SDL_GAMEPAD_BUTTON_START: return BTN_START;
   case SDL_GAMEPAD_BUTTON_BACK: return BTN_SELECT;
   case SDL_GAMEPAD_BUTTON_RIGHT_SHOULDER: return BTN_ZOOM_IN;
@@ -104,10 +116,17 @@ void input_event(Input *in, const SDL_Event *ev, int win_w, int win_h) {
   case SDL_EVENT_KEY_DOWN: if (!ev->key.repeat) key_held |= key_button(ev->key.scancode); in->touch_ui = false; break;
   case SDL_EVENT_KEY_UP: key_held &= ~key_button(ev->key.scancode); break;
   case SDL_EVENT_GAMEPAD_ADDED:
-    for (int i = 0; i < 4; i++) if (!pads[i]) { pads[i] = SDL_OpenGamepad(ev->gdevice.which); break; }
+    // also sent at start-up for controllers already there, like a handheld's own buttons
+    for (int i = 0; i < MAX_PADS; i++) if (!pads[i]) { pads[i] = SDL_OpenGamepad(ev->gdevice.which); break; }
+    in->touch_ui = false;
     break;
-  case SDL_EVENT_GAMEPAD_BUTTON_DOWN: pad_held |= pad_button(ev->gbutton.button); in->touch_ui = false; break;
-  case SDL_EVENT_GAMEPAD_BUTTON_UP: pad_held &= ~pad_button(ev->gbutton.button); break;
+  case SDL_EVENT_GAMEPAD_REMOVED:
+    for (int i = 0; i < MAX_PADS; i++)
+      if (pads[i] && SDL_GetGamepadID(pads[i]) == ev->gdevice.which) { SDL_CloseGamepad(pads[i]); pads[i] = NULL; }
+    pad_held = 0;
+    break;
+  case SDL_EVENT_GAMEPAD_BUTTON_DOWN: pad_held |= pad_button(ev->gbutton.which, ev->gbutton.button); in->touch_ui = false; break;
+  case SDL_EVENT_GAMEPAD_BUTTON_UP: pad_held &= ~pad_button(ev->gbutton.which, ev->gbutton.button); break;
   case SDL_EVENT_MOUSE_WHEEL: in->zoom_factor *= ev->wheel.y > 0 ? 1.1f : ev->wheel.y < 0 ? 1.0f / 1.1f : 1.0f; break;
   case SDL_EVENT_FINGER_DOWN: {
     in->touch_ui = true;
@@ -155,7 +174,7 @@ void input_frame(Input *in, int win_w, int win_h) {
     else if (f->role == ROLE_BUTTON) touch_held |= f->button;
   }
   Uint32 axes = 0;
-  for (int i = 0; i < 4; i++) {
+  for (int i = 0; i < MAX_PADS; i++) {
     if (!pads[i]) continue;
     int ax = SDL_GetGamepadAxis(pads[i], SDL_GAMEPAD_AXIS_LEFTX), ay = SDL_GetGamepadAxis(pads[i], SDL_GAMEPAD_AXIS_LEFTY);
     if (ax < -12000) axes |= BTN_LEFT;

@@ -78,7 +78,19 @@ Controls: arrows or WASD move, X is A, Z is B, Enter is Start, Tab or Right Shif
 +/- or the mouse wheel zoom, F2 changes the aspect ratio. Gamepads use their usual layout, with
 the shoulder buttons zooming.
 
-### Android
+### Android APK in one step
+
+`build_apk.bat` (Windows, double-click) or `./build_apk.sh` (macOS/Linux) downloads Java, the
+Android SDK and NDK, and the disassembly, builds the game data, and writes `OraclesOne.apk`
+(see `READ-ME-FIRST.txt`). `tools/make_zip.sh` packs the source with both scripts into
+`dist/OraclesOne-source.zip`.
+
+Controllers work over USB or Bluetooth (Xbox, PlayStation, Switch Pro, 8BitDo...), as do
+handhelds' built-in controls (Retroid Pocket, AYN, AYANEO). Face buttons go by their printed
+label, so A is the button marked A; PlayStation's cross is A. Tested with SDL's virtual pads in
+`tests/test_input.c`.
+
+### Android Studio
 
 Run `tools/build_assets.sh` first. The APK packages `assets/`.
 

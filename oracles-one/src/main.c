@@ -239,8 +239,9 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--all-items")) all_items = true;
     else if (!strcmp(argv[i], "--touch")) touch = true;
   }
-  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) { SDL_Log("SDL_Init: %s", SDL_GetError()); return 1; }
   SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight Portrait");
+  SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");   // back opens the menu instead of quitting
+  if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_GAMEPAD)) { SDL_Log("SDL_Init: %s", SDL_GetError()); return 1; }
   static App a;
   a.zoom = zoom;
   a.aspect = (Aspect)aspect;
@@ -253,6 +254,7 @@ int main(int argc, char **argv) {
   if (!SDL_CreateWindowAndRenderer("Oracles One", win_w, win_h, flags, &a.win, &a.ren)) { SDL_Log("window: %s", SDL_GetError()); return 1; }
   if (!shot) SDL_SetRenderVSync(a.ren, 1);
   input_init();
+  SDL_DisableScreenSaver();   // keeps a phone or handheld awake while playing with a controller
   if (!image_load(a.ren, "metatiles.rgba", &a.atlas) || !image_load(a.ren, "link.rgba", &a.link_sheet) ||
       !hud_art_load(a.ren, &a.art) ||
       !world_load(&a.worlds[WORLD_HOLODRUM], WORLD_HOLODRUM) || !world_load(&a.worlds[WORLD_LABRYNNA], WORLD_LABRYNNA)) {

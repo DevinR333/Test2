@@ -1,0 +1,38 @@
+ORACLES ONE: build the APK for your Android handheld or phone
+==============================================================
+
+This folder holds the game's source. One script turns it into OraclesOne.apk.
+
+WINDOWS
+  1. Install Git:      https://git-scm.com/download/win
+  2. Install Python 3: https://www.python.org/downloads/  (tick "Add python.exe to PATH")
+  3. Unzip this folder somewhere with a short path, e.g. C:\oracles
+  4. Double-click build_apk.bat
+     It downloads Java, the Android SDK/NDK, SDL and the oracles-disasm game data by itself.
+     The first build takes 15-30 minutes and about 6 GB of disk space.
+  5. When it says Done, OraclesOne.apk is in this folder.
+
+MAC / LINUX
+  Install git and Python 3, then run:  ./build_apk.sh
+
+INSTALL ON YOUR DEVICE
+  Copy OraclesOne.apk to the device (USB, SD card or cloud) and open it. Android asks to allow
+  installing from unknown sources; allow it for your file manager.
+  Or with USB debugging on:  adb install -r OraclesOne.apk
+  It runs on arm64 Android 7.0 or newer (Retroid Pocket 2S/3/3+/4/5/Mini/Flip, AYN Odin,
+  AYANEO, Snapdragon 8 Gen 2 phones and the like).
+
+CONTROLS
+  Built-in handheld controls and Bluetooth/USB controllers (Xbox, PlayStation, Switch Pro,
+  8BitDo...) work as soon as they're connected. Face buttons go by their printed letters: the
+  button marked A is A, B is B (PlayStation: cross is A, circle B).
+    D-pad / left stick   move
+    A, B                 the items on A and B
+    Start                inventory (both games' item pages; Select switches page)
+    L / R shoulders      zoom out / in
+  On a touchscreen: on-screen d-pad and buttons; pinch to zoom. They hide while a controller is
+  used. The back button opens the inventory.
+
+This is an early build: both overworlds, the town houses between them, shared hearts, rupees and
+items, and the inventory work; NPCs, enemies, caves and dungeons are not in yet (see README.md).
+Not affiliated with Nintendo or Capcom.
