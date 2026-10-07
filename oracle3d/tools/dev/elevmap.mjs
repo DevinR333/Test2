@@ -12,11 +12,13 @@ const tilePx = (ts, id) => { const p = frames[ts][id]; const ox = (p % 256) * 16
 const models = {};
 const model = (ts) => (models[ts] ||= new TilesetModel((id) => tilePx(ts, id), new Uint8Array(Buffer.from(w.tilesets[ts].collisions, 'base64'))));
 const world = w.worlds[0];
+// season -1: each area in its default season, as the game shows it
+const seasonOf = (r) => (season >= 0 ? season : (w.seasonTable[world.seasons[0][r]?.pack] ?? 0) & 3);
 const map = { mtW: 160, mtH: 128, ids: new Uint8Array(160 * 128), tilesets: new Uint16Array(160 * 128).fill(0xffff) };
 map.models = new Proxy({}, { get: (_, k) => (Number(k) === 0xffff ? null : model(Number(k))) });
 for (let room = 0; room < 256; room++) {
-  const r = world.seasons[season][room]; if (!r) continue;
-  const lay = Buffer.from(r.layout, 'base64');
+  const r = world.seasons[seasonOf(room)][room]; if (!r) continue;
+  const lay = Buffer.from(r.layout, 'base64'); if (lay.every((v) => v === 0x04 || v === 0xf4)) continue;
   for (let y = 0; y < 8; y++) for (let x = 0; x < 10; x++) { const mi = ((room >> 4) * 8 + y) * 160 + (room & 15) * 10 + x; map.ids[mi] = lay[y * 10 + x]; map.tilesets[mi] = r.tileset; }
 }
 const elev = computeElevation(map, (ts) => w.tilesets[ts].collisionMode);

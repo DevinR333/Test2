@@ -582,25 +582,36 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     }
     // Face pixels lie beyond the rim, on the lower ground: find, through the face, the
     // nearest plain ground on the far side (feature transform from that ground).
+    // A face always drops to the lowest ground it touches, so the lowest level claims
+    // the face first; the nearest pixel of that ground supplies the texture.
     const low = new Int32Array(N2).fill(-1);
     {
-      const q3 = [];
-      for (let i = 0; i < N2; i++) if (kind[i] !== P_CLIFF && lvl[i] !== NO_LEVEL) { low[i] = i; q3.push(i); }
-      for (let h = 0; h < q3.length; h++) {
-        const i = q3[h], x = i % ww, y = (i / ww) | 0;
-        const src = low[i], sx = src % ww, sy = (src / ww) | 0;
-        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-          if (!dx && !dy) continue;
-          const X = x + dx, Y = y + dy;
-          if (X < 0 || Y < 0 || X >= ww || Y >= wh) continue;
-          const j = Y * ww + X;
-          if (kind[j] !== P_CLIFF || isRimPx[j]) continue;
-          if (low[j] >= 0) {
-            const o = low[j], ox = o % ww, oy = (o / ww) | 0;
-            if ((ox - X) ** 2 + (oy - Y) ** 2 <= (sx - X) ** 2 + (sy - Y) ** 2) continue;
+      const byLevel = new Map();
+      for (let i = 0; i < N2; i++) {
+        if (kind[i] === P_CLIFF || lvl[i] === NO_LEVEL) continue;
+        if (!byLevel.has(lvl[i])) byLevel.set(lvl[i], []);
+        byLevel.get(lvl[i]).push(i);
+      }
+      for (const lev of [...byLevel.keys()].sort((p, q) => p - q)) {
+        const q3 = [];
+        for (const i of byLevel.get(lev)) { low[i] = i; q3.push(i); }
+        for (let h = 0; h < q3.length; h++) {
+          const i = q3[h], x = i % ww, y = (i / ww) | 0;
+          const src = low[i], sx = src % ww, sy = (src / ww) | 0;
+          for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+            if (!dx && !dy) continue;
+            const X = x + dx, Y = y + dy;
+            if (X < 0 || Y < 0 || X >= ww || Y >= wh) continue;
+            const j = Y * ww + X;
+            if (kind[j] !== P_CLIFF || isRimPx[j]) continue;
+            if (low[j] >= 0) {
+              if (lvl[low[j]] < lev) continue; // claimed by lower ground
+              const o = low[j], ox = o % ww, oy = (o / ww) | 0;
+              if ((ox - X) ** 2 + (oy - Y) ** 2 <= (sx - X) ** 2 + (sy - Y) ** 2) continue;
+            }
+            low[j] = src;
+            q3.push(j);
           }
-          low[j] = src;
-          q3.push(j);
         }
       }
     }
@@ -624,10 +635,14 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         set(x, y, level, o);
         continue;
       }
-      // Face pixel: lower ground at the foot of the wall.
+      // Face pixel: the lower ground at the foot of the wall, textured with that ground
+      // itself (shifted by whole metatiles so its pattern lines up).
       const src = low[i];
-      const level = src >= 0 ? lvl[src] : levelOr(anyLv[i], 0);
-      set(x, y, level, plainFill(x, y, level) || {});
+      if (src < 0) { set(x, y, levelOr(anyLv[i], 0), {}); continue; }
+      const sxp = src % ww, syp = (src / ww) | 0;
+      const dxm = (Math.floor((wx0 + sxp) / 16) - Math.floor((wx0 + x) / 16)) * 16;
+      const dym = (Math.floor((wy0 + syp) / 16) - Math.floor((wy0 + y) / 16)) * 16;
+      set(x, y, lvl[src] + (DEPTH[cls[src]] || 0), { ox: dxm, oy: dym });
     }
   }
   // ---- column pass (all window columns, so the row pass has its inputs) ----

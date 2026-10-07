@@ -12,11 +12,13 @@ const tilePx = (ts, id) => { const p = frames[ts][id]; const ox = (p % 256) * 16
 const models = {};
 const model = (ts) => { if (!models[ts]) { models[ts] = new TilesetModel((id) => tilePx(ts, id), new Uint8Array(Buffer.from(w.tilesets[ts].collisions, 'base64'))); markGrass(models[ts], w.tilesets[ts].collisionMode); } return models[ts]; };
 const world = w.worlds[0];
+// season -1: each area in its default season, as the game shows it
+const seasonOf = (r) => (season >= 0 ? season : (w.seasonTable[world.seasons[0][r]?.pack] ?? 0) & 3);
 const map = { mtW: 160, mtH: 128, ids: new Uint8Array(160 * 128), tilesets: new Uint16Array(160 * 128).fill(0xffff) };
 map.models = new Proxy({}, { get: (_, k) => (Number(k) === 0xffff ? null : model(Number(k))) });
 for (let r = 0; r < 256; r++) {
-  const rr = world.seasons[season][r]; if (!rr) continue;
-  const lay = Buffer.from(rr.layout, 'base64');
+  const rr = world.seasons[seasonOf(r)][r]; if (!rr) continue;
+  const lay = Buffer.from(rr.layout, 'base64'); if (lay.every((v) => v === 0x04 || v === 0xf4)) continue;
   for (let y = 0; y < 8; y++) for (let x = 0; x < 10; x++) { const mi = ((r >> 4) * 8 + y) * 160 + (r & 15) * 10 + x; map.ids[mi] = lay[y * 10 + x]; map.tilesets[mi] = rr.tileset; }
 }
 globalThis.DEBUG_ORG = process.env.DEBUG_ORG;

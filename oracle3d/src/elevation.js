@@ -71,14 +71,19 @@ export function computeElevation(map, collisionModeOf) {
     else if (CLIFF_IDS.has(id) && c >= 1 && c <= 15 && (c & QUARTER_BIT[q])) {
       kind[i] = CELL.CLIFF;
       if (LEDGE_DOWN.has(id)) ledge[i] = 1;
-    } else if (c >= 1 && c <= 15 && (c & QUARTER_BIT[q]) && m) {
+    } else if (m && !wet[i] && c <= 15) {
       // Solid cell drawn in cliff colours (brown face, red rim, dark cave mouths):
       // becomes cliff if it touches a known cliff (decided below).
-      let n2 = 0;
+      let n2 = 0, black = 0;
       for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) {
         const rgb = m.color[id * 256 + ((cy & 1) * 8 + y) * 16 + (cx & 1) * 8 + x];
         if (cliffColour(rgb)) n2++;
+        if (0.3 * (rgb >> 16) + 0.59 * ((rgb >> 8) & 255) + 0.11 * (rgb & 255) < 40) black++;
       }
+      // A walkable cell only counts if it is part of a cave mouth (mostly dark), so
+      // dirt paths and sand between cliffs stay ground.
+      const solidHere = c >= 1 && c <= 15 && (c & QUARTER_BIT[q]);
+      if (!solidHere && black < 16) n2 = 0;
       // Not part of a tree or bush (any leafy green in the metatile).
       let green = 0;
       for (let p = 0; p < 256; p++) {
