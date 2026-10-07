@@ -375,7 +375,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     sF: new Float32Array(N).fill(NONE), sLen: new Float32Array(N),
     nF: new Float32Array(N).fill(NONE), nLen: new Float32Array(N),
     xF: new Float32Array(N).fill(NONE), xLen: new Float32Array(N),
-    wx: new Float32Array(N), wy: new Float32Array(N), // cliff walls: offset to the rim
+    wx: new Float32Array(N), wy: new Float32Array(N), // cliff walls: offset across the face
     deck: new Int16Array(N).fill(NO_LEVEL),
     walk: new Int16Array(N), // height Link stands at (tall grass is walked through)
   };
@@ -580,18 +580,54 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         }
       }
     }
+    // Face pixels lie beyond the rim, on the lower ground: find, through the face, the
+    // nearest plain ground on the far side (feature transform from that ground).
+    const low = new Int32Array(N2).fill(-1);
+    {
+      const q3 = [];
+      for (let i = 0; i < N2; i++) if (kind[i] !== P_CLIFF && lvl[i] !== NO_LEVEL) { low[i] = i; q3.push(i); }
+      for (let h = 0; h < q3.length; h++) {
+        const i = q3[h], x = i % ww, y = (i / ww) | 0;
+        const src = low[i], sx = src % ww, sy = (src / ww) | 0;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          const X = x + dx, Y = y + dy;
+          if (X < 0 || Y < 0 || X >= ww || Y >= wh) continue;
+          const j = Y * ww + X;
+          if (kind[j] !== P_CLIFF || isRimPx[j]) continue;
+          if (low[j] >= 0) {
+            const o = low[j], ox = o % ww, oy = (o / ww) | 0;
+            if ((ox - X) ** 2 + (oy - Y) ** 2 <= (sx - X) ** 2 + (sy - Y) ** 2) continue;
+          }
+          low[j] = src;
+          q3.push(j);
+        }
+      }
+    }
     for (let y = MARGIN_Y; y < MARGIN_Y + H; y++) for (let x = MARGIN_X; x < MARGIN_X + W; x++) {
       const i = W0(y) + x;
       if (kind[i] !== P_CLIFF) continue;
-      const src = near[i];
-      let level = src >= 0 && hi[src] !== NO_LEVEL ? hi[src] : levelOr(anyLv[i], 0);
       if (isRimPx[i]) {
-        set(x, y, level, {});
+        // The rim is the plateau's edge. Its wall shows the face art: from the rim at
+        // the top of the wall, out across the face to the lower ground at the foot.
+        const level = hi[i] !== NO_LEVEL ? hi[i] : levelOr(anyLv[i], 0);
+        let best = -1, bd = 1e9;
+        for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+          const X = x + dx, Y = y + dy;
+          if (X < 0 || Y < 0 || X >= ww || Y >= wh) continue;
+          const j = Y * ww + X;
+          if (kind[j] !== P_CLIFF || isRimPx[j] || low[j] < 0) continue;
+          const o = low[j], d = (o % ww - x) ** 2 + (((o / ww) | 0) - y) ** 2;
+          if (d < bd) { bd = d; best = o; }
+        }
+        const o = best >= 0 ? { wx: best % ww - x, wy: ((best / ww) | 0) - y, wOut: 1 } : {};
+        set(x, y, level, o);
         continue;
       }
-      const sx = src >= 0 ? src % ww : x, sy = src >= 0 ? (src / ww) | 0 : y;
-      const o = { ...(plainFill(x, y, level) || {}), wx: sx - x, wy: sy - y };
-      set(x, y, level, o);
+      // Face pixel: lower ground at the foot of the wall.
+      const src = low[i];
+      const level = src >= 0 ? lvl[src] : levelOr(anyLv[i], 0);
+      set(x, y, level, plainFill(x, y, level) || {});
     }
   }
   // ---- column pass (all window columns, so the row pass has its inputs) ----
@@ -730,8 +766,8 @@ export function meshChunk(c, neighbor) {
     const cc = r.c, i = r.i;
     const f = t(e, lo, hi);
     if (cc.wx[i] || cc.wy[i]) {
-      // cliff wall: walk from the wall towards the rim as the wall rises
-      return [px + f * cc.wx[i], pz + f * cc.wy[i]];
+      // cliff wall: from the rim (top) out across the face to its foot (bottom)
+      return [px + (1 - f) * cc.wx[i], pz + (1 - f) * cc.wy[i]];
     }
     if ((dir === 'e' || dir === 'w') && cc.xF[i] !== NONE) {
       return [cc.xF[i] + 0.01 + f * (cc.xLen[i] - 0.02), cc.fy[i] !== NONE ? cc.fy[i] + 0.5 : pz + cc.oy[i]];
