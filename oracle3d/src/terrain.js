@@ -523,6 +523,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
   // ---- one height per object: connected object pixels share the median column run ----
   const comp = new Int32Array(ww * wh).fill(-1);
   const compHt = [];
+  const compSmall = [];
   {
     let next = 0;
     const st = [];
@@ -532,7 +533,13 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
       while (st.length) {
         const j = st.pop(), x = j % ww;
         for (const k of [x > 0 ? j - 1 : -1, x < ww - 1 ? j + 1 : -1, j - ww, j + ww]) {
-          if (k >= 0 && k < ww * wh && kind[k] === P_OBJECT && comp[k] < 0) { comp[k] = next; st.push(k); }
+          if (k < 0 || k >= ww * wh || kind[k] !== P_OBJECT || comp[k] >= 0) continue;
+          // Separate objects drawn in neighbouring tiles (posts under a tree's roots)
+          // meet along dark outlines at the tile edge: don't join them there.
+          const tileJ = (((wx0 + j % ww) >> 4) << 16) | ((wy0 + ((j / ww) | 0)) >> 4);
+          const tileK = (((wx0 + k % ww) >> 4) << 16) | ((wy0 + ((k / ww) | 0)) >> 4);
+          if (tileJ !== tileK && (luma(rgbs[j]) < 50 || luma(rgbs[k]) < 50)) continue;
+          comp[k] = next; st.push(k);
         }
       }
       next++;
@@ -555,6 +562,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
       // Small props (rocks, mushrooms, posts, stumps) stand taller for their size.
       const area = list.reduce((t, v) => t + v, 0);
       compHt.push(area < 400 ? Math.max(runHeight(med), Math.round(med * 0.7)) : runHeight(med));
+      compSmall.push(area < 600);
     }
   }
 
@@ -735,6 +743,25 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         // rows 1:1 and whose front wall shows the bottom ht rows. The strip behind it
         // (hidden in the 2D art) is ground, filled with the row above the object.
         const lv = levelOr(lvl[at(r)], levelOr(levelBelow(e), 0));
+        // Gaps between fence posts: within each tile, a column of an object that is
+        // mostly ground colour (crossed only by rails or outlines) stays on the ground.
+        // The rest of the run is shortened to what's left.
+        {
+          // the floor colour right next to the fence (below it, else above it)
+          const floorRgb = e < wh && kind[at(e)] === P_GROUND ? rgbs[at(e)] : r > 0 && kind[at(r - 1)] === P_GROUND ? rgbs[at(r - 1)] : -1;
+          let rr = r, cut = false;
+          while (rr < e) {
+            const tEnd = Math.min(e, rr + (16 - ((wy0 + rr) & 15)));
+            let g = 0;
+            for (let k = rr; k < tEnd; k++) if ((floorRgb >= 0 && rgbs[at(k)] === floorRgb) || luma(rgbs[at(k)]) < 40) g++;
+            if (floorRgb >= 0 && tEnd - rr >= 6 && g > (tEnd - rr) * 0.6) {
+              for (let k = rr; k < tEnd; k++) { kind[at(k)] = P_GROUND; cls[at(k)] = CLS.GROUND; }
+              cut = true;
+            }
+            rr = tEnd;
+          }
+          if (cut) continue; // re-scan this column from r with the gaps as ground
+        }
         const ht = len <= 3 ? len : Math.min(compHt[comp[at(r)]], len - 2);
         for (let rr = r; rr < e; rr++) {
           if (rr - r < ht) set(x, rr, lv, fillY(x, rr, -ht, y0 - 1));
