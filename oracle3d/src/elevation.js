@@ -62,7 +62,7 @@ export function computeElevation(map, collisionModeOf) {
     if (m && pc === 0) {
       const rgb = m.color[id * 256 + ((cy & 1) * 8 + 4) * 16 + (cx & 1) * 8 + 4];
       const r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
-      if (b > r + 40 && b > g) blueLand[i] = 1;
+      if (b > r + 40 && b > g) { blueLand[i] = 1; wet[i] = 1; } // ice, shallows: water level
     }
     if (collisionModeOf(ts) !== 0) continue;
     const c = m ? m.collisions[id] : 0;
@@ -348,7 +348,7 @@ export function computeElevation(map, collisionModeOf) {
       for (const i of seeds) { d.set(i, 0); q.push(i); }
       for (let h = 0; h < q.length; h++) {
         const i = q[h], di = d.get(i);
-        if (di > 40) continue;
+        if (di > 80) continue;
         for (const k of neighbours(i)) if (region[k] === r && !d.has(k)) { d.set(k, di + 1); q.push(k); }
       }
       return d;
@@ -356,11 +356,13 @@ export function computeElevation(map, collisionModeOf) {
     for (const [r, tops] of topSeed) {
       if (tops.length < 3) continue;
       const dt = bfs(tops, r), df = bfs(footSeed.get(r), r);
+      // Flat top at full height, with a short ramp where the two sides meet.
+      const RAMP = 4; // cells either side of the midpoint
       for (const [i, a] of dt) {
-        const b = df.has(i) ? df.get(i) : 41;
-        if (b <= a) continue; // nearer the foot: stays low
-        let hgt = STOREY * b / (a + b);
-        if (a > 16) hgt *= Math.max(0, 1 - (a - 16) / 16);
+        const b = df.has(i) ? df.get(i) : 81;
+        const t = Math.max(0, Math.min(1, (b - a) / (2 * RAMP) + 0.5));
+        let hgt = STOREY * t;
+        if (a > 72) hgt *= Math.max(0, 1 - (a - 72) / 8);
         out[i] += Math.round(hgt);
       }
     }
@@ -401,5 +403,22 @@ export function computeElevation(map, collisionModeOf) {
     if (!bridge[i]) continue;
     out[i] = under[i] !== NONE ? under[i] : deck[i] !== NONE ? deck[i] - 4 : 0;
   }
-  return { cw, ch, kind, level: out, deck };
+  // Bridge stubs (a bridge not built yet, or ending at the water): pieces touching land
+  // on one side only are part of that bank, not floating decks.
+  const stub = new Uint8Array(n);
+  {
+    const done2 = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      if (!bridge[i] || done2[i]) continue;
+      const comp = [i], lands = new Set();
+      done2[i] = 1;
+      for (let h = 0; h < comp.length; h++) {
+        for (const k of neighbours(comp[h])) {
+          if (bridge[k] && !done2[k]) { done2[k] = 1; comp.push(k); } else if (region[k] >= 0 && !regionWet[region[k]]) lands.add(region[k]);
+        }
+      }
+      if (lands.size <= 1) for (const j of comp) { stub[j] = 1; if (deck[j] !== NONE) out[j] = deck[j]; }
+    }
+  }
+  return { cw, ch, kind, level: out, deck, stub };
 }

@@ -172,6 +172,8 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
   const deckLvl = new Int16Array(ww * wh).fill(NO_LEVEL);
   const ground = new Uint8Array(ww * wh); // object pixel showing plain ground colour
   const rgbs = new Uint32Array(ww * wh);
+  const isGroundRgb = new Uint8Array(ww * wh);
+  const rgbIsGroundAt = (i) => isGroundRgb[i] === 1;
   const blade = new Int8Array(ww * wh); // raised detail on walkable/water ground: grass blades, rocks in rapids
   for (let y = 0; y < wh; y++) {
     const py = wy0 + y;
@@ -188,6 +190,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         c = m.cls[p];
         rgbs[i] = m.color[p];
         rgbIsGround = m.ground.has(m.color[p]);
+        isGroundRgb[i] = rgbIsGround ? 1 : 0;
         if (m.grass && m.grass[map.ids[mi]]) blade[i] = luma(m.color[p]) < m.grass[map.ids[mi]] ? 4 : 1;
         else if (m.wavy[map.ids[mi]] && luma(m.color[p]) < m.wavy[map.ids[mi]]) blade[i] = 3;
       }
@@ -198,6 +201,7 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
         kd = elev.kind[ci];
         lvl[i] = elev.level[ci];
         deckLvl[i] = elev.deck[ci];
+        if (elev.stub && elev.stub[ci] && c === CLS.BRIDGE) { c = CLS.GROUND; cls[i] = c; }
       }
       kind[i] = kd === 2 ? P_STAIRS : kd === 1 ? P_CLIFF : c === CLS.SOLID ? P_OBJECT : P_GROUND;
       if (kind[i] === P_OBJECT && rgbIsGround) ground[i] = 1;
@@ -242,6 +246,35 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
       if (lost[k] > solid[k] * 0.7) { ground[i] = 1; continue; }
       kind[i] = P_GROUND; // stays at the ground level of its 8x8 cell
       cls[i] = CLS.GROUND;
+    }
+  }
+
+  // ---- decorations drawn on walkable ground (mushrooms, rocks, flowers) ----
+  // A small, compact blob of non-ground pixels surrounded by ground stands up as a
+  // little object instead of lying painted on the floor.
+  {
+    const seen = new Uint8Array(ww * wh);
+    const isDeco = (i) => kind[i] === P_GROUND && cls[i] === CLS.GROUND && !blade[i] && !rgbIsGroundAt(i);
+    for (let i0 = 0; i0 < ww * wh; i0++) {
+      if (seen[i0] || !isDeco(i0)) continue;
+      const comp = [i0];
+      seen[i0] = 1;
+      let x0 = 1e9, x1 = -1, y0 = 1e9, y1 = -1, green = 0, edge = false;
+      for (let h = 0; h < comp.length && comp.length < 260; h++) {
+        const j = comp[h], x = j % ww, y = (j / ww) | 0;
+        x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y);
+        const rgb = rgbs[j], r = rgb >> 16, g = (rgb >> 8) & 255, b = rgb & 255;
+        if (g > r + 12 && g > b) green++;
+        for (const k of [x > 0 ? j - 1 : -1, x < ww - 1 ? j + 1 : -1, j - ww, j + ww]) {
+          if (k < 0 || k >= ww * wh) { edge = true; continue; }
+          if (seen[k]) continue;
+          if (isDeco(k)) { seen[k] = 1; comp.push(k); } else if (kind[k] !== P_GROUND || cls[k] !== CLS.GROUND) edge = true;
+        }
+      }
+      const n = comp.length;
+      if (edge || n < 30 || n >= 260 || x1 - x0 > 15 || y1 - y0 > 15 || green > n * 0.3) continue;
+      if (n < 0.45 * (x1 - x0 + 1) * (y1 - y0 + 1)) continue; // compact shapes only
+      for (const j of comp) kind[j] = P_OBJECT;
     }
   }
 
@@ -518,7 +551,10 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
     }
     for (const list of runs) {
       list.sort((a, b) => a - b);
-      compHt.push(runHeight(list[Math.floor(list.length * 0.6)] || 1));
+      const med = list[Math.floor(list.length * 0.6)] || 1;
+      // Small props (rocks, mushrooms, posts, stumps) stand taller for their size.
+      const area = list.reduce((t, v) => t + v, 0);
+      compHt.push(area < 400 ? Math.max(runHeight(med), Math.round(med * 0.7)) : runHeight(med));
     }
   }
 
@@ -652,7 +688,13 @@ export function buildChunkHeights(map, models, cx, cy, cw, ch, elev) {
       const sxp = src % ww, syp = (src / ww) | 0;
       const dxm = (Math.floor((wx0 + sxp) / 16) - Math.floor((wx0 + x) / 16)) * 16;
       const dym = (Math.floor((wy0 + syp) / 16) - Math.floor((wy0 + y) / 16)) * 16;
-      set(x, y, lvl[src] + (DEPTH[cls[src]] || 0), { ox: dxm, oy: dym });
+      // Prefer a whole plain-ground metatile at that level; a straight metatile shift
+      // could land on a mushroom or rock drawn in the neighbouring tile.
+      const baseLv = lvl[src];
+      const sx2 = x + dxm, sy2 = y + dym;
+      const okShift = sx2 >= 0 && sy2 >= 0 && sx2 < ww && sy2 < wh && kind[W0(sy2) + sx2] !== P_OBJECT && kind[W0(sy2) + sx2] !== P_ORGANIC && cls[W0(sy2) + sx2] === cls[src];
+      const fill = cls[src] === CLS.GROUND ? plainFill(x, y, baseLv) : null;
+      set(x, y, baseLv + (DEPTH[cls[src]] || 0), fill || (okShift ? { ox: dxm, oy: dym } : { fx: sxp + wx0, fy: syp + wy0 }));
     }
   }
   // ---- column pass (all window columns, so the row pass has its inputs) ----
