@@ -203,7 +203,14 @@ public final class World {
                 if (secs <= 0) cooldownsUntil.remove(id);
                 else cooldownsUntil.put(id, timeMs + secs * 1000L);
             } else if (op == SendOpcode.GIVE_BUFF.getValue()) giveBuff(r);
-            else if (op == SendOpcode.VICIOUS_HAMMER.getValue()) {
+            else if (op == SendOpcode.MAPLELIFE_RESULT.getValue()) {
+                events.popup("That name is already in use. Please choose another.");
+            } else if (op == SendOpcode.MAPLELIFE_ERROR.getValue()) {
+                r.readByte();
+                int code = r.readInt();
+                events.popup(code == 0 ? "Your new character has been created. You will find it on your character list."
+                        : code == 3 ? "You have no empty character slot." : "The character could not be created.");
+            } else if (op == SendOpcode.VICIOUS_HAMMER.getValue()) {
                 int mode = r.readUByte();
                 r.readInt();
                 if (mode == 0x39) events.popup("The item gained an upgrade slot. (Hammered " + r.readInt() + "/2)");
@@ -2289,6 +2296,12 @@ public final class World {
         showLocal(t);
     }
 
+    /** Maple Life: a new Lv. 30 character (class 0 warrior .. 4 pirate) from the creation screen. */
+    public void mapleLife(int slot, int itemId, String name, int face, int hair, int color, int skin, int gender, int cls) {
+        client.send(cashUse(slot, itemId).writeString(name).writeInt(face).writeInt(hair).writeInt(color).writeInt(skin)
+                .writeInt(gender).writeInt(cls).writeInt(0));
+    }
+
     private void localYesNo(String text, Runnable yes) {
         NpcTalk t = localTalk(9010000, 1, text, false, false);
         t.local = (a, s, x) -> {
@@ -2466,6 +2479,11 @@ public final class World {
                 return;
             case 540: // using it cancels a name change bought in the Cash Shop (applied when you next log in)
                 localYesNo("Cancel your pending name change?", () -> client.send(cashUse(slot, id)));
+                return;
+            case 543:
+                if (id == 5430000) localYesNo("Use #b#t" + id + "##k to add a character slot?", () -> client.send(cashUse(slot, id)));
+                else if (data().stats.level < 30) localSay("You must be Level 30 or higher to use #b#t" + id + "##k.");
+                else events.mapleLife(slot, id);
                 return;
             case 552: scissors(slot, id); return;
             case 557: hammer(slot, id); return;
@@ -2775,12 +2793,17 @@ public final class World {
 
     /** Respawn after dying (CHANGE_MAP with the dead flag). */
     public void revive() {
+        revive(false);
+    }
+
+    /** Respawn; with the Wheel of Destiny, on the spot. */
+    public void revive(boolean wheel) {
         PacketWriter w = new PacketWriter(RecvOpcode.CHANGE_MAP.getValue());
         w.writeByte(1);
         w.writeInt(0);
         w.writeString("");
         w.writeByte(0);
-        w.writeByte(0);
+        w.writeByte(wheel ? 1 : 0);
         w.writeByte(0);
         client.send(w);
     }

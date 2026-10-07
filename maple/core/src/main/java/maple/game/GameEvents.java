@@ -32,6 +32,9 @@ public interface GameEvents {
     /** Someone invited you to their party. */
     default void partyInvite(int partyId, String from) {}
 
+    /** A Maple Life item was used: open the character creation screen for it. */
+    default void mapleLife(int slot, int itemId) {}
+
     /** An NPC asked for the name of a new guild. */
     default void guildNamePrompt() {}
 

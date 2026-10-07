@@ -1134,6 +1134,11 @@ public class MapleGame extends ApplicationAdapter {
         }
 
         @Override
+        public void mapleLife(int slot, int itemId) {
+            if (ui.find(maple.ui.windows.UltimateCreator.class) == null) ui.open(maple.ui.windows.UltimateCreator.mapleLife(ui, world, slot, itemId));
+        }
+
+        @Override
         public void shop(Shop shop) {
             ShopWindow old = ui.find(ShopWindow.class);
             if (old != null) ui.close(old);
@@ -1165,7 +1170,15 @@ public class MapleGame extends ApplicationAdapter {
 
         @Override
         public void died() {
-            if (ui.find(ReviveNotice.class) == null) ui.open(new ReviveNotice(ui, world::revive));
+            if (ui.find(ReviveNotice.class) != null || ui.find(maple.ui.Dialogs.Notice.class) != null) return;
+            long wheels = world.data() == null ? 0 : world.data().inventory(5).values().stream()
+                    .filter(it -> it.itemId == 5510000).mapToLong(it -> it.quantity).sum();
+            if (wheels > 0) { // Wheel of Destiny: revive where you fell (the server refuses where it may not be used)
+                ui.open(new maple.ui.Dialogs.Notice(ui, "Use the Wheel of Destiny to revive here? (" + wheels + " left)", true,
+                        () -> world.revive(true), () -> ui.open(new ReviveNotice(ui, world::revive))));
+            } else {
+                ui.open(new ReviveNotice(ui, world::revive));
+            }
         }
 
         @Override

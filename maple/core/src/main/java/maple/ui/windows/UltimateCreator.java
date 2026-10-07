@@ -25,12 +25,17 @@ import java.util.List;
  * name board with the name and the 2nd job, then the look board (face, hair, hair colour, skin,
  * gender, and the Empress's Fine Set it will wear), beside a preview of the new character. The answer
  * goes back as the get-text reply: "name|job|face|hair|color|skin|gender".
+ * The same screen serves the Maple Life cash items (a Lv. 30 1st-job character of one of the five
+ * classes), whose choice goes out as the item's USE_CASH_ITEM request.
  */
 public final class UltimateCreator extends Window {
     private static final String NC = "Login.img/NewChar/";
     private static final int PREVIEW_W = 190, BOARD_X = PREVIEW_W;
     private final World world;
     private final NpcTalk talk;
+    /** Maple Life: the item's Cash slot and id (0 for an Ultimate Explorer). */
+    private final int lifeSlot, lifeItem;
+    private static final String[] LIFE_CLASSES = {"Warrior", "Magician", "Bowman", "Thief", "Pirate"};
     private String error;
     private boolean namePhase = true;
     private String name = "";
@@ -43,10 +48,21 @@ public final class UltimateCreator extends Window {
     private long time;
 
     public UltimateCreator(Ui ui, World world, NpcTalk talk) {
+        this(ui, world, talk, 0, 0);
+    }
+
+    /** Maple Life (5431000 / 5432000) from the Cash inventory slot. */
+    public static UltimateCreator mapleLife(Ui ui, World world, int slot, int itemId) {
+        return new UltimateCreator(ui, world, null, slot, itemId);
+    }
+
+    private UltimateCreator(Ui ui, World world, NpcTalk talk, int lifeSlot, int lifeItem) {
         super(ui, "UltimateCreator", null);
         this.world = world;
         this.talk = talk;
-        String rest = talk.text.substring(UltimateExplorer.CREATOR.length()).trim();
+        this.lifeSlot = lifeSlot;
+        this.lifeItem = lifeItem;
+        String rest = talk == null ? "" : talk.text.substring(UltimateExplorer.CREATOR.length()).trim();
         error = rest.isEmpty() ? null : rest;
         w = PREVIEW_W + 225;
         h = 377;
@@ -61,7 +77,15 @@ public final class UltimateCreator extends Window {
     }
 
     private int job() {
-        return UltimateExplorer.JOBS[jobIndex][0];
+        return lifeItem != 0 ? jobIndex : UltimateExplorer.JOBS[jobIndex][0];
+    }
+
+    private String jobName() {
+        return lifeItem != 0 ? LIFE_CLASSES[jobIndex] : JobNames.name(job());
+    }
+
+    private int jobCount() {
+        return lifeItem != 0 ? LIFE_CLASSES.length : UltimateExplorer.JOBS.length;
     }
 
     /** The Explorer starter faces, hairs, hair colours and skins (Etc/MakeCharInfo.img), or every style with the option on. */
@@ -109,7 +133,7 @@ public final class UltimateCreator extends Window {
             Widgets.Focus.set(nameField);
             add(new Button(ui.assets, NC + "BtLeft", BOARD_X + 12 + 20, 60 + 148, () -> cycleJob(-1)));
             add(new Button(ui.assets, NC + "BtRight", BOARD_X + 12 + 166, 60 + 148, () -> cycleJob(1)));
-            add(new Widgets.Label(BOARD_X + 12 + 36, 60 + 147, 130, () -> JobNames.name(job())).align(Align.center));
+            add(new Widgets.Label(BOARD_X + 12 + 36, 60 + 147, 130, () -> jobName()).align(Align.center));
             add(new Button(ui.assets, NC + "BtYes", BOARD_X + 12 + 27, 60 + 178, this::next));
             add(new Button(ui.assets, NC + "BtNo", BOARD_X + 12 + 101, 60 + 178, this::cancel));
         } else {
@@ -134,7 +158,7 @@ public final class UltimateCreator extends Window {
     }
 
     private void cycleJob(int d) {
-        int n = UltimateExplorer.JOBS.length;
+        int n = jobCount();
         jobIndex = ((jobIndex + d) % n + n) % n;
         previewDirty = true;
     }
@@ -151,7 +175,8 @@ public final class UltimateCreator extends Window {
     }
 
     private String optionText(int row) {
-        int[] set = UltimateExplorer.fineSet(job());
+        if (lifeItem != 0 && row >= 4 && row <= 7) return "-"; // given by class on creation
+        int[] set = lifeItem != 0 ? new int[5] : UltimateExplorer.fineSet(job());
         switch (row) {
             case 0: return styleName("Face", options[0][choice[0]]);
             case 1: return styleName("Hair", options[1][choice[1]]);
@@ -194,6 +219,12 @@ public final class UltimateCreator extends Window {
     }
 
     private void create() {
+        if (lifeItem != 0) {
+            close();
+            world.mapleLife(lifeSlot, lifeItem, name, options[0][choice[0]], options[1][choice[1]], options[2][choice[2]],
+                    options[3][choice[3]], gender, jobIndex);
+            return;
+        }
         String answer = name + "|" + job() + "|" + options[0][choice[0]] + "|" + options[1][choice[1]] + "|"
                 + options[2][choice[2]] + "|" + options[3][choice[3]] + "|" + gender;
         close();
@@ -202,7 +233,7 @@ public final class UltimateCreator extends Window {
 
     private void cancel() {
         close();
-        if (world.talk == talk) world.answer(0, 0, null);
+        if (talk != null && world.talk == talk) world.answer(0, 0, null);
     }
 
     private Avatar preview() {
@@ -211,7 +242,7 @@ public final class UltimateCreator extends Window {
         if (preview != null) preview.dispose();
         preview = null;
         int hair = options[1][choice[1]] + options[2][choice[2]];
-        int[] set = UltimateExplorer.fineSet(job());
+        int[] set = lifeItem != 0 ? new int[0] : UltimateExplorer.fineSet(job());
         try {
             preview = new Avatar(ui.assets.wz, options[3][choice[3]], options[0][choice[0]], hair, set);
         } catch (RuntimeException e) {
@@ -224,7 +255,7 @@ public final class UltimateCreator extends Window {
     public void update(long ms) {
         super.update(ms);
         time += ms;
-        if (world.talk != talk && ui.windows().contains(this)) close();
+        if (talk != null && world.talk != talk && ui.windows().contains(this)) close();
     }
 
     @Override
@@ -237,9 +268,9 @@ public final class UltimateCreator extends Window {
     protected void drawContent(UiDraw g) {
         g.fill(0, 0, PREVIEW_W, h, 0xD0102030);
         g.outline(0, 0, PREVIEW_W, h, 0xFFB0C8E8);
-        g.text("Ultimate Explorer", 0, 14, PREVIEW_W, Align.center, false, 14, true, 0xFFFFE08A);
-        g.text("Successor of " + (world.data() == null ? "" : world.data().stats.name), 0, 34, PREVIEW_W, Align.center, false, 11, false, 0xFFD8E4F4);
-        g.text("Lv. " + UltimateExplorer.START_LEVEL + "  " + JobNames.name(job()), 0, 50, PREVIEW_W, Align.center, false, 11, false, 0xFFD8E4F4);
+        g.text(lifeItem != 0 ? "Maple Life" : "Ultimate Explorer", 0, 14, PREVIEW_W, Align.center, false, 14, true, 0xFFFFE08A);
+        if (lifeItem == 0) g.text("Successor of " + (world.data() == null ? "" : world.data().stats.name), 0, 34, PREVIEW_W, Align.center, false, 11, false, 0xFFD8E4F4);
+        g.text("Lv. " + (lifeItem != 0 ? 30 : UltimateExplorer.START_LEVEL) + "  " + jobName(), 0, 50, PREVIEW_W, Align.center, false, 11, false, 0xFFD8E4F4);
         float cx = PREVIEW_W / 2f, feet = 250;
         Sprite shadow = ui.assets.sprite("UIWindow.img/UtilDlgEx_Avatar/shadow");
         if (shadow != null) g.image(shadow, cx - shadow.w / 2f, feet - 4);
@@ -261,7 +292,7 @@ public final class UltimateCreator extends Window {
             g.artMode();
             a.draw(g.batch, st, f, g.tx + cx, g.ty + feet, false);
         }
-        String sub = namePhase ? "Choose a name and a 2nd job." : "Choose a look.";
+        String sub = namePhase ? (lifeItem != 0 ? "Choose a name and a class." : "Choose a name and a 2nd job.") : "Choose a look.";
         g.text(sub, 8, 272, PREVIEW_W - 16, Align.center, true, 11, false, 0xFFD8E4F4);
         if (error != null) g.text(error, 8, 300, PREVIEW_W - 16, Align.center, true, 11, true, 0xFFFF7070);
     }

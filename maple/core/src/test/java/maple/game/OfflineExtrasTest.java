@@ -610,6 +610,46 @@ public class OfflineExtrasTest {
         return c.player;
     }
 
+    /** Maple Life makes a Lv. 30 character, the slot coupon adds a slot, the Wheel of Destiny revives on the spot. */
+    @Test(timeout = 120000)
+    public void mapleLifeSlotAndWheel() throws Exception {
+        client.Character chr = server();
+        while (chr.getLevel() < 30) chr.levelUp(false);
+        stepUntil(() -> c.player.stats.level >= 30, 5000);
+        // Extra Character Slot Coupon
+        give(5430000, 1);
+        chat.clear();
+        useCash(5430000, 0);
+        stepUntil(() -> firstOf(5, 5430000) == null, 5000);
+        assertNull("coupon used", firstOf(5, 5430000));
+        assertTrue(chat.toString(), chat.stream().anyMatch(m -> m.contains("character slots have been increased")));
+        // Maple Life (A-Type): a Lv. 30 Magician
+        give(5431000, 1);
+        chat.clear();
+        Thread.sleep(3900);
+        world.mapleLife(firstOf(5, 5431000).position, 5431000, "LifeMage1", 20000, 30000, 0, 0, 0, 1);
+        stepUntil(() -> chat.stream().anyMatch(m -> m.contains("new character has been created")), 8000);
+        assertTrue(chat.toString(), chat.stream().anyMatch(m -> m.contains("new character has been created")));
+        int[] made = ultimate("LifeMage1");
+        assertNotNull(made);
+        assertEquals(30, made[0]);
+        assertEquals(200, made[1]);
+        assertNull("used up", firstOf(5, 5431000));
+        // Wheel of Destiny: die, revive where you fell
+        give(5510000, 2);
+        int map = chr.getMapId();
+        chr.updateHp(0);
+        stepUntil(() -> !chr.isAlive(), 5000);
+        warp = null;
+        world.revive(true);
+        stepUntil(() -> chr.isAlive(), 5000);
+        assertTrue("alive again", chr.isAlive());
+        assertEquals("same map", map, chr.getMapId());
+        stepUntil(() -> firstOf(5, 5510000) != null && firstOf(5, 5510000).quantity == 1, 5000);
+        assertEquals("one wheel used", 1, firstOf(5, 5510000).quantity);
+        if (warp != null) enterMap(warp[0]);
+    }
+
     static Npc npc(int id) {
         for (Npc n : world.npcs.values()) if (n.id == id) return n;
         return null;

@@ -490,6 +490,21 @@ public final class UseCashItemHandler extends AbstractPacketHandler {
             remove(c, position, itemId);
             c.sendPacket(PacketCreator.enableActions());
         } else if (itemType == 543) {
+            if (itemId == 5430000) { // Extra Character Slot Coupon (not a Maple Life: no character data follows)
+                if (c.gainCharacterSlot()) {
+                    player.dropMessage(1, "Your character slots have been increased.");
+                    remove(c, position, itemId);
+                } else {
+                    player.dropMessage(1, "You have already used up all 12 extra character slots.");
+                }
+                c.sendPacket(PacketCreator.enableActions());
+                return;
+            }
+            if (player.getLevel() < 30) { // Maple Life: "If you are over Level 30"
+                player.dropMessage(1, "You must be Level 30 or higher to use this.");
+                c.sendPacket(PacketCreator.enableActions());
+                return;
+            }
             if (itemId == ItemId.MAPLE_LIFE_B && !c.gainCharacterSlot()) {
                 player.dropMessage(1, "You have already used up all 12 extra character slots.");
                 c.sendPacket(PacketCreator.enableActions());
