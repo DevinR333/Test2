@@ -9,6 +9,10 @@ Writes into OUT_DIR:
              column v-$80 of the three side by side), once per sprite palette 0-7; row
              (game * 8 + palette) * 3 + sheet, 16 pixels high each
 
+  inventory_seasons.rgba, inventory_ages.rgba  each game's original item page, 160x128
+  inventory_cursor.rgba  the item page's bracket cursor (left; mirror it for the right)
+  font.rgba  the games' 8x16 font, white, 16 glyphs per row in character-code order
+
 Usage: extract_sprites.py DISASM_DIR OUT_DIR
 """
 import os
@@ -17,7 +21,7 @@ import sys
 from PIL import Image
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from extract_world import Game  # noqa: E402
+from extract_world import Game, draw_tile  # noqa: E402
 
 
 def save_rgba(im, path):
@@ -69,6 +73,74 @@ def outline(im):
     return out
 
 
+def find_bin(root, game, name):
+    for d in (f"gfx_compressible/{game}", "gfx_compressible/common", f"gfx/{game}", "gfx/common"):
+        p = os.path.join(root, d, name + ".bin")
+        if os.path.exists(p):
+            with open(p, "rb") as f:
+                return f.read()
+    raise FileNotFoundError(name)
+
+
+def inventory_page(root, game):
+    """The item page of the game's inventory (GFXH_INVENTORY_SCREEN tiles, PALH_0a colours):
+    map_inventory_screen_1 at w4TileMap+$40 and the text bar at +$1e0, so screen rows 2-17 (the
+    status bar rows above are left out). 160x128."""
+    g = Game(root, game)
+    vram = g.build_vram((0, 0, 0, g.names["GFXH_INVENTORY_SCREEN"], 0, 0, 0, 0))
+    pals = [[(31, 31, 31)] * 4 for _ in range(8)]
+    for kind, first, count, label in g.pal_headers[g.pal_names["PALH_0a"]]:
+        if kind == "Bg":
+            cols = g.label_colours(label)
+            for p in range(count):
+                pals[first + p] = cols[p * 4:p * 4 + 4]
+    rows = {}
+    for name, at in (("inventory_screen_1", 2), ("inventory_textbar", 15)):
+        tm, attrs = find_bin(root, game, "map_" + name), find_bin(root, game, "flg_" + name)
+        for r in range(len(tm) // 32):
+            rows[at + r] = (tm[r * 32:r * 32 + 32], attrs[r * 32:r * 32 + 32])
+    im = Image.new("RGBA", (160, 128))
+    for row in range(2, 18):
+        tm, attrs = rows[row]
+        for col in range(20):
+            px = bytearray(16 * 16 * 4)
+            draw_tile(px, 0, 0, vram, tm[col], attrs[col], pals)
+            im.paste(Image.frombytes("RGBA", (16, 16), bytes(px)).crop((0, 0, 8, 8)), (col * 8, (row - 2) * 8))
+    return im
+
+
+def inventory_cursor(root):
+    """The item page's cursor: sprite tile $0c (8x16, from gfx_inventory_hud_1 at $8000) in sprite
+    palette 2, the left bracket; the right one is it mirrored (inventorySubscreen0_drawCursor)."""
+    g = Game(root, "seasons")
+    data = g.gfx_file("gfx_inventory_hud_1")
+    pal = g.label_colours("standardSpritePaletteData")[8:12]
+    rgba = [(0, 0, 0, 0)] + [c5(*c) for c in pal[1:]]
+    im = Image.new("RGBA", (8, 16))
+    px = im.load()
+    for half in range(2):
+        t = data[(0x0c + half) * 16:(0x0d + half) * 16]
+        for y in range(8):
+            lo, hi = t[y * 2], t[y * 2 + 1]
+            for x in range(8):
+                c = (lo >> (7 - x) & 1) | (hi >> (7 - x) & 1) << 1
+                px[7 - x, half * 8 + y] = rgba[c]       # the left bracket is drawn x-flipped
+    return im
+
+
+def game_font(root):
+    """gfx_font.png: 8x16 glyphs, 16 per row in character-code order, as white on clear."""
+    im = Image.open(os.path.join(root, "gfx/common/gfx_font.png"))
+    src = im.load()
+    out = Image.new("RGBA", im.size)
+    px = out.load()
+    for y in range(im.size[1]):
+        for x in range(im.size[0]):
+            on = src[x, y] == 0 if im.mode == "P" else src[x, y] > 127     # colour 0 is the glyph
+            px[x, y] = (255, 255, 255, 255) if on else (0, 0, 0, 0)
+    return out
+
+
 def find_png(root, game, name):
     for d in (f"gfx/{game}", "gfx/common", f"gfx_compressible/{game}", "gfx_compressible/common"):
         p = os.path.join(root, d, name + ".png")
@@ -104,6 +176,10 @@ def main():
     for i, s in enumerate(sheets):
         items.paste(s, (0, i * 16))
     save_rgba(items, os.path.join(out, "items.rgba"))
+    for game in ("seasons", "ages"):
+        save_rgba(inventory_page(root, game), os.path.join(out, f"inventory_{game}.rgba"))
+    save_rgba(inventory_cursor(root), os.path.join(out, "inventory_cursor.rgba"))
+    save_rgba(game_font(root), os.path.join(out, "font.rgba"))
     print("sprites written")
 
 

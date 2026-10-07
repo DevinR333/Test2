@@ -11,25 +11,30 @@ or emulates the hardware.
   shoulder buttons zoom from close-up out to a large part of the map.
 - **Holodrum in its seasons.** Every area shows its own default season, as in Seasons. The Rod of
   Seasons changes the screen you stand on.
-- **A door in each Maku Tree** connects Holodrum and present-day Labrynna. Ages' tree has the door
-  in its trunk, and Holodrum's tree gets the same door.
+- **A new house in each main town** connects Holodrum and present-day Labrynna. Its front door in
+  Horon Village opens into Lynna City and back. Each house copies a small house already in that
+  town, so it looks and blocks like the originals.
 - **One Link.** Hearts, rupees, items, rings, seeds and bombs are shared. Once you have all 16
   hearts, heart containers give 300 rupees and pieces of heart give 150.
 - **Every item works in both worlds.** Item code never asks which world it's in, so Roc's Cape
   works in Labrynna and the Magnetic Gloves work in Holodrum.
-- **Two inventory pages.** Start opens the inventory, and Select slides between the Holodrum
-  (Seasons) and Labrynna (Ages) pages. A or B puts the highlighted item on that button.
+- **Both games' item pages in one Start menu**, drawn from the originals' own inventory screens,
+  cursor and font. The page of the world you're in comes first: Seasons' page in Holodrum,
+  Ages' page in Labrynna. Select slides to the other one, and A or B equips the highlighted
+  item.
 - **Always a linked game**, starting from the first save.
 - **Floating HUD** like *The Minish Cap*: hearts at top left, B and A at top right, rupees at
   bottom right. There's no status bar.
 - **Place names.** Walking into a new area fades its name in and out, using the names the
   originals' map screen gives each screen ("Horon Village", "Maku Tree"...).
 
-| Holodrum | Labrynna's Maku Tree door |
+| Horon Village's new house (to Labrynna) | Lynna City's new house (to Holodrum) |
 | --- | --- |
-| ![Holodrum](docs/screenshots/holodrum.png) | ![Labrynna](docs/screenshots/labrynna_maku_door.png) |
-| **Inventory: Select switches page** | **4:3, zoomed out** |
-| ![Inventory](docs/screenshots/inventory.png) | ![4:3](docs/screenshots/aspect_4_3_zoomed_out.png) |
+| ![Horon Village](docs/screenshots/house_horon.png) | ![Lynna City](docs/screenshots/house_lynna.png) |
+| **Start in Holodrum: Seasons' page first** | **Start in Labrynna: Ages' page first** |
+| ![Seasons page](docs/screenshots/menu_seasons.png) | ![Ages page](docs/screenshots/menu_ages.png) |
+| **Arriving in Horon Village** | **4:3, zoomed out** |
+| ![Holodrum](docs/screenshots/holodrum.png) | ![4:3](docs/screenshots/aspect_4_3_zoomed_out.png) |
 
 ![Touch controls on a 20:9 phone](docs/screenshots/touch.png)
 
@@ -42,9 +47,9 @@ inventory work. Most of the game itself isn't in yet:
 | --- | --- |
 | Holodrum and present Labrynna overworlds from the disassembly, each Holodrum area in its season | Houses, caves, dungeons, Subrosia, Labrynna's past |
 | Link walking, the originals' tile collision, sliding around corners | Ledges, holes, water, stairs, bushes and rocks |
-| Maku Tree doors in both directions | Seasons' Maku Tree sprite (the door stands in its clearing for now) |
+| The two town houses' doors, in both directions | Sprites for NPCs, enemies and Seasons' Maku Tree |
 | Shared hearts, rupees and items; extra hearts become rupees (tested) | Enemies, NPCs, scripts, text, chests, shops |
-| Two inventory pages, A/B equip, floating HUD | Linked secrets that NPCs recognise when you walk up to them, essences, final boss |
+| Both games' original item pages, A/B equip, floating HUD | The other subscreens (rings, essences, map), linked secrets that NPCs recognise when you walk up to them, final boss |
 | Roc's Feather and Cape jumps, Rod of Seasons, Magnetic Gloves polarity | Swinging the sword with its real animation; the other items' effects |
 | Keyboard, gamepad, touch and pinch zoom, any aspect ratio | Sound and music |
 
@@ -86,12 +91,12 @@ Select/Start at the bottom. Pinch with two fingers anywhere else to zoom.
 
 ```bash
 SDL_VIDEO_DRIVER=offscreen SDL_RENDER_DRIVER=software ./build/oracles-one \
-  --shot out.bmp --frames 120 --size 1280x720 --world labrynna --pos 1376,470 --hold U
+  --shot out.bmp --frames 120 --size 1280x720 --world labrynna --pos 1176,790 --hold U
 ```
 
-This holds Up for 120 frames from below Labrynna's Maku Tree door, so it goes through the door
-into Holodrum. Other options: `--aspect 4:3|16:9`, `--zoom Z`, `--menu 0|1`, `--touch`,
-`--all-items`.
+This holds Up for 120 frames from just south of Lynna City's new house, so it goes through the
+door into Holodrum. Other options: `--aspect 4:3|16:9`, `--zoom Z`, `--menu 0|1` (open the menu on
+its first or second page), `--touch`, `--all-items`.
 
 ## Layout
 
@@ -99,12 +104,12 @@ into Holodrum. Other options: `--aspect 4:3|16:9`, `--zoom Z`, `--menu 0|1`, `--
   become `metatiles.rgba` (every distinct 16x16 tile) and one `.map` per world (atlas index and
   the game's collision byte per tile). It writes Holodrum in its default seasons, plus each
   season in full for the rod, and `.names` with each screen's area name.
-- `tools/extract_sprites.py`: Link, the HUD art and both games' item icons, in the games'
-  palettes.
+- `tools/extract_sprites.py`: Link, the HUD art, both games' item icons, their original item
+  pages, the inventory cursor and the font, in the games' palettes.
 - `src/world.c`: maps, drawing, and the originals' collision rules (`checkGivenCollision_allowHoles`).
 - `src/link.c`: walking and collision. `src/items.c`: using items. `src/game.c`: the shared save
   and its rules.
-- `src/hud.c`: the HUD and the two-page inventory. `src/input.c`: keyboard, gamepad, touch, pinch.
-- `src/main.c`: the loop, camera, zoom, aspect ratios, Maku Tree doors and screenshot mode.
+- `src/hud.c`: the HUD and the Start menu with both games' item pages. `src/input.c`: keyboard, gamepad, touch, pinch.
+- `src/main.c`: the loop, camera, zoom, aspect ratios, the town houses and screenshot mode.
 
 Not affiliated with Nintendo or Capcom. The data comes from the community disassembly.

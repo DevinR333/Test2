@@ -23,14 +23,34 @@
 typedef enum { ASPECT_FILL, ASPECT_16_9, ASPECT_4_3, ASPECT_COUNT } Aspect;
 static const char *aspect_names[ASPECT_COUNT] = {"FILL SCREEN", "16:9", "4:3"};
 
-// A door in one world's Maku Tree that opens into the other's: x, y is where Link stands in the
-// doorway (world pixels), tile_x, tile_y the top-left of its 2x2 metatiles. Labrynna's is the door in
-// the trunk of the present-day Maku Tree (room $38); Holodrum's tree (room $c9) gets a copy of it.
-typedef struct { WorldId world; float x, y; int tile_x, tile_y; } Door;
-static const Door doors[WORLD_COUNT] = {
-  [WORLD_HOLODRUM] = {WORLD_HOLODRUM, 95 * 16, 99 * 16 + 4, 94, 98},
-  [WORLD_LABRYNNA] = {WORLD_LABRYNNA, 86 * 16, 27 * 16 + 4, 85, 26},
+// A new house in each world's main town whose door opens into the other world. Each is a copy of a
+// small house already in that town (metatiles and collision, so it looks and blocks like the
+// original): src_x, src_y its top-left, w x h metatiles, built at dst_x, dst_y; the door is the middle
+// of its bottom row. Horon Village: the green-roofed house in the fenced yard, built on the lawn inside
+// the path loop to the east. Lynna City: the blue-roofed house by the steps, built on the lawn south of
+// the square.
+typedef struct { int src_x, src_y, w, h, dst_x, dst_y; } House;
+static const House houses[WORLD_COUNT] = {
+  [WORLD_HOLODRUM] = {84, 114, 3, 3, 93, 114},
+  [WORLD_LABRYNNA] = {67, 40, 3, 3, 72, 45},
 };
+static float door_x(WorldId id) { return (float)((houses[id].dst_x + houses[id].w / 2) * MT + MT / 2); }
+static float door_y(WorldId id) { return (float)((houses[id].dst_y + houses[id].h) * MT); }   // its bottom edge
+
+static void build_house(World *w) {
+  const House *h = &houses[w->id];
+  Map *layers[5] = {&w->base, &w->seasons[0], &w->seasons[1], &w->seasons[2], &w->seasons[3]};
+  for (int m = 0; m < 5; m++) {
+    Map *l = layers[m];
+    if (!l->cells) continue;
+    for (int y = 0; y < h->h; y++)
+      for (int x = 0; x < h->w; x++) {
+        int src = (h->src_y + y) * l->w + h->src_x + x, dst = (h->dst_y + y) * l->w + h->dst_x + x;
+        l->cells[dst] = l->cells[src];   // within the same layer, so each season's house matches
+        l->coll[dst] = l->coll[src];
+      }
+  }
+}
 
 typedef struct {
   SDL_Window *win;
@@ -99,8 +119,8 @@ static void enter_world(App *a, WorldId id, bool via_door) {
   a->world = &a->worlds[id];
   game.world = (uint8_t)id;
   if (via_door) {
-    a->link.x = doors[id].x;
-    a->link.y = doors[id].y + 4;
+    a->link.x = door_x(id);
+    a->link.y = door_y(id) + 8;
     a->link.dir = DIR_DOWN;
     a->door_armed = false;
   }
@@ -111,9 +131,11 @@ static void enter_world(App *a, WorldId id, bool via_door) {
 }
 
 static bool at_door(App *a) {
-  const Door *d = &doors[a->world->id];
-  bool in_doorway = SDL_fabsf(a->link.x - d->x) < 6 && SDL_fabsf(a->link.y - d->y) < 6;
-  if (!in_doorway || !(a->in.held & BTN_UP)) a->door_armed = true;
+  WorldId id = a->world->id;
+  float dx = SDL_fabsf(a->link.x - door_x(id)), dy = a->link.y - door_y(id);
+  bool in_doorway = dx < 6 && dy < 6 && dy > -14;
+  bool near = dx < 16 && dy < 20 && dy > -14;      // where Link arrives, just below the door
+  if (!near || !(a->in.held & BTN_UP)) a->door_armed = true;
   return a->door_armed && in_doorway && a->link.dir == DIR_UP && (a->in.held & BTN_UP);
 }
 
@@ -129,10 +151,12 @@ static void update(App *a) {
   a->zoom = SDL_clamp(a->zoom * in->zoom_factor, ZOOM_MIN, ZOOM_MAX);
   in->zoom_factor = 1;
 
-  if (in->pressed & BTN_START) { a->menu.open = !a->menu.open; a->menu.slide = (float)a->menu.page; }
+  if (in->pressed & BTN_START) {
+    if (a->menu.open) a->menu.open = false;
+    else menu_open(&a->menu, a->world->id);
+    return;
+  }
   if (a->menu.open) { menu_update(&a->menu, in->pressed); return; }
-  // Select in play also opens the inventory, on the other world's page
-  if (in->pressed & BTN_SELECT) { a->menu.open = true; a->menu.page = a->world->id == WORLD_LABRYNNA ? PAGE_SEASONS : PAGE_AGES; a->menu.slide = (float)a->menu.page; return; }
 
   if (in->pressed & BTN_A) items_use((Item)game.equip_a, &a->link, a->world);
   if (in->pressed & BTN_B) items_use((Item)game.equip_b, &a->link, a->world);
@@ -168,14 +192,14 @@ static void render(App *a) {
   items_draw(a->ren, &a->link, &v, px);
   SDL_SetRenderClipRect(a->ren, NULL);
   if (a->menu.open) menu_draw(a->ren, &a->menu, &a->art, w, h);
-  else hud_draw(a->ren, &a->art, w, h, a->in.touch_ui);
+  hud_draw(a->ren, &a->art, w, h, a->in.touch_ui && !a->menu.open);
   if (a->banner_frames && !a->menu.open) {
     int t = a->banner_frames, since = BANNER_FRAMES - t;
     float alpha = since < BANNER_FADE ? (float)since / BANNER_FADE : t < BANNER_FADE ? (float)t / BANNER_FADE : 1.0f;
     float bp = px * 1.5f;
     draw_text_alpha(a->ren, a->banner, (float)(w - text_width(a->banner, bp)) / 2, (float)h * 0.22f, bp, 255, 240, 200, (Uint8)(alpha * 255));
   }
-  if (!a->menu.open) input_draw_touch(a->ren, &a->in, w, h);
+  input_draw_touch(a->ren, &a->in, w, h);
   if (a->fade) {
     float t = 1.0f - SDL_fabsf((float)a->fade - FADE_FRAMES / 2.0f) / (FADE_FRAMES / 2.0f);
     fill_rect(a->ren, 0, 0, (float)w, (float)h, 255, 255, 255, (Uint8)(t * 255));
@@ -230,24 +254,12 @@ int main(int argc, char **argv) {
   if (!shot) SDL_SetRenderVSync(a.ren, 1);
   input_init();
   if (!image_load(a.ren, "metatiles.rgba", &a.atlas) || !image_load(a.ren, "link.rgba", &a.link_sheet) ||
-      !image_load(a.ren, "hud.rgba", &a.art.hud) || !image_load(a.ren, "items.rgba", &a.art.items) ||
+      !hud_art_load(a.ren, &a.art) ||
       !world_load(&a.worlds[WORLD_HOLODRUM], WORLD_HOLODRUM) || !world_load(&a.worlds[WORLD_LABRYNNA], WORLD_LABRYNNA)) {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is missing. Run tools/build_assets.sh first (see README).", a.win);
     return 1;
   }
-  const Map *lab = &a.worlds[WORLD_LABRYNNA].base;
-  // Holodrum's Maku Tree gets the same trunk door Labrynna's has: its 2x2 metatiles and collision,
-  // in every season's version of the map
-  World *hol = &a.worlds[WORLD_HOLODRUM];
-  Map *layers[5] = {&hol->base, &hol->seasons[0], &hol->seasons[1], &hol->seasons[2], &hol->seasons[3]};
-  for (int i = 0; i < 4; i++) {
-    int src = (doors[WORLD_LABRYNNA].tile_y + i / 2) * lab->w + doors[WORLD_LABRYNNA].tile_x + i % 2;
-    for (int m = 0; m < 5; m++) {
-      int dst = (doors[WORLD_HOLODRUM].tile_y + i / 2) * layers[m]->w + doors[WORLD_HOLODRUM].tile_x + i % 2;
-      layers[m]->cells[dst] = lab->cells[src];
-      layers[m]->coll[dst] = lab->coll[src];
-    }
-  }
+  for (int i = 0; i < WORLD_COUNT; i++) build_house(&a.worlds[i]);
 
   if (shot || !game_load()) game_new();
   if (all_items) items_give_all();
@@ -257,7 +269,8 @@ int main(int argc, char **argv) {
   a.link.y = game.y;
   a.link.dir = game.dir;
   enter_world(&a, (WorldId)game.world, false);
-  if (menu_page >= 0) { a.menu.open = true; a.menu.page = menu_page; a.menu.slide = (float)menu_page; }
+  a.door_armed = true;
+  if (menu_page >= 0) { menu_open(&a.menu, a.world->id); a.menu.at = a.menu.slide = menu_page; }
 
   Uint64 last = SDL_GetTicksNS(), acc = 0, autosave = 0;
   int frame = 0;

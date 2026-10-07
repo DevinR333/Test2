@@ -4,7 +4,13 @@
 
 typedef struct {
   Image hud, items;
+  Image inventory[PAGE_COUNT];   // the originals' item pages (inventory_seasons/ages.rgba)
+  Image cursor, font;
 } HudArt;
+
+bool hud_art_load(SDL_Renderer *ren, HudArt *art);
+// The games' own 8x16 font; px = screen pixels per game pixel.
+void draw_game_text(SDL_Renderer *ren, const HudArt *art, const char *s, float x, float y, float px);
 
 // Pixels of the window per HUD pixel: the HUD keeps one size whatever the world zoom.
 float hud_scale(int win_w, int win_h);
@@ -15,11 +21,14 @@ void hud_draw(SDL_Renderer *ren, const HudArt *art, int win_w, int win_h, bool t
 
 typedef struct {
   bool open;
-  int page;                 // PAGE_SEASONS or PAGE_AGES
-  float slide;              // drawn page position, eases toward `page`
-  int cursor;
+  Page order[PAGE_COUNT];   // the world Link is in comes first
+  int at;                   // index into order
+  float slide;              // drawn position, eases toward `at`
+  int cursor[PAGE_COUNT];
 } Menu;
 
-// Select flips between the Holodrum and Labrynna pages; A/B put the highlighted item on that button.
+// Start opens the inventory on the page of the world Link is in; Select slides to the other game's
+// page, like the originals' Select moves between subscreens. A/B equip the highlighted item.
+void menu_open(Menu *m, WorldId world);
 void menu_update(Menu *m, Uint32 pressed);
 void menu_draw(SDL_Renderer *ren, const Menu *m, const HudArt *art, int win_w, int win_h);
