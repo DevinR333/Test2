@@ -1,0 +1,3 @@
+[submodule "oracles-one/disasm"]
+	path = oracles-one/disasm
+	url = https://github.com/Stewmath/oracles-disasm

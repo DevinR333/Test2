@@ -1,0 +1,43 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace "io.github.oraclesone"
+    compileSdkVersion 35
+    ndkVersion "27.2.12479018"
+    defaultConfig {
+        applicationId "io.github.oraclesone"
+        minSdkVersion 24
+        targetSdkVersion 35
+        versionCode 1
+        versionName "0.1.0"
+        externalNativeBuild {
+            cmake {
+                arguments "-DANDROID_STL=c++_static"
+                abiFilters 'arm64-v8a'
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            // the engine is fast either way, but optimise debug builds too so they play like release
+            externalNativeBuild { cmake { arguments "-DCMAKE_BUILD_TYPE=Release" } }
+        }
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
+            signingConfig signingConfigs.debug
+        }
+    }
+    externalNativeBuild {
+        cmake {
+            path '../../CMakeLists.txt'
+        }
+    }
+    // the game data from tools/build_assets.sh goes into the APK as-is
+    sourceSets.main.assets.srcDirs = ['../../assets']
+    lint {
+        abortOnError false
+    }
+}
