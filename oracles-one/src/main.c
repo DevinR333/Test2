@@ -8,6 +8,7 @@
 
 #include "actors.h"
 #include "audio.h"
+#include "companion.h"
 #include "game.h"
 #include "gfx.h"
 #include "hud.h"
@@ -538,6 +539,7 @@ static void update(App *a) {
   combat(a);
   room_events_update(a->worlds, a->n_worlds, a->world, a->link.x, a->link.y);
   link_pose(a);
+  if (a->riding) companion_update(game.companion, &a->link);
   if (a->link.pushing == 20) {
     const char *msg = keydoor_push(a->worlds, a->n_worlds, a->world, front_x, front_y, a->link.dir);
     if (msg) show_message(a, msg);
@@ -584,8 +586,10 @@ static void render(App *a) {
   world_draw(a->ren, a->world, &a->atlas, &v);
   terrain_draw(a->ren, &a->atlas, &v, &a->link, false);
   actors_draw(a->ren, &v, true, a->link.y);
+  float ride = 0;
+  if (a->riding) companion_draw(a->ren, &v, game.companion, &a->link, &ride);
   if (!(a->hurt_frames & 2))
-    link_draw(a->ren, &a->link, &a->link_sheet, &v, items.z + terrain_z());
+    link_draw(a->ren, &a->link, &a->link_sheet, &v, items.z + terrain_z() + ride);
   actors_draw(a->ren, &v, false, a->link.y);
   terrain_draw(a->ren, &a->atlas, &v, &a->link, true);
   float px = hud_scale(w, h);
@@ -708,7 +712,7 @@ int main(int argc, char **argv) {
   if (touch_hidden) a.in.touch_hidden = true;
   SDL_DisableScreenSaver();   // keeps a phone or handheld awake while playing with a controller
   if (!image_load(a.ren, "metatiles.rgba", &a.atlas) || !image_load(a.ren, "link.rgba", &a.link_sheet) ||
-      !hud_art_load(a.ren, &a.art) || !actors_load(a.ren) || !link_anims_load() || !(a.n_worlds = world_load_all(&a.worlds)) || !warps_load() ||
+      !hud_art_load(a.ren, &a.art) || !actors_load(a.ren) || !link_anims_load() || !companion_load(a.ren) || !(a.n_worlds = world_load_all(&a.worlds)) || !warps_load() ||
       (a.overworld[WORLD_HOLODRUM] = world_overworld(a.worlds, a.n_worlds, WORLD_HOLODRUM, 0)) < 0 ||
       (a.overworld[WORLD_LABRYNNA] = world_overworld(a.worlds, a.n_worlds, WORLD_LABRYNNA, 0)) < 0) {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is missing. Run tools/build_assets.sh first (see README).", a.win);
@@ -727,6 +731,7 @@ int main(int argc, char **argv) {
   if (shot || !game_load()) game_new();
   if (all_items) items_give_all();
   if (equip_a >= 0) game.equip_a = (uint8_t)equip_a;
+  if (getenv("ORACLES_COMPANION")) game.companion = (uint8_t)atoi(getenv("ORACLES_COMPANION"));   // testing
   if (getenv("ORACLES_SEED")) game.seed_selected = (uint8_t)atoi(getenv("ORACLES_SEED"));   // testing
   if (equip_b >= 0) game.equip_b = (uint8_t)equip_b;
   chests_restore(a.worlds, a.n_worlds);

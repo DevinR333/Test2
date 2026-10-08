@@ -18,6 +18,10 @@ typedef struct {
   Frame frames[MAX_FRAMES];
   uint8_t tell, take;            // linked secret told / taken ($ff none)
   char *text;                    // what the character says
+  uint8_t vis_type;              // when shown: 0 always, 1 Horon stages (mask), 2 a Sunken City stage, 3 from an Ages progress
+  uint16_t vis;
+  uint8_t prog_fn, prog_off, n_ptexts;   // Ages: what they say at each progress (getGameProgress_1/_2)
+  char *ptexts[8];
 } Kind;
 typedef struct { uint8_t game, group, room, kind, id, subid, y, x, count, random, cond; } Placement;
 
@@ -52,7 +56,7 @@ bool actors_load(SDL_Renderer *ren) {
   if (!image_load(ren, "sprites.rgba", &sheet)) return false;
   size_t size;
   Uint8 *d = asset_load("objects.bin", &size);
-  if (!d || size < 10 || memcmp(d, "OOBJ", 4) != 0 || (d[4] | d[5] << 8) != 2) { SDL_free(d); return false; }
+  if (!d || size < 10 || memcmp(d, "OOBJ", 4) != 0 || (d[4] | d[5] << 8) != 3) { SDL_free(d); return false; }
   n_kinds = d[6] | d[7] << 8;
   n_places = d[8] | d[9] << 8;
   kinds = calloc((size_t)n_kinds, sizeof *kinds);
@@ -72,6 +76,20 @@ bool actors_load(SDL_Renderer *ren) {
     k->text = calloc((size_t)tl + 1, 1);
     memcpy(k->text, p, (size_t)tl);
     p += tl;
+    if (p + 6 > end) break;
+    k->vis_type = p[0];
+    k->vis = (uint16_t)(p[1] | p[2] << 8);
+    k->prog_fn = p[3]; k->prog_off = p[4]; k->n_ptexts = p[5];
+    p += 6;
+    for (int t = 0; t < k->n_ptexts && t < 8; t++) {
+      if (p + 2 > end) break;
+      int l2 = p[0] | p[1] << 8;
+      p += 2;
+      if (p + l2 > end) break;
+      k->ptexts[t] = calloc((size_t)l2 + 1, 1);
+      memcpy(k->ptexts[t], p, (size_t)l2);
+      p += l2;
+    }
     for (int f = 0; f < k->n_frames && p + 11 <= end; f++, p += 11) {
       Frame *fr = &k->frames[f];
       fr->x = (uint16_t)(p[0] | p[1] << 8); fr->y = (uint16_t)(p[2] | p[3] << 8);
@@ -154,6 +172,65 @@ bool actors_spawn(int game, int id, int subid, float x, float y) {
   return true;
 }
 
+// ---- the story so far, as the originals' NPCs judge it ---------------------------------------
+static int essence_count(int g) { int n = 0; for (int i = 0; i < 8; i++) n += game.essences[g] >> i & 1; return n; }
+static int essence_highest(int g) { for (int i = 7; i >= 0; i--) if (game.essences[g] >> i & 1) return i; return -1; }
+
+// miscNpcs.s checkNPCStage (a normal game): Horon Village's people come and go by it.
+static int seasons_stage(void) {
+  if (game.onox_beaten) return 10;
+  int h = essence_highest(WORLD_HOLODRUM);
+  if (h < 0) return game.item_level[ITEM_SWORD] ? 1 : 0;   // met the Maku Tree (who gives the Gnarled Key)
+  if (h >= 7) return 5;
+  if (essence_count(WORLD_HOLODRUM) >= 5) return 4;
+  return h >= 1 ? 3 : 2;
+}
+
+// getSunkenCityNPCVisibleSubId: the Sunken City's divers' son and treasure hunter.
+static int sunken_stage(void) {
+  if (game.onox_beaten) return 4;
+  int h = essence_highest(WORLD_HOLODRUM);
+  if (h < 0) return 0;
+  return h >= 7 ? 2 : h >= 3 ? 1 : 0;
+}
+
+// Ages' getGameProgress_1 / _2 (miscMan2.s): beaten dungeons, Nayru saved, the Maku Seed, the end.
+static int ages_progress(int fn) {
+  int h = essence_highest(WORLD_LABRYNNA);
+  bool done = game.veran_beaten, seed = essence_count(WORLD_LABRYNNA) == 8, nayru = h >= 3;
+  if (fn == 1) {
+    if (done) return 5;
+    if (seed) return 4;
+    if (h >= 6) return 3;
+    if (nayru) return 2;
+    return h >= 2 ? 1 : 0;
+  }
+  if (done) return 7;
+  if (seed) return 5;
+  if (h >= 6) return 4;
+  if (nayru) return 3;
+  if (h >= 3) return 2;
+  return h >= 1 ? 1 : 0;
+}
+
+static bool shown_now(const Kind *k) {
+  switch (k->vis_type) {
+  case 1: return k->vis >> seasons_stage() & 1;
+  case 2: return sunken_stage() == k->vis;
+  case 3: return ages_progress(k->prog_fn ? k->prog_fn : 1) >= k->vis;
+  default: return true;
+  }
+}
+
+static const char *say(const Kind *k) {
+  if (k->prog_fn && k->n_ptexts) {
+    int i = ages_progress(k->prog_fn) - k->prog_off;
+    i = i < 0 ? 0 : i >= k->n_ptexts ? k->n_ptexts - 1 : i;
+    if (k->ptexts[i] && k->ptexts[i][0]) return k->ptexts[i];
+  }
+  return k->text ? k->text : "";
+}
+
 void actors_enter(const World *areas, int n, const World *w) {
   (void)areas; (void)n;
   n_actors = 0;
@@ -171,6 +248,7 @@ void actors_enter(const World *areas, int n, const World *w) {
       const Kind *k = find_kind(pl->game, pl->kind, pl->id, pl->subid);
       if (!k || (!k->n_frames && pl->kind != ACTOR_ENEMY)) continue;
       if (pl->kind == ACTOR_INTERACTION && pl->random == 2) continue;   // placed by a script later
+      if (pl->kind == ACTOR_INTERACTION && !shown_now(k)) continue;     // not at this point in the story
       for (int c = 0; c < pl->count && n_actors < MAX_ACTORS; c++) {
         Actor *a = &actors[n_actors];
         memset(a, 0, sizeof *a);
@@ -518,12 +596,12 @@ bool actors_talk(const Link *l, ActorTalk *out) {
   for (int i = 0; i < n_actors; i++) {
     const Actor *a = &actors[i];
     if (!a->alive || a->kind != ACTOR_INTERACTION || !a->k) continue;
-    if (!(a->k->text && a->k->text[0]) && a->k->tell == 0xff && a->k->take == 0xff) continue;
+    if (!say(a->k)[0] && a->k->tell == 0xff && a->k->take == 0xff) continue;
     float dx = a->x - px, dy = a->y - py, d = dx * dx + dy * dy;
     if (d < best_d) { best_d = d; best = a; }
   }
   if (!best) return false;
-  out->text = best->k->text ? best->k->text : "";
+  out->text = say(best->k);
   out->tell = best->k->tell == 0xff ? -1 : best->k->tell;
   out->take = best->k->take == 0xff ? -1 : best->k->take;
   return true;

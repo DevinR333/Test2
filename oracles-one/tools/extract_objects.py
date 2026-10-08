@@ -4,11 +4,14 @@
 Writes into OUT_DIR:
   sprites.rgba  the animation frames of every placed interaction, enemy and part, packed in rows
   objects.bin   (little endian)
-    "OOBJ", u16 version 2, u16 sprite count, u16 object count
+    "OOBJ", u16 version 3, u16 sprite count, u16 object count
     sprites: u8 game, u8 kind (0 interaction, 1 enemy, 2 part), u8 id, u8 subid,
              u8 radius y, u8 radius x, s8 damage (quarter hearts, negative), u8 health,
              u8 frame count (<= 4), u8 secret told, u8 secret taken ($ff none), u16 text length,
-             the text (what the character says first), then per frame: u16 x, u16 y (in
+             the text (what the character says first), u8 when shown (0 always, 1 Horon stage
+             mask, 2 Sunken City stage, 3 from Ages progress), u16 its mask / stage / progress,
+             u8 Ages progress function (0 none), u8 table offset, u8 text count, (u16 length,
+             text) per progress, then per frame: u16 x, u16 y (in
              sprites.rgba), u8 w, u8 h, s16 origin x, s16 origin y (top-left relative to the
              object's position), u8 duration
     objects: u8 game, u8 group, u8 room, u8 kind, u8 id, u8 subid, u8 y, u8 x (in the room),
@@ -366,6 +369,118 @@ def secret_of(table, game, oid, subid):
     return SECRETS.index(s) if s else 0xff
 
 
+# ---- who shows up and what they say as the story moves on ----------------------------------------
+
+def seasons_conditions(root):
+    """(id, subid) -> ("stage", mask) for Horon Village's conditional NPCs (conditionalHoronNPCLookupTable:
+    seen only at listed checkNPCStage stages), or ("sunken", stage) for the Sunken City ones."""
+    path = os.path.join(root, "object_code/seasons/interactions/miscNpcs.s")
+    blocks, cur, order = {}, None, []
+    for raw in open(path):
+        line = raw.split(";", 1)[0].strip()
+        m = re.match(r"(@{0,2}\w+):$", line)
+        if m:
+            cur = m.group(1)
+            blocks[cur] = []
+            order.append(cur)
+            continue
+        if cur and line:
+            blocks[cur].append(line)
+    for i in range(len(order) - 2, -1, -1):          # stacked labels share the next one's lines
+        if not blocks[order[i]]:
+            blocks[order[i]] = blocks[order[i + 1]]
+    top = [l.split()[1] for l in blocks.get("conditionalHoronNPCLookupTable", []) if l.startswith(".dw")]
+    per_b = []
+    for lab in top:
+        subs = [l.split()[1] for l in blocks.get(lab, []) if l.startswith(".dw")]
+        lists = []
+        for sl in subs:
+            name = sl.replace("@@", "")
+            data = []
+            for l in blocks.get("@@" + name, blocks.get(sl, [])):
+                if l.startswith(".db"):
+                    data += [num(t) for t in l[3:].split()]
+            mask = 0
+            for v in data:
+                if v == 0:
+                    break
+                mask |= 1 << (v - 1)
+            lists.append(mask)
+        per_b.append(lists)
+    out = {}
+    for oid, b in ((0x2d, 0), (0x37, 1), (0x3c, 2), (0x3d, 3), (0x80, 7)):
+        if b < len(per_b):
+            for sub, mask in enumerate(per_b[b]):
+                out[(oid, sub)] = ("stage", mask)
+    for hi in range(3):
+        if 4 + hi < len(per_b):
+            for lo, mask in enumerate(per_b[4 + hi]):
+                out[(0x3e, hi << 4 | lo)] = ("stage", mask)
+    for lo in range(5):
+        out[(0x3e, 0x30 | lo)] = ("sunken", lo)
+    for oid in (0x36, 0x39):
+        for sub in range(5):
+            out[(oid, sub)] = ("sunken", sub)
+    return out
+
+
+def ages_progress(root, dialogue):
+    """(id, subid) -> (progress function 1/2, least progress shown at, table offset, [texts]) for the
+    Ages characters whose script comes from a table by getGameProgress_1/_2."""
+    out = {}
+    d = os.path.join(root, "object_code/ages/interactions")
+    for fn in sorted(os.listdir(d)):
+        text = open(os.path.join(d, fn)).read()
+        if "getGameProgress" not in text:
+            continue
+        ids = [int(x, 16) for x in re.findall(r"interactionCode([0-9a-f]{2}):", text)]
+        lines = [l.split(";", 1)[0].strip() for l in text.splitlines()]
+        tables, cur = {}, None
+        for l in lines:
+            m = re.match(r"(@\w+):$", l)
+            if m:
+                cur = m.group(1)
+                tables.setdefault(cur, [])
+                continue
+            if cur and l.startswith(".dw"):
+                r = re.findall(r"mainScripts\.(\w+)", l)
+                if r:
+                    tables[cur].append(r[0])
+        i = 0
+        while i < len(lines):
+            subs = []
+            while i < len(lines) and re.match(r"@initSubid([0-9a-f]{2}):$", lines[i]):
+                subs.append(int(re.match(r"@initSubid([0-9a-f]{2}):$", lines[i]).group(1), 16))
+                i += 1
+            if not subs:
+                i += 1
+                continue
+            fnum, least, off, table = None, 0, 0, None
+            j = i
+            while j < len(lines) and not re.match(r"@\w+:$", lines[j]):
+                l = lines[j]
+                m = re.search(r"getGameProgress_([12])", l)
+                if m:
+                    fnum = int(m.group(1))
+                m = re.match(r"cp \$([0-9a-f]{2})", l)
+                if m and fnum and j + 1 < len(lines) and "interactionDelete" in lines[j + 1] and "jp c" in lines[j + 1]:
+                    least = int(m.group(1), 16)
+                m = re.match(r"sub \$([0-9a-f]{2})", l)
+                if m and fnum:
+                    off = int(m.group(1), 16)
+                m = re.match(r"ld hl,(@\w+)", l)
+                if m and fnum and m.group(1) in tables:
+                    table = tables[m.group(1)]
+                j += 1
+            if fnum and table:
+                texts = [dialogue.script_text(t) or "" for t in table]
+                for oid in ids[:1]:
+                    for sub in subs:
+                        out[(oid, sub)] = (fnum, least, off, texts)
+            i = j
+    return out
+
+
 def object_lists(root, game):
     """(group, room) -> [(kind, id, subid, y, x, count, random, condition)] as at the start of a game."""
     files = [os.path.join(root, f"objects/{game}", f) for f in sorted(os.listdir(os.path.join(root, f"objects/{game}"))) if f.endswith(".s")]
@@ -418,6 +533,146 @@ def object_lists(root, game):
     return result
 
 
+def companions(root, out):
+    """companions.rgba + companions.bin: Ricky, Dimitri and Moosh (special objects $0b-$0d) from
+    data/seasons/specialObjectAnimationData.s: each animation's frames, and each gfx frame drawn from
+    its spr_ file with its OAM layout and palettes. Little endian, per companion:
+      u16 animations, per animation: u8 frame count, u8 loop frame ($ff holds), (u8 duration, u8 gfx)
+      u16 gfx frames, per frame: u16 x, u16 y, u8 w, u8 h, s8 origin x, s8 origin y"""
+    g = Game(root, "seasons")
+    cols = g.label_colours("standardSpritePaletteData")
+    pals = [cols[p * 4:p * 4 + 4] for p in range(min(8, len(cols) // 4))]
+    blocks, order, cur = {}, [], None
+    for line in lines_of(os.path.join(root, "data/seasons/specialObjectAnimationData.s")):
+        m = re.match(r"(\w+):$", line)
+        if m:
+            cur = m.group(1)
+            blocks[cur] = []
+            order.append(cur)
+            continue
+        if cur:
+            blocks[cur].append(line)
+    for i in range(len(order) - 2, -1, -1):
+        if not blocks[order[i]]:
+            blocks[order[i]] = blocks[order[i + 1]]
+    oam, cur = {}, None
+    for line in lines_of(os.path.join(root, "data/seasons/specialObjectOamData.s")):
+        m = re.match(r"(\w+):$", line)
+        if m:
+            cur = m.group(1)
+            oam[cur] = []
+            continue
+        if cur and line.startswith(".db"):
+            oam[cur] += [num(t) for t in line[3:].split()]
+    images, blob = [], b""
+    # palettes from commonCode.s's special object table: Ricky 3, Dimitri 2, Moosh 1
+    for obj, fname, objpal in ((0x0b, "spr_ricky", 3), (0x0c, "spr_dimitri", 2), (0x0d, "spr_moosh", 1)):
+        tiles = g.gfx_file(fname)
+        gp = []
+        for l in blocks[f"specialObject{obj:02x}GfxPointers"]:
+            m = re.match(r"m_SpecialObjectGfxPointer\s+(\$?\w+)\s+\w+\s+(\$?\w+)", l)
+            if m:
+                gp.append((num(m.group(1)), num(m.group(2)) // 16))
+        op = [l.split()[1] for l in blocks[f"specialObject{obj:02x}OamDataPointers"] if l.startswith(".dw")]
+        ap = [l.split()[1] for l in blocks[f"specialObject{obj:02x}AnimationDataPointers"] if l.startswith(".dw")]
+        # animations: frames until a loop (relative jump) or a hold
+        part = struct.pack("<H", len(ap))
+        for lab in ap:
+            i = order.index(lab)
+            seq, loop = [], 0xff
+            j = i
+            while j < len(order) and len(seq) < 32:
+                if j != i and not order[j].startswith("animationLoop"):
+                    break
+                stop = False
+                for l in blocks[order[j]]:
+                    if l.startswith("m_AnimationLoop"):
+                        k = order.index(l.split()[1])
+                        loop = sum(1 for q in range(i, k) for x in blocks[order[q]] if x.startswith(".db"))
+                        stop = True
+                        break
+                    if l.startswith(".db"):
+                        v = [num(t) for t in l[3:].split()]
+                        if len(v) == 3:
+                            seq.append(v[:2])
+                if stop:
+                    break
+                j += 1
+            if loop != 0xff and loop >= len(seq):
+                loop = 0xff
+            part += bytes([len(seq), loop]) + b"".join(bytes(f) for f in seq)
+        part += struct.pack("<H", len(gp))
+        for o, tb in gp:
+            d = oam.get(op[o] if o < len(op) else "", [0])
+            n = d[0] if d else 0
+            ents = []
+            for k in range(n):
+                y, x, t, a = d[1 + k * 4:5 + k * 4]
+                ents.append(((y - 256 if y >= 128 else y) - 16, (x - 256 if x >= 128 else x) - 8, t, a))
+            if not ents:
+                images.append(None)
+                part += struct.pack("<HHBBbb", 0, 0, 0, 0, 0, 0)
+                continue
+            x0, y0 = min(e[1] for e in ents), min(e[0] for e in ents)
+            x1, y1 = max(e[1] for e in ents) + 8, max(e[0] for e in ents) + 16
+            im = Image.new("RGBA", (x1 - x0, y1 - y0))
+            px = im.load()
+            for y, x, t, a in reversed(ents):
+                rgba = [None] + [c5(c) for c in pals[(a + objpal) & 7][1:]]
+                t = (t + tb) & 0xfffe
+                for half in range(2):
+                    data = tiles[(t + half) * 16:(t + half) * 16 + 16]
+                    if len(data) < 16:
+                        continue
+                    for row in range(8):
+                        sy = 7 - row if a & 0x40 else row
+                        lo, hi = data[sy * 2], data[sy * 2 + 1]
+                        for col in range(8):
+                            sx = 7 - col if a & 0x20 else col
+                            c = (lo >> (7 - sx) & 1) | (hi >> (7 - sx) & 1) << 1
+                            if c:
+                                yy = (half if not a & 0x40 else 1 - half) * 8 + row
+                                px[x - x0 + col, y - y0 + yy] = rgba[c]
+            images.append(im)
+            part += struct.pack("<HHBBbb", len(images) - 1, 0, im.width, im.height, x0, y0)   # x/y fixed below
+        blob += part
+    # pack the pictures in rows and patch their places in
+    W, x, y, row = 512, 0, 0, 0
+    places = []
+    for im in images:
+        if im is None:
+            places.append((0, 0))
+            continue
+        if x + im.width > W:
+            x, y, row = 0, y + row, 0
+        places.append((x, y))
+        x += im.width
+        row = max(row, im.height)
+    sheet = Image.new("RGBA", (W, max(1, y + row)))
+    for im, (px_, py_) in zip(images, places):
+        if im is not None:
+            sheet.paste(im, (px_, py_))
+    with open(os.path.join(out, "companions.rgba"), "wb") as f:
+        f.write(sheet.size[0].to_bytes(4, "little") + sheet.size[1].to_bytes(4, "little") + sheet.tobytes())
+    # rewrite: the gfx records carry an image index in x; turn it into the sheet position
+    outb, p = bytearray(), 0
+    for _ in range(3):
+        na = blob[p] | blob[p + 1] << 8
+        outb += blob[p:p + 2]; p += 2
+        for _ in range(na):
+            nf = blob[p]
+            outb += blob[p:p + 2 + nf * 2]; p += 2 + nf * 2
+        ng = blob[p] | blob[p + 1] << 8
+        outb += blob[p:p + 2]; p += 2
+        for _ in range(ng):
+            idx, _y, w, h, ox, oy = struct.unpack_from("<HHBBbb", blob, p)
+            px_, py_ = places[idx] if w else (0, 0)
+            outb += struct.pack("<HHBBbb", px_, py_, w, h, ox, oy)
+            p += 8
+    with open(os.path.join(out, "companions.bin"), "wb") as f:
+        f.write(bytes(outb))
+
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__)
@@ -428,6 +683,8 @@ def main():
     for gi, game in enumerate(GAMES):
         sp = Sprites(root, game)
         dialogue = Dialogue(root, game)
+        conds = seasons_conditions(root) if game == "seasons" else {}
+        progress = ages_progress(root, dialogue) if game == "ages" else {}
         lists = object_lists(root, game)
         # the bosses scripts bring in: General Onox where the Din crystal hangs (his throne room), and
         # Ganon, who rises when Twinrova falls (condition 0: never placed, spawned by the game)
@@ -443,7 +700,8 @@ def main():
                     frames, stats = sp.frames(kind, oid, subid)
                     if kind == KIND_INTERACTION:
                         talk[key] = (dialogue.text(oid, subid) or "", secret_of(SECRET_TELLERS, gi, oid, subid),
-                                     secret_of(SECRET_TAKERS, gi, oid, subid))
+                                     secret_of(SECRET_TAKERS, gi, oid, subid), conds.get((oid, subid)),
+                                     progress.get((oid, subid)))
                     sprite_index[key] = len(sprites)
                     sprites.append((key, frames or [], stats))
                 objects.append((gi, group, room, kind, oid, subid, y, x, count, rnd, cond))
@@ -469,17 +727,37 @@ def main():
     with open(os.path.join(out, "sprites.rgba"), "wb") as f:
         f.write(sheet.size[0].to_bytes(4, "little") + sheet.size[1].to_bytes(4, "little") + sheet.tobytes())
     with open(os.path.join(out, "objects.bin"), "wb") as f:
-        f.write(b"OOBJ" + struct.pack("<HHH", 2, len(sprites), len(objects)))
+        f.write(b"OOBJ" + struct.pack("<HHH", 3, len(sprites), len(objects)))
         for (key, frames, stats), pf in zip(sprites, placed):
             ry, rx, dmg, hp = stats if stats else (0, 0, 0, 0)
             f.write(struct.pack("<BBBBBBbBB", *key, ry & 0xff, rx & 0xff, dmg - 256 if dmg >= 128 else dmg, hp & 0xff, len(pf)))
-            text, tell, take = talk.get(key, ("", 0xff, 0xff))
+            text, tell, take, cond, prog = talk.get(key, ("", 0xff, 0xff, None, None))
             tb = text.encode("ascii", "replace")[:399]
             f.write(struct.pack("<BBH", tell, take, len(tb)) + tb)
+            # when the character shows up: 0 always, 1 at the Horon stages in the mask, 2 at one
+            # Sunken City stage, 3 from an Ages progress on
+            if cond and cond[0] == "stage":
+                f.write(struct.pack("<BH", 1, cond[1]))
+            elif cond:
+                f.write(struct.pack("<BH", 2, cond[1]))
+            elif prog:
+                f.write(struct.pack("<BH", 3, prog[1]))
+            else:
+                f.write(struct.pack("<BH", 0, 0))
+            # what they say at each Ages progress (function, table offset, texts)
+            if prog:
+                fnum, least, off, texts = prog
+                f.write(bytes([fnum, off, min(len(texts), 8)]))
+                for t in texts[:8]:
+                    b = t.encode("ascii", "replace")[:399]
+                    f.write(struct.pack("<H", len(b)) + b)
+            else:
+                f.write(bytes([0, 0, 0]))
             for fx, fy, im, ox, oy, dur in pf:
                 f.write(struct.pack("<HHBBhhB", fx, fy, min(im.width, 255), min(im.height, 255), ox, oy, dur))
         for o in objects:
             f.write(bytes(o))
+    companions(root, out)
     drawn = sum(1 for s in placed if s)
     print(f"{len(objects)} objects, {len(sprites)} kinds ({drawn} with sprites), sheet {sheet.size[0]}x{sheet.size[1]}")
 
