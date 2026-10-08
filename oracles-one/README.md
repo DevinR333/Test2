@@ -55,7 +55,8 @@ or emulates the hardware.
 | The 20 linked secrets: the linked NPCs tell them, their takers reward them, no typing | |
 | Link's own animations from the originals (walking, sword, lifting, swimming, jumping, falling, drowning) | |
 | Both games' music in every room and their sound effects, from their own sound data | |
-| Shared hearts, rupees, items, rings, seeds and bombs; extra hearts become rupees | |
+| Shops at their original prices (Subrosia's for ore chunks), and the story items characters hand over: the Rod of Seasons, the Harp's tunes, flippers, Mermaid Suit, Pirate's Bell, keys, Island Chart... | Overworld keyholes are already open (the keys aren't needed) |
+| Shared hearts, rupees, items, rings, seeds and bombs; extra hearts become rupees | Rings and Gasha menus, minigames, the trading sequence |
 
 `--all-items` gives every item of both games, for testing.
 
