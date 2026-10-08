@@ -1,6 +1,7 @@
 #include "treasure.h"
 #include "actors.h"
 #include "audio.h"
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -14,6 +15,14 @@ static void set_level(Item item, int level) {
   if (level < 1) level = 1;
   while (game.item_level[item] < level && game.item_level[item] < item_info[item].max_level) game_give_item(item);
   if (!game.item_level[item]) game_give_item(item);
+}
+
+bool treasure_owned(WorldId g, int t, int param) {
+  if (t == TREASURE_SWORD) return game.item_level[ITEM_SWORD] >= SDL_min(param, 3);
+  if (t == TREASURE_SHIELD) return game.item_level[ITEM_SHIELD] >= SDL_min(param, 3);
+  if (g == WORLD_LABRYNNA && t >= 0x25 && t <= 0x27) return game.item_level[ITEM_HARP_OF_AGES] >= t - 0x24;
+  if (t == TREASURE_ROD) return game.item_level[ITEM_ROD_OF_SEASONS] > 0;
+  return t >= 0 && t < 256 && (game.treasures[g][t >> 3] >> (t & 7) & 1);
 }
 
 void treasure_give(WorldId g, int dungeon, int t, int param) {
@@ -67,6 +76,8 @@ void treasure_give(WorldId g, int dungeon, int t, int param) {
   case TREASURE_ORE_CHUNKS: game.ore_chunks = (uint16_t)SDL_min(999, game.ore_chunks + rupee_value(param)); break;
   case TREASURE_BOMB_UPGRADE: game.bomb_max = (uint8_t)(game.bomb_max < 20 ? 20 : game.bomb_max + 10); break;
   default:
+    // Ages's tunes are the Harp of Ages and its levels (Echoes, Currents, Ages)
+    if (g == WORLD_LABRYNNA && t >= 0x25 && t <= 0x27) { set_level(ITEM_HARP_OF_AGES, t - 0x24); break; }
     if (t >= TREASURE_EMBER_SEEDS && t <= TREASURE_MYSTERY_SEEDS)
       game.seeds[t - TREASURE_EMBER_SEEDS] = (uint8_t)SDL_min(99, game.seeds[t - TREASURE_EMBER_SEEDS] + (param ? param : 20));
     break;   // quest items: remembered in game.treasures
@@ -268,4 +279,74 @@ void room_events_enter(World *areas, World *w) {
     world_put(w, c->tx, c->ty, c->under);
     c->shown = false;
   }
+}
+
+// ---- shops ---------------------------------------------------------------------------------------
+
+typedef struct { uint8_t game, id, subid, currency; uint16_t price; uint8_t treasure, param; } ShopItem;
+static ShopItem *shop_items;
+static int n_shop_items;
+
+bool shops_load(void) {
+  size_t size;
+  Uint8 *d = asset_load("shops.bin", &size);
+  if (!d) return false;
+  n_shop_items = d[0] | d[1] << 8;
+  shop_items = calloc((size_t)n_shop_items + 1, sizeof *shop_items);
+  for (int i = 0; i < n_shop_items && (size_t)(2 + i * 8 + 8) <= size; i++) {
+    const Uint8 *p = d + 2 + i * 8;
+    shop_items[i] = (ShopItem){p[0], p[1], p[2], p[3], (uint16_t)(p[4] | p[5] << 8), p[6], p[7]};
+  }
+  SDL_free(d);
+  return true;
+}
+
+static const ShopItem *shop_find(int g, int id, int subid) {
+  for (int i = 0; i < n_shop_items; i++)
+    if (shop_items[i].game == g && shop_items[i].id == id && shop_items[i].subid == subid) return &shop_items[i];
+  return NULL;
+}
+
+// Goods sold once: everything but ammunition, refills and gasha seeds.
+static bool one_time(int t) {
+  return !(t == TREASURE_BOMBS || t == TREASURE_BOMBCHUS || t == TREASURE_HEART_REFILL || t == TREASURE_GASHA_SEED ||
+           t == 0x2f /* potion */ || t == TREASURE_ORE_CHUNKS || (t >= TREASURE_EMBER_SEEDS && t <= TREASURE_MYSTERY_SEEDS));
+}
+
+static int bought_bit(int id, int subid) { return (id == 0x81 ? 32 : 0) + (subid & 31); }
+
+bool shop_sold_out(int g, int id, int subid) {
+  const ShopItem *s = shop_find(g, id, subid);
+  if (!s || !one_time(s->treasure)) return false;
+  int b = bought_bit(id, subid);
+  return game.shop_bought[g & 1][b >> 3] >> (b & 7) & 1;
+}
+
+const char *shop_offer(int g, int id, int subid, bool confirm, bool *bought) {
+  static char msg[160];
+  static const char *money[6] = {"Rupees", "Ore Chunks", "Bombs", "Ember Seeds", "Scent Seeds", "Gale Seeds"};
+  *bought = false;
+  const ShopItem *s = shop_find(g, id, subid);
+  if (!s) return NULL;
+  if (shop_sold_out(g, id, subid)) return "Sold out!";
+  int have = s->currency == 0 ? game.rupees : s->currency == 1 ? game.ore_chunks : s->currency == 2 ? game.bombs
+           : s->currency == 3 ? game.seeds[0] : s->currency == 4 ? game.seeds[1] : game.seeds[3];
+  if (!confirm) {
+    snprintf(msg, sizeof msg, "%d %s. Press A again to buy it.", s->price, money[s->currency % 6]);
+    return msg;
+  }
+  if (have < s->price) { snprintf(msg, sizeof msg, "You need %d %s.", s->price, money[s->currency % 6]); return msg; }
+  switch (s->currency) {
+  case 0: game.rupees = (uint16_t)(game.rupees - s->price); break;
+  case 1: game.ore_chunks = (uint16_t)(game.ore_chunks - s->price); break;
+  case 2: game.bombs = (uint8_t)(game.bombs - s->price); break;
+  case 3: game.seeds[0] = (uint8_t)(game.seeds[0] - s->price); break;
+  case 4: game.seeds[1] = (uint8_t)(game.seeds[1] - s->price); break;
+  default: game.seeds[3] = (uint8_t)(game.seeds[3] - s->price); break;
+  }
+  treasure_give((WorldId)g, 0, s->treasure, s->param);
+  if (s->treasure == 0x0e && s->param >= 0x0b && s->param <= 0x0d) game.companion = (uint8_t)(s->param - 0x0b);   // the Flute calls its animal
+  if (one_time(s->treasure)) { int b = bought_bit(id, subid); game.shop_bought[g & 1][b >> 3] |= (uint8_t)(1 << (b & 7)); }
+  *bought = true;
+  return "Thank you! Come again!";
 }

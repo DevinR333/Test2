@@ -19,7 +19,9 @@ enum {
 
 // Gives a treasure found in `game`'s world (dungeon: which dungeon, for keys, maps and compasses).
 void treasure_give(WorldId game, int dungeon, int treasure, int param);
-int rupee_value(int param);       // code/bank0.s getRupeeValue
+int rupee_value(int param);
+// Whether Link already has a treasure (at that level, for leveled items).
+bool treasure_owned(WorldId game, int treasure, int param);       // code/bank0.s getRupeeValue
 
 // Chests (chests.bin) and the tiles that keys open, placed into the loaded areas.
 bool chests_load(World *areas, int n);
@@ -33,6 +35,14 @@ void tile_change_for_good(World *areas, World *w, int tx, int ty, uint8_t mt);
 // that the originals make appear show up then. Called every frame; _enter when arriving in an area.
 void room_events_update(World *areas, int n, World *w, float lx, float ly);
 void room_events_enter(World *areas, World *w);
+
+// Shops (shops.bin): what a shop item (interaction $47, Subrosia's $81) sells.
+bool shops_load(void);
+// Whether a shop item has been bought for good (it no longer stands in the shop).
+bool shop_sold_out(int game, int id, int subid);
+// Buying it: returns the message (price, not enough money, bought), or NULL if it isn't for sale.
+// confirm false only asks; true pays and gives.
+const char *shop_offer(int game, int id, int subid, bool confirm, bool *bought);
 
 // Link pressed A facing (px, py): opens a chest there. Returns the pickup text, or NULL.
 const char *chest_open_at(World *areas, int n, World *w, float px, float py);

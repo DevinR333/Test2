@@ -4,14 +4,15 @@
 Writes into OUT_DIR:
   sprites.rgba  the animation frames of every placed interaction, enemy and part, packed in rows
   objects.bin   (little endian)
-    "OOBJ", u16 version 3, u16 sprite count, u16 object count
+    "OOBJ", u16 version 4, u16 sprite count, u16 object count
     sprites: u8 game, u8 kind (0 interaction, 1 enemy, 2 part), u8 id, u8 subid,
              u8 radius y, u8 radius x, s8 damage (quarter hearts, negative), u8 health,
              u8 frame count (<= 4), u8 secret told, u8 secret taken ($ff none), u16 text length,
              the text (what the character says first), u8 when shown (0 always, 1 Horon stage
              mask, 2 Sunken City stage, 3 from Ages progress), u16 its mask / stage / progress,
              u8 Ages progress function (0 none), u8 table offset, u8 text count, (u16 length,
-             text) per progress, then per frame: u16 x, u16 y (in
+             text) per progress, u8 gift count, (u8 treasure, u8 parameter, u16 length, text)
+             per gift, then per frame: u16 x, u16 y (in
              sprites.rgba), u8 w, u8 h, s16 origin x, s16 origin y (top-left relative to the
              object's position), u8 duration
     objects: u8 game, u8 group, u8 room, u8 kind, u8 id, u8 subid, u8 y, u8 x (in the room),
@@ -481,6 +482,53 @@ def ages_progress(root, dialogue):
     return out
 
 
+# Story items characters hand over in their scripts (giveitem): what each kind of character gives.
+SKIP_GIFTS = ("TREASURE_GASHA_SEED", "TREASURE_TRADEITEM", "TREASURE_RING", "TREASURE_BOMBS", "TREASURE_HEART_CONTAINER",
+              "TREASURE_ORE_CHUNKS", "TREASURE_BIGGORON_SWORD", "TREASURE_BOMBCHUS", "TREASURE_BOMB_UPGRADE")
+
+
+def gifts(root, game, dialogue):
+    """interaction id -> [(treasure, parameter, pickup text)] from the giveitem lines of its scripts."""
+    from extract_world import treasure_objects
+    tre = enum_ids(root, "constants/common/treasure.s", game, "TREASURE_")
+    objs = treasure_objects(root, game)
+    by_tp = {}
+    for name, (t, prm, tx) in objs.items():
+        by_tp.setdefault((t, prm), tx)
+    texts = dialogue.texts
+    out = {}
+    names = dialogue.names
+    for oid in set(list(dialogue.code.keys()) + list(names.keys())):
+        shared, refs, txs = dialogue.code.get(oid, (0, [], []))
+        labels = list(refs) if shared == 1 else []
+        labels += dialogue.sections.get(names.get(oid, ""), [])
+        found = []
+        for lab in labels:
+            for line in dialogue.scripts.get(lab, []):
+                p = line.replace(",", " ").split()
+                if not p or p[0] != "giveitem" or len(p) < 2:
+                    continue
+                name = p[1]
+                if name.startswith(SKIP_GIFTS) or name.startswith("ITEM_"):
+                    continue
+                if name.startswith("TREASURE_OBJECT_"):
+                    if name not in objs:
+                        continue
+                    t, prm, tx = objs[name]
+                else:
+                    if name not in tre:
+                        continue
+                    t = tre[name]
+                    prm = num(p[2]) if len(p) > 2 else 0
+                    tx = by_tp.get((t, prm), by_tp.get((t, 0), 0xff))
+                text = texts.get(tx, "") if tx != 0xff else ""
+                if (t, prm) not in [(a, b) for a, b, _ in found]:
+                    found.append((t, prm, text))
+        if found:
+            out[oid] = found[:4]
+    return out
+
+
 def object_lists(root, game):
     """(group, room) -> [(kind, id, subid, y, x, count, random, condition)] as at the start of a game."""
     files = [os.path.join(root, f"objects/{game}", f) for f in sorted(os.listdir(os.path.join(root, f"objects/{game}"))) if f.endswith(".s")]
@@ -525,11 +573,24 @@ def object_lists(root, game):
                 break
         return out
 
-    result = {}
+    by_table = {}
     for label in labels:
         m = re.match(r"group(\d)Map([0-9a-f]{2})ObjectData$", label)
         if m:
-            result[(int(m.group(1)), int(m.group(2), 16))] = walk(label, 0xff, set())
+            by_table[(int(m.group(1)), int(m.group(2), 16))] = walk(label, 0xff, set())
+    # objectDataGroupTable: which table each group reads (Seasons' groups 1-3 share group 1's)
+    tables = []
+    for line in lines_of(os.path.join(root, f"objects/{game}/pointers.s")):
+        m = re.match(r"\.dw\s+group(\d)ObjectDataTable", line)
+        if m:
+            tables.append(int(m.group(1)))
+        elif tables and not line.startswith(".dw"):
+            break
+    result = {}
+    for group, src in enumerate(tables[:8]):
+        for (g, room), objs in by_table.items():
+            if g == src:
+                result[(group, room)] = objs
     return result
 
 
@@ -673,6 +734,102 @@ def companions(root, out):
         f.write(bytes(outb))
 
 
+def game_lines(root, rel, game):
+    """A source file's lines with .ifdef ROM_SEASONS / ROM_AGES resolved for one game."""
+    stack = []
+    for raw in open(os.path.join(root, rel)):
+        line = re.sub(r"/\*.*?\*/", "", raw.split(";", 1)[0]).strip()
+        if not line:
+            continue
+        w = line.split()[0]
+        if w == ".ifdef":
+            stack.append(line.split()[1] == ("ROM_SEASONS" if game == "seasons" else "ROM_AGES"))
+        elif w == ".else":
+            stack[-1] = not stack[-1]
+        elif w == ".endif":
+            stack.pop()
+        elif all(stack):
+            yield line
+
+
+def enum_ids(root, rel, game, prefix):
+    ids, val = {}, 0
+    for line in game_lines(root, rel, game):
+        p = line.split()
+        if p[0] == ".enum":
+            val = num(p[1])
+        elif len(p) >= 2 and p[0].startswith(prefix) and p[1] in ("db", ".db"):
+            ids[p[0]] = val
+            val += 1
+        elif p[0] == ".define" and len(p) >= 3 and p[1].startswith(prefix):
+            try:
+                ids[p[1]] = num(p[2])
+            except ValueError:
+                pass
+    return ids
+
+
+def shops(root, out):
+    """shops.bin: what shop items sell. u16 count, then (u8 game, u8 interaction id, u8 subid,
+    u8 currency (0 rupees, 1 ore chunks, 2 bombs, 3 ember, 4 scent, 5 gale seeds), u16 price,
+    u8 treasure, u8 parameter) each. From shopItem.s (both games) and Seasons' subrosianShop.s."""
+    rows = []
+    rupees = [0, 1, 2, 5, 10, 20, 40, 30, 60, 70, 25, 50, 100, 200, 400, 150, 300, 500, 900, 80, 999]
+    for gi, game in enumerate(GAMES):
+        tre = enum_ids(root, "constants/common/treasure.s", game, "TREASURE_")
+        rv = enum_ids(root, "constants/common/rupeeValues.s", game, "RUPEEVAL_")
+        consts = {**tre, **rv, "SPECIALOBJECT_RICKY": 0x0b, "SPECIALOBJECT_DIMITRI": 0x0c, "SPECIALOBJECT_MOOSH": 0x0d}
+
+        def val(t):
+            t = t.strip().rstrip(",").lstrip("<")
+            if t in consts:
+                return consts[t]
+            try:
+                return num(t)
+            except ValueError:
+                return 0
+        cur, prices, gives = None, [], []
+        for line in game_lines(root, "object_code/common/interactions/shopItem.s", game):
+            m = re.match(r"(\w+):$", line)
+            if m:
+                cur = m.group(1)
+                continue
+            if line.startswith(".db") and cur == "shopItemPrices":
+                prices.append(val(line[3:].split()[0]))
+            elif line.startswith(".db") and cur == "shopItemTreasureToGive":
+                v = line[3:].split()
+                gives.append((val(v[0]), val(v[1]) if len(v) > 1 else 0))
+        for sub, (t, prm) in enumerate(gives):
+            price = rupees[prices[sub]] if sub < len(prices) and prices[sub] < len(rupees) else 0
+            if t:
+                rows.append((gi, 0x47, sub, 0, price, t, prm & 0xff))
+        if game == "seasons":
+            cur, costs, gives = None, [], []
+            for line in game_lines(root, "object_code/seasons/interactions/subrosianShop.s", game):
+                m = re.match(r"(@?\w+):$", line)
+                if m:
+                    cur = m.group(1)
+                    continue
+                if cur == "@table_779e" and line.startswith(".db"):
+                    costs.append([t.strip() for t in line[3:].split(",")])
+                elif cur == "@table_77da" and line.startswith(".db"):
+                    v = [t.strip() for t in line[3:].split(",")]
+                    gives.append((val(v[0]), val(v[1])))
+            other = {"<wNumBombs": 2, "<wNumEmberSeeds": 3, "<wNumScentSeeds": 4, "<wNumGaleSeeds": 5}
+            for sub, (t, prm) in enumerate(gives):
+                c = costs[sub] if sub < len(costs) else ["0", "$00", "$00", "$00"]
+                ore = val(c[3])
+                if ore:
+                    rows.append((gi, 0x81, sub, 1, rupees[ore] if ore < len(rupees) else 0, t, prm))
+                elif c[1] in other:
+                    rows.append((gi, 0x81, sub, other[c[1]], val(c[2]), t, prm))
+                elif t:
+                    rows.append((gi, 0x81, sub, 1, 0, t, prm))
+    with open(os.path.join(out, "shops.bin"), "wb") as f:
+        f.write(struct.pack("<H", len(rows)) + b"".join(struct.pack("<BBBBHBB", *r) for r in rows))
+    return len(rows)
+
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__)
@@ -685,6 +842,7 @@ def main():
         dialogue = Dialogue(root, game)
         conds = seasons_conditions(root) if game == "seasons" else {}
         progress = ages_progress(root, dialogue) if game == "ages" else {}
+        gives = gifts(root, game, dialogue)
         lists = object_lists(root, game)
         # the bosses scripts bring in: General Onox where the Din crystal hangs (his throne room), and
         # Ganon, who rises when Twinrova falls (condition 0: never placed, spawned by the game)
@@ -701,7 +859,7 @@ def main():
                     if kind == KIND_INTERACTION:
                         talk[key] = (dialogue.text(oid, subid) or "", secret_of(SECRET_TELLERS, gi, oid, subid),
                                      secret_of(SECRET_TAKERS, gi, oid, subid), conds.get((oid, subid)),
-                                     progress.get((oid, subid)))
+                                     progress.get((oid, subid)), gives.get(oid, []))
                     sprite_index[key] = len(sprites)
                     sprites.append((key, frames or [], stats))
                 objects.append((gi, group, room, kind, oid, subid, y, x, count, rnd, cond))
@@ -727,11 +885,11 @@ def main():
     with open(os.path.join(out, "sprites.rgba"), "wb") as f:
         f.write(sheet.size[0].to_bytes(4, "little") + sheet.size[1].to_bytes(4, "little") + sheet.tobytes())
     with open(os.path.join(out, "objects.bin"), "wb") as f:
-        f.write(b"OOBJ" + struct.pack("<HHH", 3, len(sprites), len(objects)))
+        f.write(b"OOBJ" + struct.pack("<HHH", 4, len(sprites), len(objects)))
         for (key, frames, stats), pf in zip(sprites, placed):
             ry, rx, dmg, hp = stats if stats else (0, 0, 0, 0)
             f.write(struct.pack("<BBBBBBbBB", *key, ry & 0xff, rx & 0xff, dmg - 256 if dmg >= 128 else dmg, hp & 0xff, len(pf)))
-            text, tell, take, cond, prog = talk.get(key, ("", 0xff, 0xff, None, None))
+            text, tell, take, cond, prog, gv = talk.get(key, ("", 0xff, 0xff, None, None, []))
             tb = text.encode("ascii", "replace")[:399]
             f.write(struct.pack("<BBH", tell, take, len(tb)) + tb)
             # when the character shows up: 0 always, 1 at the Horon stages in the mask, 2 at one
@@ -753,11 +911,17 @@ def main():
                     f.write(struct.pack("<H", len(b)) + b)
             else:
                 f.write(bytes([0, 0, 0]))
+            # story items the character hands over: (treasure, parameter, text)
+            f.write(bytes([len(gv)]))
+            for t, prm, gtext in gv:
+                b = gtext.encode("ascii", "replace")[:159]
+                f.write(bytes([t & 0xff, prm & 0xff]) + struct.pack("<H", len(b)) + b)
             for fx, fy, im, ox, oy, dur in pf:
                 f.write(struct.pack("<HHBBhhB", fx, fy, min(im.width, 255), min(im.height, 255), ox, oy, dur))
         for o in objects:
             f.write(bytes(o))
     companions(root, out)
+    print("shop items:", shops(root, out))
     drawn = sum(1 for s in placed if s)
     print(f"{len(objects)} objects, {len(sprites)} kinds ({drawn} with sprites), sheet {sheet.size[0]}x{sheet.size[1]}")
 

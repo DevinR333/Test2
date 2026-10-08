@@ -40,7 +40,12 @@ void actors_draw(SDL_Renderer *ren, const View *v, bool behind_link, float link_
 // Draws a heart container or essence pickup centred at (cx, cy) (set by main, from the HUD art).
 extern void (*pickup_icon)(SDL_Renderer *ren, int what, float cx, float cy, float px);
 // The character Link faces, close enough to talk to: what they say and the secret they tell or take.
-typedef struct { const char *text; int tell, take; } ActorTalk;
+typedef struct { int treasure, param; char *text; } ActorGift;
+typedef struct { const char *text; int tell, take, game, id, subid, index, n_gifts; const ActorGift *gifts; } ActorTalk;
+// Takes a character away (an item bought off the shelf).
+void actors_remove(int index);
+// Set by main: whether a placed character stays away for good (sold shop goods).
+extern bool (*actors_gone)(int game, int id, int subid);
 bool actors_talk(const Link *l, ActorTalk *out);
 // Drops a heart or rupee (half the time), as a cut bush or beaten enemy does.
 void actors_drop(float x, float y);

@@ -90,6 +90,7 @@ typedef struct {
   bool gale_open;                 // the Gale Seed's list of trees to fly to
   int gale_sel;
   bool riding;                    // on the Flute's companion
+  int shop_pending;               // the shop item Link was told the price of (-1 none)
   float side_vy;                  // side-view rooms: falling or jumping speed
   bool side_ground;
 } App;
@@ -319,7 +320,25 @@ static void combat(App *a) {
 static const char *talk(App *a) {
   static char buf[800];
   ActorTalk t;
-  if (!actors_talk(&a->link, &t)) return NULL;
+  if (!actors_talk(&a->link, &t)) { a->shop_pending = -1; return NULL; }
+  // goods in a shop: A once for the price, again to buy
+  bool bought;
+  int key = t.game << 16 | t.id << 8 | t.subid;
+  const char *offer = shop_offer(t.game, t.id, t.subid, a->shop_pending == key, &bought);
+  if (offer) {
+    if (bought) { sfx("SND_GETITEM"); a->shop_pending = -1; if (shop_sold_out(t.game, t.id, t.subid)) actors_remove(t.index); }
+    else a->shop_pending = a->shop_pending == key ? -1 : key;
+    return offer;
+  }
+  // story items: the first of the character's gifts Link doesn't have yet
+  for (int i = 0; i < t.n_gifts; i++) {
+    const ActorGift *g = &t.gifts[i];
+    if (treasure_owned((WorldId)t.game, g->treasure, g->param)) continue;
+    treasure_give((WorldId)t.game, 0, g->treasure, g->param);
+    sfx("SND_GETITEM");
+    snprintf(buf, sizeof buf, "%s%s%s", t.text, t.text[0] ? "\n" : "", g->text[0] ? g->text : "You got something!");
+    return buf;
+  }
   if (t.take >= 0 && secret_redeem((Secret)t.take)) {
     snprintf(buf, sizeof buf, "%s%sYou know the %s! Here is your reward.", t.text, t.text[0] ? "\n" : "", secret_info[t.take].name);
     return buf;
@@ -670,6 +689,7 @@ int main(int argc, char **argv) {
   int frames = 0, win_w = 1280, win_h = 720, start_world = -1, menu_page = -1;
   float start_x = -1, start_y = -1, zoom = 1;
   bool all_items = false, touch = false, touch_hidden = false;
+  bool pos_set = false;
   int keys = 0, equip_a = -1, equip_b = -1, room_game = -1, room_group = 0, room_id = 0;
   int aspect = ASPECT_FILL;
   for (int i = 1; i < argc; i++) {
@@ -681,7 +701,7 @@ int main(int argc, char **argv) {
       i++;   // holodrum, labrynna, or an area number from areas.bin
       start_world = !strcmp(argv[i], "labrynna") ? WORLD_LABRYNNA : !strcmp(argv[i], "holodrum") ? WORLD_HOLODRUM : WORLD_COUNT + atoi(argv[i]);
     }
-    else if (!strcmp(argv[i], "--pos") && i + 1 < argc) sscanf(argv[++i], "%f,%f", &start_x, &start_y);
+    else if (!strcmp(argv[i], "--pos") && i + 1 < argc) { sscanf(argv[++i], "%f,%f", &start_x, &start_y); pos_set = true; }
     else if (!strcmp(argv[i], "--zoom") && i + 1 < argc) zoom = (float)atof(argv[++i]);
     else if (!strcmp(argv[i], "--aspect") && i + 1 < argc) { i++; aspect = !strcmp(argv[i], "4:3") ? ASPECT_4_3 : !strcmp(argv[i], "16:9") ? ASPECT_16_9 : ASPECT_FILL; }
     else if (!strcmp(argv[i], "--menu") && i + 1 < argc) menu_page = atoi(argv[++i]);
@@ -721,6 +741,9 @@ int main(int argc, char **argv) {
   for (int i = 0; i < WORLD_COUNT; i++) build_house(&a.worlds[a.overworld[i]]);
   link_blocker = block_at;
   trees_load();
+  shops_load();
+  actors_gone = shop_sold_out;
+  a.shop_pending = -1;
   g_art = &a.art;
   terrain_icon = draw_icon;
   items_icon = draw_icon_rotated;
@@ -732,20 +755,21 @@ int main(int argc, char **argv) {
   if (all_items) items_give_all();
   if (equip_a >= 0) game.equip_a = (uint8_t)equip_a;
   if (getenv("ORACLES_COMPANION")) game.companion = (uint8_t)atoi(getenv("ORACLES_COMPANION"));   // testing
+  if (getenv("ORACLES_RUPEES")) game.rupees = (uint16_t)atoi(getenv("ORACLES_RUPEES"));   // testing
   if (getenv("ORACLES_SEED")) game.seed_selected = (uint8_t)atoi(getenv("ORACLES_SEED"));   // testing
   if (equip_b >= 0) game.equip_b = (uint8_t)equip_b;
   chests_restore(a.worlds, a.n_worlds);
   for (int g = 0; keys && g < WORLD_COUNT; g++) for (int d = 0; d < 16; d++) game.small_keys[g][d] = (uint8_t)keys;
   if (start_world >= 0) game.area = (uint16_t)(start_world < WORLD_COUNT ? a.overworld[start_world] : start_world - WORLD_COUNT);
-  if (start_x >= 0) { game.x = start_x; game.y = start_y; }
+  if (pos_set && room_game < 0) { game.x = start_x; game.y = start_y; }
   if (room_game >= 0) {
     int area;
     float ox, oy;
     if (world_find_room(a.worlds, a.n_worlds, room_game, room_group, room_id, &area, &ox, &oy)) {
       const World *w = &a.worlds[area];
       game.area = (uint16_t)area;
-      game.x = ox + (float)(w->base.room_w * MT) / 2 + (start_x >= 0 ? start_x : 0);
-      game.y = oy + (float)(w->base.room_h * MT) - 24 + (start_x >= 0 ? start_y : 0);
+      game.x = ox + (float)(w->base.room_w * MT) / 2 + (pos_set ? start_x : 0);
+      game.y = oy + (float)(w->base.room_h * MT) - 24 + (pos_set ? start_y : 0);
     }
   }
   if (game.area >= a.n_worlds) game.area = (uint16_t)a.overworld[WORLD_HOLODRUM];
@@ -789,9 +813,9 @@ int main(int argc, char **argv) {
       if (!s || !SDL_SaveBMP(s, shot)) { SDL_Log("screenshot: %s", SDL_GetError()); return 1; }
       SDL_DestroySurface(s);
       int room = world_room_index(a.world, a.link.x, a.link.y);
-      SDL_Log("saved %s after %d frames: link at %.0f,%.0f in area %d (%s, group %d, room %02x), health %d, rupees %d, enemies %d", shot, frame,
+      SDL_Log("saved %s after %d frames: link at %.0f,%.0f in area %d (%s, group %d, room %02x), health %d, rupees %d, shield*10+rod %d, enemies %d", shot, frame,
               a.link.x, a.link.y, (int)(a.world - a.worlds), a.world->name, a.world->group, room >= 0 ? a.world->room_ids[room] : 0xff,
-              game.health, game.rupees, actors_enemies_alive());
+              game.health, game.rupees, game.item_level[ITEM_SHIELD] * 10 + game.item_level[ITEM_ROD_OF_SEASONS], actors_enemies_alive());
       break;
     }
     SDL_RenderPresent(a.ren);

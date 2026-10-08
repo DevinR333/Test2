@@ -22,6 +22,8 @@ typedef struct {
   uint16_t vis;
   uint8_t prog_fn, prog_off, n_ptexts;   // Ages: what they say at each progress (getGameProgress_1/_2)
   char *ptexts[8];
+  int n_gifts;
+  ActorGift gifts[4];
 } Kind;
 typedef struct { uint8_t game, group, room, kind, id, subid, y, x, count, random, cond; } Placement;
 
@@ -56,7 +58,7 @@ bool actors_load(SDL_Renderer *ren) {
   if (!image_load(ren, "sprites.rgba", &sheet)) return false;
   size_t size;
   Uint8 *d = asset_load("objects.bin", &size);
-  if (!d || size < 10 || memcmp(d, "OOBJ", 4) != 0 || (d[4] | d[5] << 8) != 3) { SDL_free(d); return false; }
+  if (!d || size < 10 || memcmp(d, "OOBJ", 4) != 0 || (d[4] | d[5] << 8) != 4) { SDL_free(d); return false; }
   n_kinds = d[6] | d[7] << 8;
   n_places = d[8] | d[9] << 8;
   kinds = calloc((size_t)n_kinds, sizeof *kinds);
@@ -89,6 +91,20 @@ bool actors_load(SDL_Renderer *ren) {
       k->ptexts[t] = calloc((size_t)l2 + 1, 1);
       memcpy(k->ptexts[t], p, (size_t)l2);
       p += l2;
+    }
+    if (p >= end) break;
+    int ng = *p++;
+    for (int gi = 0; gi < ng && p + 4 <= end; gi++) {
+      int t = p[0], prm = p[1], l3 = p[2] | p[3] << 8;
+      p += 4;
+      if (p + l3 > end) break;
+      if (gi < 4) {
+        ActorGift *g = &k->gifts[k->n_gifts++];
+        g->treasure = t; g->param = prm;
+        g->text = calloc((size_t)l3 + 1, 1);
+        memcpy(g->text, p, (size_t)l3);
+      }
+      p += l3;
     }
     for (int f = 0; f < k->n_frames && p + 11 <= end; f++, p += 11) {
       Frame *fr = &k->frames[f];
@@ -246,9 +262,11 @@ void actors_enter(const World *areas, int n, const World *w) {
       if (pl->game != w->id || pl->group != w->group || pl->room != room) continue;
       if (pl->cond != 0xff && !(pl->cond >> state & 1)) continue;
       const Kind *k = find_kind(pl->game, pl->kind, pl->id, pl->subid);
-      if (!k || (!k->n_frames && pl->kind != ACTOR_ENEMY)) continue;
-      if (pl->kind == ACTOR_INTERACTION && pl->random == 2) continue;   // placed by a script later
+      bool gives = k && (k->n_gifts || k->take != 0xff || k->tell != 0xff);   // story characters may have no sprite here
+      if (!k || (!k->n_frames && pl->kind != ACTOR_ENEMY && !gives)) continue;
+      if (pl->kind == ACTOR_INTERACTION && pl->random == 2 && !gives) continue;   // placed by a script later
       if (pl->kind == ACTOR_INTERACTION && !shown_now(k)) continue;     // not at this point in the story
+      if (pl->kind == ACTOR_INTERACTION && actors_gone && actors_gone(pl->game, pl->id, pl->subid)) continue;
       for (int c = 0; c < pl->count && n_actors < MAX_ACTORS; c++) {
         Actor *a = &actors[n_actors];
         memset(a, 0, sizeof *a);
@@ -257,6 +275,7 @@ void actors_enter(const World *areas, int n, const World *w) {
         a->room = r;
         a->x = ox + pl->x;
         a->y = oy + pl->y;
+        if (pl->random == 2) { a->x = ox + (float)(w->base.room_w * MT) / 2; a->y = oy + (float)(w->base.room_h * MT) / 2 - 16; }
         if (pl->random) {
           // a random walkable spot in the room, like getRandomPositionForEnemy
           for (int tries = 0; tries < 32; tries++) {
@@ -264,7 +283,7 @@ void actors_enter(const World *areas, int n, const World *w) {
             if (walkable(w, rx, ry)) { a->x = rx; a->y = ry; break; }
           }
         }
-        if (!k->n_frames) continue;       // an enemy the sprite data can't draw yet: left out
+        if (!k->n_frames && !gives) continue;   // an enemy the sprite data can't draw yet: left out
         if (a->kind == ACTOR_ENEMY) {
           setup_enemy(a, k, pl->game);
           if (!a->hp) continue;                 // health $7f: invincible scenery (fireballs, traps)
@@ -579,6 +598,7 @@ void actors_draw(SDL_Renderer *ren, const View *v, bool behind_link, float link_
     for (int f = 0; f < a->k->n_frames; f++) total += a->k->frames[f].dur ? a->k->frames[f].dur : 8;
     int t = total ? a->anim % total : 0, f = 0;
     while (f < a->k->n_frames - 1 && t >= (a->k->frames[f].dur ? a->k->frames[f].dur : 8)) { t -= a->k->frames[f].dur ? a->k->frames[f].dur : 8; f++; }
+    if (!a->k->n_frames) continue;
     const Frame *fr = &a->k->frames[f];
     if (a->hidden) continue;
     if (a->hurt && a->behave != B_SEEDTREE && (a->hurt / 2) & 1) continue;   // flicker when hit
@@ -588,6 +608,9 @@ void actors_draw(SDL_Renderer *ren, const View *v, bool behind_link, float link_
   }
 }
 
+bool (*actors_gone)(int game, int id, int subid);
+void actors_remove(int index) { if (index >= 0 && index < n_actors) actors[index].alive = false; }
+
 bool actors_talk(const Link *l, ActorTalk *out) {
   static const float fx[4] = {0, 12, 0, -12}, fy[4] = {-10, 2, 14, 2};
   float px = l->x + fx[l->dir], py = l->y + fy[l->dir];
@@ -596,12 +619,17 @@ bool actors_talk(const Link *l, ActorTalk *out) {
   for (int i = 0; i < n_actors; i++) {
     const Actor *a = &actors[i];
     if (!a->alive || a->kind != ACTOR_INTERACTION || !a->k) continue;
-    if (!say(a->k)[0] && a->k->tell == 0xff && a->k->take == 0xff) continue;
+    bool shop = a->k->id == 0x47 || (a->k->game == WORLD_HOLODRUM && a->k->id == 0x81);
+    if (!shop && !say(a->k)[0] && a->k->tell == 0xff && a->k->take == 0xff && !a->k->n_gifts) continue;
     float dx = a->x - px, dy = a->y - py, d = dx * dx + dy * dy;
     if (d < best_d) { best_d = d; best = a; }
   }
   if (!best) return false;
   out->text = say(best->k);
+  out->game = best->k->game; out->id = best->k->id; out->subid = best->k->subid;
+  out->index = (int)(best - actors);
+  out->n_gifts = best->k->n_gifts;
+  out->gifts = best->k->gifts;
   out->tell = best->k->tell == 0xff ? -1 : best->k->tell;
   out->take = best->k->take == 0xff ? -1 : best->k->take;
   return true;
