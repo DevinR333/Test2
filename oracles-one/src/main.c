@@ -564,7 +564,7 @@ static void update(App *a) {
   for (int b = 0; b < 2 && !busy; b++) {
     if (!(in->pressed & (b ? BTN_B : BTN_A))) continue;
     Item item = (Item)(b ? game.equip_b : game.equip_a);
-    if (a->riding) { companion_attack(a); continue; }
+    if (a->riding && item != ITEM_STRANGE_FLUTE) { companion_attack(a); continue; }   // the Flute still sends them home
     if (!terrain_use(item, a->worlds, a->n_worlds, a->world, &a->link) && game.item_level[item]) items_use(item, &a->link, a->world);
   }
   {
