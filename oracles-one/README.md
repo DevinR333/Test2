@@ -56,7 +56,8 @@ or emulates the hardware.
 | Link's own animations from the originals (walking, sword, lifting, swimming, jumping, falling, drowning) | |
 | Both games' music in every room and their sound effects, from their own sound data | |
 | Shops at their original prices (Subrosia's for ore chunks), and the story items characters hand over: the Rod of Seasons, the Harp's tunes, flippers, Mermaid Suit, Pirate's Bell, keys, Island Chart... | Overworld keyholes are already open (the keys aren't needed) |
-| Rings: a ring page in the Start menu (the originals' names and descriptions) and their effects; rings you wear go in the ring box, and Select during play swaps through them on the fly | Minigames, the trading sequence |
+| Sword: spin attack (hold, release), beams from the Noble and Master Swords at full health; the trading sequence up to the Biggoron's Sword; riding, Ricky punches, Dimitri bites and Moosh stomps | |
+| Rings: a ring page in the Start menu (the originals' names and descriptions) and their effects; rings you wear go in the ring box, and Select during play swaps through them on the fly | Minigames (their prizes come from talking to their hosts) |
 | Gasha Seeds: plant them in Gasha spots, beat monsters, harvest the nut (the originals' prize odds by spot and progress) | |
 | Shared hearts, rupees, items, rings, seeds and bombs; extra hearts become rupees | |
 

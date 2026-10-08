@@ -31,6 +31,7 @@ typedef struct {
   const Kind *k;
   int kind, boss, room, behave, state, st;
   float z, vz;
+  float hx, hy;                 // where it was placed (traps slide back there)
   bool hidden, invincible;
   float x, y, vx, vy;
   int hp, timer, hurt, anim;
@@ -285,6 +286,7 @@ void actors_enter(const World *areas, int n, const World *w) {
           }
         }
         if (!k->n_frames && !gives) continue;   // an enemy the sprite data can't draw yet: left out
+        a->hx = a->x; a->hy = a->y;
         if (a->kind == ACTOR_ENEMY) {
           setup_enemy(a, k, pl->game);
           if (!a->hp) continue;                 // health $7f: invincible scenery (fireballs, traps)
@@ -452,7 +454,12 @@ static void behave(Actor *a, const World *w, const Link *link, float dx, float d
       a->state = 70;
       break;
     }
-    if (a->invincible) { if (a->timer > 0) a->timer--; break; }   // traps wait where they are
+    if (a->invincible) {                     // traps slide back home, then wait there
+      if (a->timer > 0) a->timer--;
+      float hx = a->hx - a->x, hy = a->hy - a->y;
+      if (SDL_fabsf(hx) > 1 || SDL_fabsf(hy) > 1) { a->x += SDL_clamp(hx, -1.0f, 1.0f); a->y += SDL_clamp(hy, -1.0f, 1.0f); a->timer = 10; }
+      break;
+    }
     wander(a, w, 0.4f);
     break;
   }
