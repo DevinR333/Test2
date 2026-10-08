@@ -124,7 +124,9 @@ bool actors_block(float px, float py) {
   return false;
 }
 
-static void drop(float x, float y) {
+void actors_drop(float x, float y);
+static void drop(float x, float y) { actors_drop(x, y); }
+void actors_drop(float x, float y) {
   if (n_actors >= MAX_ACTORS || frand() > 0.5f) return;
   Actor *a = &actors[n_actors++];
   memset(a, 0, sizeof *a);
@@ -207,6 +209,23 @@ void actors_draw(SDL_Renderer *ren, const View *v, bool behind_link, float link_
     float x1 = view_sx(v, a->x + fr->ox + fr->w), y1 = view_sy(v, a->y + fr->oy + fr->h);
     image_draw(ren, &sheet, fr->x, fr->y, fr->w, fr->h, x0, y0, x1 - x0, y1 - y0, false);
   }
+}
+
+int actors_hit_area(float x, float y, float r, int damage) {
+  int hits = 0;
+  for (int i = 0; i < n_actors; i++) {
+    Actor *a = &actors[i];
+    if (!a->alive || a->kind != ACTOR_ENEMY || a->hurt) continue;
+    float dx = a->x - x, dy = a->y - y;
+    if (dx * dx + dy * dy > r * r) continue;
+    a->hp -= damage;
+    a->hurt = 16;
+    float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f;
+    a->vx = dx / len * 2.5f; a->vy = dy / len * 2.5f;
+    if (a->hp <= 0) { a->alive = false; drop(a->x, a->y); }
+    hits++;
+  }
+  return hits;
 }
 
 int actors_enemies_alive(void) {

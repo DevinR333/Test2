@@ -11,8 +11,8 @@ writes, into the output directory:
   <world>.png     a preview of the whole world (only with --previews)
 
 Map file layout (little endian):
-  char[4] "OWLD", u16 version (1), u16 width, u16 height (in metatiles), u16 room_w, u16 room_h,
-  then width*height u16 atlas indices, then width*height u8 collision values.
+  char[4] "OWLD", u16 version (2), u16 width, u16 height (in metatiles), u16 room_w, u16 room_h,
+  then width*height u16 atlas indices, width*height u8 collision values, width*height u8 metatiles.
 
 Usage: extract_world.py DISASM_DIR OUT_DIR [--previews]
 """
@@ -446,6 +446,24 @@ class Rooms:
         self.tables = {g: tileset_tables(root, g) for g in GAMES}
         self.seasons_auto = default_seasons(root)
         self.atlas, self.atlas_index, self.ts_cache = [], {}, {}
+        self.ts_ids = {}                         # (game, tileset) -> index in tiles.bin
+
+    def ts_index(self, game, ts):
+        return self.ts_ids.setdefault((game, ts), len(self.ts_ids))
+
+    def tileset_cells(self, game, ts):
+        """The atlas cell and collision of all 256 metatiles of a tileset (for tiles that change)."""
+        key = (game, ts)
+        if key not in self.ts_cache:
+            self.ts_cache[key] = self.games[game].metatiles(ts)
+        tiles, coll = self.ts_cache[key]
+        cells = []
+        for img in tiles:
+            if img not in self.atlas_index:
+                self.atlas_index[img] = len(self.atlas)
+                self.atlas.append(img)
+            cells.append(self.atlas_index[img])
+        return cells, coll
 
     def tileset(self, game, group, room, season):
         g = self.games[game]
@@ -532,7 +550,7 @@ class Rooms:
                 cells.append(self.atlas_index[img])
                 colls.append(coll[mt])
                 mts.append(mt)
-        return w, h, cells, colls, mts, ts[0] >> 4
+        return w, h, cells, colls, mts, ts[0] >> 4, self.ts_index(game, ts)
 
 
 class Area:
@@ -544,11 +562,13 @@ class Area:
         self.room_names = [""] * (rooms_w * rooms_h)
         self.specials = [(VOID, 0xff, VOID, 0xff, VOID, 0xff, 0xf)] * (rooms_w * rooms_h)
         self.state = [0] * (rooms_w * rooms_h)   # per screen: the season object conditions test
+        self.tsidx = [0xffff] * (rooms_w * rooms_h)  # per screen: its tileset in tiles.bin
         W, H = rooms_w * room_w, rooms_h * room_h
         self.cells, self.colls, self.mts = [VOID] * (W * H), [0xff] * (W * H), [0] * (W * H)
 
     def put(self, rx, ry, room, rendered, specials=None):
-        w, h, cells, colls, mts, mode = rendered
+        w, h, cells, colls, mts, mode, tsi = rendered
+        self.tsidx[ry * self.rooms_w + rx] = tsi
         if specials:
             self.specials[ry * self.rooms_w + rx] = specials
         W = self.rooms_w * self.room_w
@@ -569,6 +589,7 @@ class Area:
         out += b"".join(nm.encode()[:31].ljust(32, b"\0") for nm in self.room_names)
         out += b"".join(struct.pack("<HBHBHBB", *sp) for sp in self.specials)
         out += bytes(self.state)
+        out += struct.pack(f"<{n}H", *self.tsidx)
         out += struct.pack(f"<{W * H}H", *self.cells) + bytes(self.colls) + bytes(self.mts)
         return out
 
@@ -771,6 +792,136 @@ def chests(root, rooms, game):
     return out
 
 
+# ---- tile properties (data/{game}/tile_properties) ---------------------------------------------
+
+def defines(root, *files):
+    out = {}
+    for f in files:
+        for line in lines_of(os.path.join(root, f)):
+            m = re.match(r"\.define\s+(\w+)\s+(\$?\w+)", line)
+            if m:
+                try:
+                    out[m.group(1)] = num(m.group(2))
+                except ValueError:
+                    pass
+    return out
+
+
+def prop_table(path, consts):
+    """A tile_properties file: the pointer table's label order and each label's rows of numbers."""
+    order, rows, cur, pending = [], {}, None, []
+    for line in lines_of(path):
+        m = re.match(r"(@?\w+):", line)
+        if m:
+            name = m.group(1)
+            if cur is not None and not rows[cur]:
+                pending.append(cur)
+            else:
+                pending = []
+            cur = name
+            rows[cur] = []
+            continue
+        m = re.match(r"(?:\.dw|dbrel)\s+(@\w+)", line)
+        if m:
+            order.append(m.group(1))
+            continue
+        if cur and line.startswith(".db"):
+            vals = []
+            for t in line[3:].replace(",", " ").split():
+                t = t.lstrip("<")
+                vals.append(consts[t] if t in consts else num(t) if re.match(r"^(\$[0-9a-fA-F]+|%[01]+|\d+)$", t) else 0)
+            rows[cur].append(vals)
+            for p in pending:
+                rows[p] = rows[cur]
+    return order, rows
+
+
+def tile_properties(root, game):
+    """Per collision mode (6), 256 records: cliff angle ($ff none), hazard bits, tile type, breakable
+    mode ($ff none), interactable byte ($ff none), pushed: tile left behind, tile it becomes."""
+    consts = defines(root, "constants/common/directions.s", "constants/common/tileTypes.s")
+    d = os.path.join(root, f"data/{game}/tile_properties")
+    modes_order, _ = prop_table(os.path.join(d, "cliffTiles.s"), consts)
+    out = [[[0xff, 0, 0, 0xff, 0xff, 0, 0, 0] for _ in range(256)] for _ in range(6)]
+
+    def each(fname, fn):
+        order, rows = prop_table(os.path.join(d, fname), consts)
+        for mode, label in enumerate(modes_order[:6]):
+            # Seasons' pushable table goes by group (8 entries); match its labels by name instead
+            for r in rows.get(label, []):
+                if len(r) >= 2 and r[0] != 0:
+                    fn(out[mode][r[0] & 0xff], r)
+
+    each("cliffTiles.s", lambda t, r: t.__setitem__(0, r[1]))
+    each("hazards.s", lambda t, r: t.__setitem__(1, r[1]))
+    each("tileTypeMappings.s", lambda t, r: t.__setitem__(2, r[1]))
+    each("breakableTiles.s", lambda t, r: t.__setitem__(3, r[1]))
+    each("interactableTiles.s", lambda t, r: t.__setitem__(4, r[1]))
+
+    def push(t, r):
+        if len(r) >= 3:
+            t[5], t[6] = r[1], r[2]
+    each("pushableTiles.s", push)
+    # breakable modes: m_BreakableTileData sources(8) sources(8) sources(4) drop flags result
+    modes = []
+    for line in lines_of(os.path.join(d, "breakableTiles.s")):
+        m = re.match(r"m_BreakableTileData\s+%([01]+)\s+%([01]+)\s+%([01]+)\s+(\$?\w+)\s+(\$?\w+)\s+(\$?\w+)", line)
+        if m:
+            bits = m.group(1) + m.group(2) + m.group(3)
+            src = sum(1 << i for i, b in enumerate(bits) if b == "1")
+            modes.append((src, num(m.group(4)), num(m.group(5)), num(m.group(6))))
+    return out, modes
+
+
+def signs(root, game):
+    """(group, room, YX, text) for every sign (signText.s)."""
+    texts = text_strings(root, game, 0x2e)
+    out, groups = [], []
+    for line in lines_of(os.path.join(root, f"data/{game}/signText.s")):
+        m = re.match(r"signTextGroup(\d)Data:", line)
+        if m:
+            groups.append(int(m.group(1)))
+            continue
+        if line.startswith(".db") and groups:
+            vals = [t.strip() for t in line[3:].split(",")]
+            if len(vals) == 3 and vals[2].startswith("<TX_2e"):
+                tx = int(vals[2][6:], 16)
+                for g in groups:
+                    out.append((g, num(vals[1]), num(vals[0]), texts.get(tx, "")))
+                continue
+        if line.startswith(".db") or line.startswith(".dw"):
+            groups = [] if not line.startswith(".db") else groups
+        if line.strip() == ".db $00":
+            groups = []
+    return out
+
+
+def write_tiles(root, rooms, season_ts, path):
+    """tiles.bin: every tileset's 256 metatiles (atlas cell, collision), Holodrum's tileset per
+    screen in each season, the tile property tables of both games, and the signs."""
+    sets = sorted(rooms.ts_ids.items(), key=lambda kv: kv[1])
+    with open(path, "wb") as f:
+        f.write(b"OTIL" + struct.pack("<HH", 1, len(sets)))
+        for (game, ts), _ in sets:
+            cells, coll = rooms.tileset_cells(game, ts)
+            f.write(struct.pack("<256H", *cells) + bytes(coll))
+        for s in range(4):
+            f.write(struct.pack("<256H", *(season_ts[s] + [0xffff] * (256 - len(season_ts[s])))))
+        all_signs = []
+        for gi, game in enumerate(GAMES):
+            props, modes = tile_properties(root, game)
+            for mode in range(6):
+                for t in props[mode]:
+                    f.write(bytes(v & 0xff for v in t))
+            f.write(struct.pack("<H", len(modes)))
+            for src, drop, flags, result in modes:
+                f.write(struct.pack("<IBBB", src, drop, flags, result))
+            all_signs += [(gi,) + sg for sg in signs(root, game)]
+        f.write(struct.pack("<H", len(all_signs)))
+        for gi, g, room, yx, text in all_signs:
+            f.write(struct.pack("<BBBB", gi, g, room, yx) + text.encode("ascii", "replace")[:119].ljust(120, b"\0"))
+
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__)
@@ -812,13 +963,15 @@ def main():
         for a in areas:
             f.write(a.pack())
     # Holodrum in each season, for the Rod of Seasons: same layout as the HOLODRUM area
+    season_ts = []
     for s, name in enumerate(("spring", "summer", "autumn", "winter")):
         a = overworld(rooms, "seasons", 0, name, 16, 16, season=s)
+        season_ts.append(a.tsidx)
         W, H = 16 * ROOM_W, 16 * ROOM_H
         with open(os.path.join(out, f"holodrum_{name}.map"), "wb") as f:
-            f.write(b"OWLD" + struct.pack("<HHHHH", 1, W, H, ROOM_W, ROOM_H))
+            f.write(b"OWLD" + struct.pack("<HHHHH", 2, W, H, ROOM_W, ROOM_H))
             f.write(struct.pack(f"<{W * H}H", *a.cells))
-            f.write(bytes(a.colls))
+            f.write(bytes(a.colls) + bytes(a.mts))
     with open(os.path.join(out, "warps.bin"), "wb") as f:
         tiles = [warp_tiles(root, g) for g in GAMES]
         f.write(b"OWRP" + struct.pack("<HHH", 1, len(all_sources), len(all_dests)))
@@ -836,6 +989,7 @@ def main():
         for gi, g, room, yx, t, param, text in all_chests:
             tb = text.encode("ascii", "replace")[:159]
             f.write(struct.pack("<BBBBBB", gi, g, room, yx, t, param) + tb.ljust(160, b"\0"))
+    write_tiles(root, rooms, season_ts, os.path.join(out, "tiles.bin"))
     rows = (len(rooms.atlas) + ATLAS_COLS - 1) // ATLAS_COLS
     sheet = Image.new("RGBA", (ATLAS_COLS * 16, rows * 16))
     for i, img in enumerate(rooms.atlas):

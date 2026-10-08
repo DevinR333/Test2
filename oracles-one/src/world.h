@@ -15,6 +15,7 @@ typedef struct {
   int room_w, room_h;            // metatiles per original screen
   uint16_t *cells;               // atlas index per metatile
   uint8_t *coll;                 // the game's collision byte per metatile
+  uint8_t *mt;                   // the original metatile index per metatile
 } Map;
 
 // An area from tools/extract_world.py: an overworld, a dungeon floor or a single room, its screens
@@ -28,7 +29,7 @@ typedef struct {
   uint16_t *room_ids;            // per screen: the original room number, 0xffff none
   uint8_t *coll_mode;            // per screen: the tileset's collision mode (which tiles warp)
   char (*room_name)[32];         // per screen: map-screen label ("Horon Village"), may be empty
-  uint8_t *mt;                   // per metatile: the original metatile index (warp tiles)
+  uint8_t *mt;                   // per metatile: the original metatile index (= base.mt)
   Map base;                      // Holodrum: every area in its default season
   Map seasons[4];                // Holodrum only: the whole map in each season (Rod of Seasons)
   int8_t *room_season;           // Holodrum only: per screen, SEASON_DEFAULT or a season set with the rod
@@ -36,6 +37,7 @@ typedef struct {
   uint16_t *floor_cell, *chest_cell, *closed_chest_cell;
   uint8_t *floor_coll, *chest_coll, *closed_chest_coll, *dungeon;
   uint8_t *state;                // per screen: the season its objects' conditions test (Holodrum)
+  uint16_t *tsidx;               // per screen: its tileset in tiles.bin (what tiles turn into)
 } World;
 
 // Loads every area of both games; returns how many (0 on failure).
@@ -60,6 +62,38 @@ void world_draw(SDL_Renderer *ren, const World *w, const Image *atlas, const Vie
 uint8_t world_metatile(const World *w, float px, float py);
 // Changes one metatile (in every season of Holodrum too).
 void world_set_tile(World *w, int tx, int ty, uint16_t cell, uint8_t coll, uint8_t mt);
+// Changes one metatile to another of the room's own tileset (in each season's tileset in Holodrum).
+void world_put(World *w, int tx, int ty, uint8_t mt);
+// The original metatile at a metatile position, and which screen it's on (-1 outside).
+uint8_t world_mt_at(const World *w, int tx, int ty, int *room);
+// The atlas cell drawn at a metatile position.
+uint16_t world_cell_at(const World *w, int tx, int ty);
+
+// ---- tile properties (tiles.bin: data/{game}/tile_properties) ----------------------------------
+typedef struct {
+  uint8_t cliff;                 // ANGLE_* Link can jump off it towards ($ff: not a cliff)
+  uint8_t hazard;                // 1 water, 2 hole, 4 lava
+  uint8_t type;                  // TILETYPE_* (tileTypes.s)
+  uint8_t breakable;             // breakable mode ($ff: no)
+  uint8_t interact;              // interactableTiles.s byte ($ff: none)
+  uint8_t push_under, push_becomes;
+  uint8_t pad;
+} TileProps;
+typedef struct { uint32_t sources; uint8_t drop, flags, result; } BreakMode;
+enum { TT_HOLE = 1, TT_WARPHOLE, TT_CRACKEDFLOOR, TT_VINES, TT_GRASS, TT_STAIRS, TT_WATER, TT_STUMP,
+       TT_UPCONVEYOR, TT_RIGHTCONVEYOR, TT_DOWNCONVEYOR, TT_LEFTCONVEYOR, TT_SPIKE, TT_CRACKED_ICE, TT_ICE,
+       TT_LAVA, TT_PUDDLE, TT_UPCURRENT, TT_RIGHTCURRENT, TT_DOWNCURRENT, TT_LEFTCURRENT, TT_RAISABLE_FLOOR,
+       TT_SEAWATER, TT_WHIRLPOOL };
+enum { BREAK_BRACELET, BREAK_SWORD_L1, BREAK_SWORD_L2, BREAK_EXPERTS_RING, BREAK_BOMB, BREAK_LANDED, BREAK_SHOVEL,
+       BREAK_SWITCH_HOOK = 8, BREAK_EMBER = 12, BREAK_GALE = 13 };
+
+bool tiles_load(World *areas, int n);
+// The properties of the tile under a world pixel (all clear outside the map).
+const TileProps *tile_props_at(const World *w, float px, float py);
+const TileProps *tile_props(const World *w, int room, uint8_t mt);
+const BreakMode *break_mode(const World *w, int mode);
+// The sign text at a metatile, or NULL.
+const char *sign_text(const World *w, int tx, int ty);
 // Where a room of a game is: its area and the top-left pixel of that screen.
 bool world_find_room(const World *areas, int n, int game, int group, int room, int *area, float *ox, float *oy);
 

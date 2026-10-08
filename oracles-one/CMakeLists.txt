@@ -28,7 +28,7 @@ if(NOT SDL3_FOUND)
   FetchContent_MakeAvailable(SDL3)
 endif()
 
-set(SOURCES src/main.c src/gfx.c src/world.c src/link.c src/game.c src/input.c src/hud.c src/items.c src/secrets.c src/treasure.c src/actors.c)
+set(SOURCES src/main.c src/gfx.c src/world.c src/link.c src/game.c src/input.c src/hud.c src/items.c src/secrets.c src/treasure.c src/actors.c src/tiles.c src/terrain.c)
 
 if(ANDROID)
   add_library(main SHARED ${SOURCES})      # SDLActivity loads libmain.so

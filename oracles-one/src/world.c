@@ -22,13 +22,15 @@ static bool map_load(Map *m, const char *name) {
   const Uint8 *magic = take(&r, 4);
   unsigned version = u16(&r);
   m->w = (int)u16(&r); m->h = (int)u16(&r); m->room_w = (int)u16(&r); m->room_h = (int)u16(&r);
-  if (r.bad || memcmp(magic, "OWLD", 4) != 0 || version != 1) { SDL_Log("%s is not a version 1 map", name); SDL_free(d); return false; }
+  if (r.bad || memcmp(magic, "OWLD", 4) != 0 || version != 2) { SDL_Log("%s is not a version 2 map", name); SDL_free(d); return false; }
   size_t n = (size_t)m->w * m->h;
   m->cells = malloc(n * 2);
   m->coll = malloc(n);
+  m->mt = malloc(n);
   for (size_t i = 0; i < n; i++) m->cells[i] = (uint16_t)u16(&r);
-  const Uint8 *c = take(&r, n);
+  const Uint8 *c = take(&r, n), *mt = take(&r, n);
   if (c) memcpy(m->coll, c, n);
+  if (mt) memcpy(m->mt, mt, n);
   SDL_free(d);
   if (r.bad) SDL_Log("%s is truncated", name);
   return !r.bad;
@@ -76,6 +78,8 @@ int world_load_all(World **out) {
     w->state = malloc((size_t)rooms);
     const Uint8 *st = take(&r, (size_t)rooms);
     if (st) memcpy(w->state, st, (size_t)rooms);
+    w->tsidx = malloc((size_t)rooms * 2);
+    for (int k = 0; k < rooms; k++) w->tsidx[k] = (uint16_t)u16(&r);
     w->base.w = w->rooms_w * w->base.room_w;
     w->base.h = w->rooms_h * w->base.room_h;
     size_t n = (size_t)w->base.w * w->base.h;
@@ -86,6 +90,7 @@ int world_load_all(World **out) {
     const Uint8 *c = take(&r, n), *m = take(&r, n);
     if (c) memcpy(w->base.coll, c, n);
     if (m) memcpy(w->mt, m, n);
+    w->base.mt = w->mt;
   }
   SDL_free(d);
   if (r.bad) { SDL_Log("areas.bin is truncated"); return 0; }
@@ -105,7 +110,8 @@ int world_load_all(World **out) {
 
 void world_free(World *w) {
   free(w->base.cells); free(w->base.coll);
-  for (int s = 0; s < 4; s++) { free(w->seasons[s].cells); free(w->seasons[s].coll); }
+  for (int s = 0; s < 4; s++) { free(w->seasons[s].cells); free(w->seasons[s].coll); free(w->seasons[s].mt); }
+  free(w->tsidx);
   free(w->room_season); free(w->room_ids); free(w->coll_mode); free(w->room_name); free(w->mt);
   free(w->floor_cell); free(w->chest_cell); free(w->floor_coll); free(w->chest_coll); free(w->dungeon);
   free(w->closed_chest_cell); free(w->closed_chest_coll); free(w->state);
@@ -231,7 +237,19 @@ bool warps_load(void) {
 
 uint8_t world_metatile(const World *w, float px, float py) {
   if (px < 0 || py < 0 || px >= (float)world_px_w(w) || py >= (float)world_px_h(w)) return 0;
-  return w->mt[((int)py / MT) * w->base.w + (int)px / MT];
+  int tx = (int)px / MT, ty = (int)py / MT;
+  return map_at(w, tx, ty)->mt[ty * w->base.w + tx];
+}
+
+uint16_t world_cell_at(const World *w, int tx, int ty) {
+  if (tx < 0 || ty < 0 || tx >= w->base.w || ty >= w->base.h) return CELL_VOID;
+  return map_at(w, tx, ty)->cells[ty * w->base.w + tx];
+}
+
+uint8_t world_mt_at(const World *w, int tx, int ty, int *room) {
+  if (tx < 0 || ty < 0 || tx >= w->base.w || ty >= w->base.h) { if (room) *room = -1; return 0; }
+  if (room) *room = (ty / w->base.room_h) * w->rooms_w + tx / w->base.room_w;
+  return map_at(w, tx, ty)->mt[ty * w->base.w + tx];
 }
 
 void world_set_tile(World *w, int tx, int ty, uint16_t cell, uint8_t coll, uint8_t mt) {
@@ -241,7 +259,7 @@ void world_set_tile(World *w, int tx, int ty, uint16_t cell, uint8_t coll, uint8
   w->base.coll[i] = coll;
   w->mt[i] = mt;
   for (int s = 0; s < 4; s++)
-    if (w->seasons[s].cells) { w->seasons[s].cells[i] = cell; w->seasons[s].coll[i] = coll; }
+    if (w->seasons[s].cells) { w->seasons[s].cells[i] = cell; w->seasons[s].coll[i] = coll; w->seasons[s].mt[i] = mt; }
 }
 
 bool world_find_room(const World *areas, int n, int game, int group, int room, int *area, float *ox, float *oy);

@@ -14,6 +14,7 @@
 #include "items.h"
 #include "link.h"
 #include "treasure.h"
+#include "terrain.h"
 #include "world.h"
 
 #define TICK_NS (SDL_NS_PER_SECOND / 60)
@@ -181,6 +182,7 @@ static void enter_area(App *a, WarpTarget t) {
   a->area[0] = 0;
   a->respawn = t;
   actors_enter(a->worlds, a->n_worlds, a->world);
+  terrain_enter(a->worlds, a->n_worlds, a->world, &a->link);
   check_area(a);
 }
 
@@ -203,8 +205,9 @@ static bool at_door(App *a) {
 // The sword's reach during a swing: the 16x16 square in front of Link, sweeping across as he swings.
 static SDL_FRect sword_box(const Link *l) {
   if (!items.sword_frames || items.sword_frames > 12) return (SDL_FRect){0, 0, 0, 0};
-  static const float ox[4] = {-8, 4, -8, -20}, oy[4] = {-20, -6, 6, -6};
-  return (SDL_FRect){l->x + ox[l->dir], l->y + oy[l->dir], 16, 16};
+  // the blade reaches about 20 pixels from Link's middle, across his width
+  static const float ox[4] = {-8, 4, -8, -22}, oy[4] = {-22, -4, 6, -4}, w[4] = {16, 18, 16, 18}, h[4] = {18, 16, 18, 16};
+  return (SDL_FRect){l->x + ox[l->dir], l->y + oy[l->dir], w[l->dir], h[l->dir]};
 }
 
 // Enemies, their hits on Link, his sword on them, and what they drop.
@@ -263,19 +266,31 @@ static void update(App *a) {
   // the tile just in front of Link, for chests and locked doors
   static const int fx[4] = {0, 9, 0, -9}, fy[4] = {-6, 4, 14, 4};
   float front_x = a->link.x + fx[a->link.dir], front_y = a->link.y + fy[a->link.dir];
-  if (in->pressed & BTN_A) {
+  if (in->pressed & BTN_A && !terrain_carrying()) {
     const char *got = chest_open_at(a->worlds, a->n_worlds, a->world, front_x, front_y);
+    if (!got) got = terrain_read(a->world, &a->link);
     if (got) { show_message(a, got); in->pressed &= ~(Uint32)BTN_A; }
   }
 
-  if (in->pressed & BTN_A) items_use((Item)game.equip_a, &a->link, a->world);
-  if (in->pressed & BTN_B) items_use((Item)game.equip_b, &a->link, a->world);
+  bool busy = terrain_busy();
+  for (int b = 0; b < 2 && !busy; b++) {
+    if (!(in->pressed & (b ? BTN_B : BTN_A))) continue;
+    Item item = (Item)(b ? game.equip_b : game.equip_a);
+    if (!terrain_use(item, a->worlds, a->n_worlds, a->world, &a->link) && game.item_level[item]) items_use(item, &a->link, a->world);
+  }
   items_update();
   int dx = !!(in->held & BTN_RIGHT) - !!(in->held & BTN_LEFT);
   int dy = !!(in->held & BTN_DOWN) - !!(in->held & BTN_UP);
-  if (items.sword_frames) dx = dy = 0;
+  if (items.sword_frames || busy) dx = dy = 0;
   if (a->hurt_frames > 30) dx = dy = 0;      // knocked back
-  link_update(&a->link, a->world, dx, dy);
+  if (!busy) link_update(&a->link, a->world, dx, dy);
+  if (items.sword_frames) terrain_sword(a->worlds, a->n_worlds, a->world, sword_box(&a->link), game.item_level[ITEM_SWORD]);
+  TerrainEvents te = terrain_update(a->worlds, a->n_worlds, a->world, &a->link, dx, dy);
+  if (te.damage) {
+    game.health = (int16_t)(game.health - te.damage);
+    if (!a->hurt_frames) a->hurt_frames = 30;
+    if (game.health <= 0) { game.health = (int16_t)SDL_min(12, game.max_hearts * 4); start_fade(a, a->respawn); }
+  }
   combat(a);
   if (a->link.pushing == 20) {
     const char *msg = keydoor_push(a->worlds, a->n_worlds, a->world, front_x, front_y, a->link.dir);
@@ -317,9 +332,13 @@ static void render(App *a) {
   View v = make_view(a, w, h);
   SDL_SetRenderClipRect(a->ren, &v.viewport);
   world_draw(a->ren, a->world, &a->atlas, &v);
+  terrain_draw(a->ren, &a->atlas, &v, &a->link, false);
   actors_draw(a->ren, &v, true, a->link.y);
-  if (!(a->hurt_frames & 2)) link_draw(a->ren, &a->link, &a->link_sheet, &v, items.z);
+  int falling = terrain_falling();
+  if (!(a->hurt_frames & 2) && (!falling || (falling > 15 && (falling / 3) & 1)))
+    link_draw(a->ren, &a->link, &a->link_sheet, &v, items.z + terrain_z());
   actors_draw(a->ren, &v, false, a->link.y);
+  terrain_draw(a->ren, &a->atlas, &v, &a->link, true);
   float px = hud_scale(w, h);
   items_draw(a->ren, &a->link, &v, px);
   SDL_SetRenderClipRect(a->ren, NULL);
@@ -359,6 +378,9 @@ static void render(App *a) {
   }
 }
 
+static HudArt *g_art;
+static void draw_icon(SDL_Renderer *ren, Item item, float x, float y, float px) { draw_item_icon(ren, g_art, item, x, y, px); }
+
 // ---- headless checks: --shot FILE renders after --frames N with buttons --hold held --------
 static Uint32 parse_buttons(const char *s) {
   Uint32 b = 0;
@@ -378,7 +400,7 @@ int main(int argc, char **argv) {
   int frames = 0, win_w = 1280, win_h = 720, start_world = -1, menu_page = -1;
   float start_x = -1, start_y = -1, zoom = 1;
   bool all_items = false, touch = false, touch_hidden = false;
-  int keys = 0;
+  int keys = 0, equip_a = -1, equip_b = -1;
   int aspect = ASPECT_FILL;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
@@ -396,6 +418,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--all-items")) all_items = true;
     else if (!strcmp(argv[i], "--touch")) touch = true;
     else if (!strcmp(argv[i], "--touch-hidden")) touch_hidden = true;
+    else if (!strcmp(argv[i], "--equip") && i + 1 < argc) sscanf(argv[++i], "%d,%d", &equip_a, &equip_b);   // testing: item numbers on A, B
     else if (!strcmp(argv[i], "--keys") && i + 1 < argc) keys = atoi(argv[++i]);   // testing: small keys in every dungeon
   }
   SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight Portrait");
@@ -425,10 +448,15 @@ int main(int argc, char **argv) {
   }
   for (int i = 0; i < WORLD_COUNT; i++) build_house(&a.worlds[a.overworld[i]]);
   link_blocker = actors_block;
+  g_art = &a.art;
+  terrain_icon = draw_icon;
+  if (!tiles_load(a.worlds, a.n_worlds)) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
   if (!chests_load(a.worlds, a.n_worlds)) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
 
   if (shot || !game_load()) game_new();
   if (all_items) items_give_all();
+  if (equip_a >= 0) game.equip_a = (uint8_t)equip_a;
+  if (equip_b >= 0) game.equip_b = (uint8_t)equip_b;
   chests_restore(a.worlds, a.n_worlds);
   for (int g = 0; keys && g < WORLD_COUNT; g++) for (int d = 0; d < 16; d++) game.small_keys[g][d] = (uint8_t)keys;
   if (start_world >= 0) game.area = (uint16_t)(start_world < WORLD_COUNT ? a.overworld[start_world] : start_world - WORLD_COUNT);

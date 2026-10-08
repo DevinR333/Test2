@@ -65,6 +65,7 @@ typedef struct {
   uint8_t chests_opened[64];
   uint16_t n_unlocked;
   uint16_t unlocked_area[256], unlocked_tile[256];
+  uint8_t unlocked_mt[256];       // what each became (opened doors, bombed walls)
   // story
   bool linked;                    // a linked game (new files start as a normal game)
   uint8_t essences[PAGE_COUNT];   // bit per essence (8 per game)

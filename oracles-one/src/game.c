@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SAVE_VERSION 4
+#define SAVE_VERSION 5
 
 GameState game;
 

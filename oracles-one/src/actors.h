@@ -25,5 +25,9 @@ ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int
 // Whether a character stands in the way at this pixel (Link walks around them).
 bool actors_block(float px, float py);
 void actors_draw(SDL_Renderer *ren, const View *v, bool behind_link, float link_y);
+// Drops a heart or rupee (half the time), as a cut bush or beaten enemy does.
+void actors_drop(float x, float y);
+// Hits every enemy within r of (x, y) (bombs, thrown pots); returns how many.
+int actors_hit_area(float x, float y, float r, int damage);
 // For tests: how many enemies are still up.
 int actors_enemies_alive(void);

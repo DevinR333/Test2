@@ -91,4 +91,7 @@ void items_give_all(void) {
     while (game.item_level[i] < item_info[i].max_level) game_give_item((Item)i);
   }
   if (!game.equip_b) game.equip_b = ITEM_SWORD;
+  if (game.bomb_max < 10) game.bomb_max = 10;
+  game.bombs = game.bomb_max;
+  for (int s = 0; s < 5; s++) game.seeds[s] = 20;
 }

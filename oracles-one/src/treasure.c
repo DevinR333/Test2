@@ -147,7 +147,7 @@ void chests_restore(World *areas, int n) {
   for (int i = 0; i < game.n_unlocked; i++)
     if (game.unlocked_area[i] < n) {
       World *w = &areas[game.unlocked_area[i]];
-      unlock_tile(w, game.unlocked_tile[i] % w->base.w, game.unlocked_tile[i] / w->base.w);
+      world_put(w, game.unlocked_tile[i] % w->base.w, game.unlocked_tile[i] / w->base.w, game.unlocked_mt[i]);
     }
 }
 
@@ -169,12 +169,18 @@ const char *chest_open_at(World *areas, int n, World *w, float px, float py) {
   return "It's empty.";
 }
 
-static void remember_unlocked(int area, int tile) {
+static void remember_unlocked(int area, int tile, uint8_t mt) {
   if (game.n_unlocked < SDL_arraysize(game.unlocked_area)) {
     game.unlocked_area[game.n_unlocked] = (uint16_t)area;
     game.unlocked_tile[game.n_unlocked] = (uint16_t)tile;
+    game.unlocked_mt[game.n_unlocked] = mt;
     game.n_unlocked++;
   }
+}
+
+void tile_change_for_good(World *areas, World *w, int tx, int ty, uint8_t mt) {
+  world_put(w, tx, ty, mt);
+  remember_unlocked((int)(w - areas), ty * w->base.w + tx, mt);
 }
 
 const char *keydoor_push(World *areas, int n, World *w, float px, float py, int dir) {
@@ -192,14 +198,14 @@ const char *keydoor_push(World *areas, int n, World *w, float px, float py, int 
     game.small_keys[w->id][dungeon]--;
   }
   unlock_tile(w, tx, ty);
-  remember_unlocked((int)(w - areas), ty * w->base.w + tx);
+  remember_unlocked((int)(w - areas), ty * w->base.w + tx, 0xa0);
   // a key door is two tiles, one each side of the room edge: open the other half too
   static const int ox[4] = {0, 1, 0, -1}, oy[4] = {-1, 0, 1, 0};
   int tx2 = tx + ox[dir], ty2 = ty + oy[dir];
   uint8_t mt2 = world_metatile(w, (float)(tx2 * MT + 1), (float)(ty2 * MT + 1));
   if (!block && mt2 >= 0x70 && mt2 <= 0x77) {
     unlock_tile(w, tx2, ty2);
-    remember_unlocked((int)(w - areas), ty2 * w->base.w + tx2);
+    remember_unlocked((int)(w - areas), ty2 * w->base.w + tx2, 0xa0);
   }
   (void)n;
   return NULL;

@@ -57,6 +57,8 @@ void link_update(Link *l, const World *w, int dx, int dy) {
   l->walk_frames++;
 }
 
+bool link_blocked_at(const World *w, float x, float y) { return box_blocked(w, x, y); }
+
 void link_push(Link *l, const World *w, float dx, float dy) {
   if (!box_blocked(w, l->x + dx, l->y)) l->x += dx;
   if (!box_blocked(w, l->x, l->y + dy)) l->y += dy;

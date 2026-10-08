@@ -26,6 +26,9 @@ bool chests_load(World *areas, int n);
 // Puts opened chests and unlocked doors back after loading a save.
 void chests_restore(World *areas, int n);
 
+// Changes a tile for good (a bombed wall, an opened door): remembered in the save.
+void tile_change_for_good(World *areas, World *w, int tx, int ty, uint8_t mt);
+
 // Link pressed A facing (px, py): opens a chest there. Returns the pickup text, or NULL.
 const char *chest_open_at(World *areas, int n, World *w, float px, float py);
 // Link has pushed against (px, py) for a while: unlocks a key block or key door there with a key
