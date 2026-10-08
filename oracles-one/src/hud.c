@@ -1,6 +1,7 @@
 #include "hud.h"
 #include "input.h"
 #include "items.h"
+#include "audio.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -149,7 +150,8 @@ void menu_open(Menu *m, WorldId world) {
 }
 
 void menu_update(Menu *m, Uint32 pressed) {
-  if (pressed & BTN_SELECT) m->at = (m->at + 1) % PAGE_COUNT;
+  if (pressed & BTN_SELECT) { m->at = (m->at + 1) % PAGE_COUNT; sfx("SND_OPENMENU"); }
+  if (pressed & (BTN_LEFT | BTN_RIGHT | BTN_UP | BTN_DOWN)) sfx("SND_MENU_MOVE");
   Page page = m->order[m->at];
   int *c = &m->cursor[page];
   if (pressed & BTN_LEFT) *c = (*c + PAGE_SLOTS - 1) % PAGE_SLOTS;
@@ -164,6 +166,7 @@ void menu_update(Menu *m, Uint32 pressed) {
     if (*mine == item && (item == ITEM_SEED_SATCHEL || item == ITEM_SLINGSHOT || item == ITEM_SEED_SHOOTER)) items_next_seed();
     if (*other == item) *other = *mine;   // swap, like the originals
     *mine = (uint8_t)item;
+    sfx("SND_SELECTITEM");
   }
   float target = (float)m->at;
   m->slide += (target - m->slide) * 0.25f;

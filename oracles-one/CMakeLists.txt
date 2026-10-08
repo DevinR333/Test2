@@ -28,7 +28,7 @@ if(NOT SDL3_FOUND)
   FetchContent_MakeAvailable(SDL3)
 endif()
 
-set(SOURCES src/main.c src/gfx.c src/world.c src/link.c src/game.c src/input.c src/hud.c src/items.c src/secrets.c src/treasure.c src/actors.c src/tiles.c src/terrain.c)
+set(SOURCES src/main.c src/gfx.c src/world.c src/link.c src/game.c src/input.c src/hud.c src/items.c src/secrets.c src/treasure.c src/actors.c src/tiles.c src/terrain.c src/audio.c)
 
 if(ANDROID)
   add_library(main SHARED ${SOURCES})      # SDLActivity loads libmain.so
@@ -59,6 +59,9 @@ if(NOT ANDROID)
 endif()
 
 if(NOT ANDROID)
+  add_executable(test_audio tests/test_audio.c src/audio.c src/gfx.c)
+  target_link_libraries(test_audio PRIVATE SDL3::SDL3)
+  add_test(NAME audio COMMAND test_audio WORKING_DIRECTORY ${CMAKE_BINARY_DIR})
   add_executable(test_warps tests/test_warps.c src/world.c src/gfx.c)
   target_link_libraries(test_warps PRIVATE SDL3::SDL3)
   add_test(NAME warps COMMAND test_warps WORKING_DIRECTORY ${CMAKE_BINARY_DIR})

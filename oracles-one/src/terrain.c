@@ -1,6 +1,7 @@
 #include "terrain.h"
 #include "actors.h"
 #include "treasure.h"
+#include "audio.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -102,6 +103,7 @@ static void break_tile(World *areas, World *w, int tx, int ty, const BreakMode *
     }
   }
   float cx = (float)(tx * MT + 8), cy = (float)(ty * MT + 8);
+  sfx(m->flags & 0x80 ? "SND_SOLVEPUZZLE" : "SND_CUTGRASS");
   if (cell != CELL_VOID) debris(cell, cx, cy);
   if (m->drop && frand() < 0.3f) actors_drop(cx, cy);
 }
@@ -145,6 +147,7 @@ bool terrain_use(Item item, World *areas, int n, World *w, Link *l) {
     T.fvx = (float)dir_x[l->dir] * 2.5f; T.fvy = (float)dir_y[l->dir] * 2.5f;
     T.fly_t = 18;
     T.fly_cell = T.carry_cell;
+    sfx("SND_THROW");
     return true;
   }
   int tx, ty;
@@ -163,6 +166,7 @@ bool terrain_use(Item item, World *areas, int n, World *w, Link *l) {
     }
     if (m->drop && frand() < 0.3f) actors_drop((float)(tx * MT + 8), (float)(ty * MT + 8));
     T.carrying = true;
+    sfx("SND_PICKUP");
     return true;
   }
   case ITEM_BOMBS:
@@ -258,6 +262,7 @@ static void push_block(World *w, Link *l) {
   if (room2 != room || world_collision(w, nx * MT + 1, ny * MT + 1) != 0) return;
   uint8_t under = p->push_under ? p->push_under : 0xa0, becomes = p->push_becomes ? p->push_becomes : mt;
   T.push_cell = world_cell_at(w, tx, ty);
+  sfx("SND_MOVEBLOCK");
   world_put(w, tx, ty, under);
   T.push_t = 16;
   T.px0 = (float)(tx * MT); T.py0 = (float)(ty * MT);
@@ -296,6 +301,7 @@ TerrainEvents terrain_update(World *areas, int n, World *w, Link *l, int dx, int
     // the blast: walls and rocks that bombs break, enemies and Link nearby
     float bx = T.bombs[i].x, by = T.bombs[i].y;
     T.bombs[i].blast = 18;
+    sfx("SND_EXPLOSION");
     for (int ty = (int)(by - 24) / MT; ty <= (int)(by + 24) / MT; ty++)
       for (int tx = (int)(bx - 24) / MT; tx <= (int)(bx + 24) / MT; tx++) {
         float cx = (float)(tx * MT + 8) - bx, cy = (float)(ty * MT + 8) - by;
@@ -334,6 +340,7 @@ TerrainEvents terrain_update(World *areas, int n, World *w, Link *l, int dx, int
       T.jx0 = l->x; T.jy0 = l->y; T.jx1 = lx; T.jy1 = ly;
       T.jump_len = T.jump_t = 14 + (int)(d / 2);
       T.jump_h = 8 + d / 6;
+      sfx("SND_JUMP");
       return ev;
     }
   }
@@ -345,9 +352,10 @@ TerrainEvents terrain_update(World *areas, int n, World *w, Link *l, int dx, int
     T.fall_t = 30;
     T.fall_damage = under->type == TT_LAVA ? 4 : 2;
     T.carrying = false;
+    sfx("SND_LINK_FALL");
   } else if (under->type == TT_WATER || under->type == TT_SEAWATER) {
     if (game.item_level[ITEM_MERMAID_SUIT]) T.swimming = true;     // flippers or the mermaid suit
-    else { T.fall_t = 30; T.fall_damage = 2; T.carrying = false; }
+    else { T.fall_t = 30; T.fall_damage = 2; T.carrying = false; sfx("SND_SPLASH"); }
   } else if (on_safe_ground(w, l)) {
     T.safe_x = l->x; T.safe_y = l->y;
   }

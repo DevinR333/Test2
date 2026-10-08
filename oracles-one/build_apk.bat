@@ -83,6 +83,7 @@ if not exist "%ROOT%\assets" mkdir "%ROOT%\assets"
 "%BT%\venv\Scripts\python.exe" "%ROOT%\tools\extract_world.py" "%ROOT%\disasm" "%ROOT%\assets" || goto :fail
 "%BT%\venv\Scripts\python.exe" "%ROOT%\tools\extract_sprites.py" "%ROOT%\disasm" "%ROOT%\assets" || goto :fail
 "%BT%\venv\Scripts\python.exe" "%ROOT%\tools\extract_objects.py" "%ROOT%\disasm" "%ROOT%\assets" || goto :fail
+"%BT%\venv\Scripts\python.exe" "%ROOT%\tools\extract_audio.py" "%ROOT%\disasm" "%ROOT%\assets" || goto :fail
 
 rem --- The APK -------------------------------------------------------------------------------
 set "SDKFWD=%SDK:\=/%"

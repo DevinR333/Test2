@@ -7,6 +7,7 @@
 #include <string.h>
 
 #include "actors.h"
+#include "audio.h"
 #include "game.h"
 #include "gfx.h"
 #include "hud.h"
@@ -117,6 +118,10 @@ static void set_banner(App *a, const char *s) {
 
 // Entering a new area shows its name, fading in and out.
 static void check_area(App *a) {
+  // each room's own music, from the game whose world it is
+  audio_set_game(a->world->id);
+  int r = world_room_index(a->world, a->link.x, a->link.y);
+  if (r >= 0 && a->world->room_ids[r] != 0xffff) audio_room(a->world->group, a->world->room_ids[r]);
   const char *name = world_area_name(a->world, a->link.x, a->link.y);
   if (!name[0] || !strcmp(name, a->area)) return;
   snprintf(a->area, sizeof a->area, "%s", name);
@@ -255,9 +260,10 @@ static void boss_events(App *a, const ActorEvents *ev) {
   default:
     break;
   }
-  if (ev->container) { treasure_give(g, dungeon, TREASURE_HEART_CONTAINER, 0); show_message(a, "You got a Heart Container!"); }
+  if (ev->container) { sfx("SND_GETITEM"); treasure_give(g, dungeon, TREASURE_HEART_CONTAINER, 0); show_message(a, "You got a Heart Container!"); }
   if (ev->essence && dungeon >= 1 && dungeon <= 8) {
     game.essences[g] |= (uint8_t)(1 << (dungeon - 1));
+    audio_music_named("MUS_GET_ESSENCE");
     snprintf(buf, sizeof buf, "You got the Essence: %s! (%d of 16)", essence_names[g][dungeon - 1], essence_count());
     show_message(a, buf);
   }
@@ -288,6 +294,7 @@ static void combat(App *a) {
   if (!ev.damage || items.z > 0) return;
   game.health = (int16_t)(game.health - ev.damage);
   a->hurt_frames = 40;
+  sfx("SND_DAMAGE_LINK");
   a->knock_x = ev.push_x * 0.6f;
   a->knock_y = ev.push_y * 0.6f;
   if (game.health <= 0) {
@@ -357,8 +364,8 @@ static void update(App *a) {
   in->zoom_factor = 1;
 
   if (in->pressed & BTN_START) {
-    if (a->menu.open) a->menu.open = false;
-    else menu_open(&a->menu, a->world->id);
+    if (a->menu.open) { a->menu.open = false; sfx("SND_CLOSEMENU"); }
+    else { menu_open(&a->menu, a->world->id); sfx("SND_OPENMENU"); }
     return;
   }
   if (a->menu.open) {
@@ -381,6 +388,7 @@ static void update(App *a) {
   float front_x = a->link.x + fx[a->link.dir], front_y = a->link.y + fy[a->link.dir];
   if (in->pressed & BTN_A && !terrain_carrying()) {
     const char *got = chest_open_at(a->worlds, a->n_worlds, a->world, front_x, front_y);
+    if (got) { sfx("SND_OPENCHEST"); sfx("SND_GETITEM"); }
     if (!got) got = terrain_read(a->world, &a->link);
     if (!got) got = talk(a);
     if (got) { show_message(a, got); in->pressed &= ~(Uint32)BTN_A; }
@@ -571,6 +579,7 @@ int main(int argc, char **argv) {
   if (!SDL_CreateWindowAndRenderer("Oracles One", win_w, win_h, flags, &a.win, &a.ren)) { SDL_Log("window: %s", SDL_GetError()); return 1; }
   if (!shot) SDL_SetRenderVSync(a.ren, 1);
   input_init();
+  if (!shot) audio_init();
   settings_load(&a);
   if (touch_hidden) a.in.touch_hidden = true;
   SDL_DisableScreenSaver();   // keeps a phone or handheld awake while playing with a controller

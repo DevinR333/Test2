@@ -1,6 +1,7 @@
 #include "items.h"
 #include "actors.h"
 #include "terrain.h"
+#include "audio.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -81,7 +82,7 @@ static void seed_effect(World *areas, World *w, int seed, float x, float y) {
     break;
   case SEED_SCENT: actors_hit_area(x, y, 10, 2); break;
   case SEED_MYSTERY: actors_hit_area(x, y, 10, 1); break;
-  case SEED_GALE: items.request = REQ_GALE; break;
+  case SEED_GALE: items.request = REQ_GALE; sfx("SND_GALE_SEED"); break;
   default: break;
   }
 }
@@ -107,6 +108,7 @@ static void use_seed(Item item, Link *link) {
   if (!s) return;
   game.seeds[seed]--;
   s->seed = seed;
+  sfx("SND_THROW");
   // the hyper slingshot fires three
   if (item == ITEM_SLINGSHOT && game.item_level[ITEM_SLINGSHOT] >= 2) {
     for (int k = -1; k <= 1; k += 2) {
@@ -124,10 +126,10 @@ void items_use(Item item, Link *link, World *world) {
   switch (item) {
   case ITEM_SWORD:
   case ITEM_FOOLS_ORE:
-    if (!items.sword_frames) items.sword_frames = SWORD_FRAMES;
+    if (!items.sword_frames) { items.sword_frames = SWORD_FRAMES; sfx("SND_SWORDSLASH"); }
     break;
   case ITEM_ROCS_FEATHER:
-    if (items.z <= 0) { items.vz = FEATHER_JUMP; items.cape_glide = false; }
+    if (items.z <= 0) { items.vz = FEATHER_JUMP; items.cape_glide = false; sfx("SND_JUMP"); }
     break;
   case ITEM_ROCS_CAPE:
     if (items.z <= 0) { items.vz = FEATHER_JUMP; items.cape_glide = false; }
@@ -140,6 +142,7 @@ void items_use(Item item, Link *link, World *world) {
     break;
   case ITEM_HARP_OF_AGES: items.request = REQ_TIME_TRAVEL; break;
   case ITEM_BOOMERANG:
+    if (!shot_of(ITEM_BOOMERANG)) sfx("SND_BOOMERANG");
     if (!shot_of(ITEM_BOOMERANG)) new_shot(ITEM_BOOMERANG, link, 2.6f, game.item_level[ITEM_BOOMERANG] >= 2 ? 112 : 72);
     break;
   case ITEM_SWITCH_HOOK:

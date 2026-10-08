@@ -77,6 +77,7 @@ mkdir -p "$ROOT/assets"
 "$BT/venv/bin/python" "$ROOT/tools/extract_world.py" "$ROOT/disasm" "$ROOT/assets"
 "$BT/venv/bin/python" "$ROOT/tools/extract_sprites.py" "$ROOT/disasm" "$ROOT/assets"
 "$BT/venv/bin/python" "$ROOT/tools/extract_objects.py" "$ROOT/disasm" "$ROOT/assets"
+"$BT/venv/bin/python" "$ROOT/tools/extract_audio.py" "$ROOT/disasm" "$ROOT/assets"
 
 # --- The APK ---------------------------------------------------------------------------------------
 echo "sdk.dir=$SDK" > "$ROOT/android/local.properties"

@@ -1,5 +1,6 @@
 #include "actors.h"
 #include "game.h"
+#include "audio.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -228,8 +229,8 @@ ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int
     if (a->kind == ACTOR_DROP) {
       if (a->timer > 0 && --a->timer == 0) a->alive = false;
       else if (SDL_fabsf(dx) < 9 && SDL_fabsf(dy) < 9) {
-        if (a->hp == DROP_HEART) ev.hearts += 4;
-        else if (a->hp == DROP_RUPEE) ev.rupees += 1;
+        if (a->hp == DROP_HEART) { ev.hearts += 4; sfx("SND_GAINHEART"); }
+        else if (a->hp == DROP_RUPEE) { ev.rupees += 1; sfx("SND_RUPEE"); }
         else if (a->hp == DROP_CONTAINER) ev.container = true;
         else if (a->hp == DROP_ESSENCE) ev.essence = true;
         a->alive = false;
@@ -264,6 +265,7 @@ ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int
     if (sword.w > 0 && !a->hurt && bx + rx > sword.x && bx - rx < sword.x + sword.w && by + ry > sword.y && by - ry < sword.y + sword.h) {
       a->hp -= sword_damage;
       a->hurt = 16;
+      sfx(a->hp <= 0 ? (a->boss ? "SND_BOSS_DEAD" : "SND_KILLENEMY") : a->boss ? "SND_BOSS_DAMAGE" : "SND_DAMAGE_ENEMY");
       float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f;
       a->vx = -dx / len * 2.5f; a->vy = -dy / len * 2.5f;
       if (a->hp <= 0) {
@@ -344,6 +346,7 @@ int actors_hit_area(float x, float y, float r, int damage) {
     if (dx * dx + dy * dy > rr * rr) continue;
     a->hp -= damage;
     a->hurt = 16;
+    sfx(a->hp <= 0 ? (a->boss ? "SND_BOSS_DEAD" : "SND_KILLENEMY") : a->boss ? "SND_BOSS_DAMAGE" : "SND_DAMAGE_ENEMY");
     float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f;
     a->vx = dx / len * 2.5f; a->vy = dy / len * 2.5f;
     if (a->hp <= 0) {
