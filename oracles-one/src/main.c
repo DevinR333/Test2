@@ -222,6 +222,7 @@ static bool at_door(App *a) {
 
 // The sword's reach during a swing: the 16x16 square in front of Link, sweeping across as he swings.
 static SDL_FRect sword_box(const Link *l) {
+  if (items.spin_frames) return (SDL_FRect){l->x - 22, l->y - 20, 44, 44};     // the spin reaches all round
   if (!items.sword_frames || items.sword_frames > 12) return (SDL_FRect){0, 0, 0, 0};
   // the blade reaches about 20 pixels from Link's middle, across his width
   static const float ox[4] = {-8, 4, -8, -22}, oy[4] = {-22, -4, 6, -4}, w[4] = {16, 18, 16, 18}, h[4] = {18, 16, 18, 16};
@@ -290,9 +291,7 @@ static bool final_room_locked(App *a) {
 
 // Enemies, their hits on Link, his sword on them, and what they drop.
 static void combat(App *a) {
-  static const int sword_damage[4] = {0, 2, 3, 5};    // wooden, noble, master (the originals' -2, -3, -5)
-  int lvl = SDL_min(game.item_level[ITEM_SWORD], 3);
-  ActorEvents ev = actors_update(a->world, &a->link, sword_box(&a->link), ring_sword_damage(sword_damage[lvl]));
+  ActorEvents ev = actors_update(a->world, &a->link, sword_box(&a->link), items_sword_damage());
   boss_events(a, &ev);
   if (ev.hearts) game.health = (int16_t)SDL_min(game.health + ring_heart_drop(ev.hearts), game.max_hearts * 4);
   if (ev.seeds && game.item_level[ITEM_SEED_SATCHEL]) game.seeds[ev.seed_kind] = (uint8_t)SDL_min(game.seeds[ev.seed_kind] + ev.seeds, 20 + 30 * (game.item_level[ITEM_SEED_SATCHEL] - 1));
@@ -533,6 +532,11 @@ static void update(App *a) {
     Item item = (Item)(b ? game.equip_b : game.equip_a);
     if (!terrain_use(item, a->worlds, a->n_worlds, a->world, &a->link) && game.item_level[item]) items_use(item, &a->link, a->world);
   }
+  {
+    Uint32 sword_btn = (game.equip_a == ITEM_SWORD || game.equip_a == ITEM_FOOLS_ORE ? BTN_A : 0) |
+                       (game.equip_b == ITEM_SWORD || game.equip_b == ITEM_FOOLS_ORE ? BTN_B : 0);
+    items_sword_hold(sword_btn && (in->held & sword_btn) && !busy, &a->link);
+  }
   items_update(a->worlds, a->world, &a->link);
   if (a->riding && game.companion == 0) link_speed *= 1.4f;      // Ricky bounds along
   if (terrain_swimming()) link_speed *= ring_swim_speed();
@@ -542,7 +546,8 @@ static void update(App *a) {
   item_request(a);
   int dx = !!(in->held & BTN_RIGHT) - !!(in->held & BTN_LEFT);
   int dy = !!(in->held & BTN_DOWN) - !!(in->held & BTN_UP);
-  if (items.sword_frames || busy) dx = dy = 0;
+  if (items.sword_frames || items.spin_frames || busy) dx = dy = 0;
+  else if (items.charge > 0) { link_speed *= 0.5f; }                    // holding the sword out: slow, facing ahead
   if (a->hurt_frames > 30) dx = dy = 0;      // knocked back
   bool side = side_view(a->world, a->link.x, a->link.y);
   terrain_sideview = side;
@@ -566,7 +571,7 @@ static void update(App *a) {
       else a->side_ground = false;
     }
   }
-  if (items.sword_frames) terrain_sword(a->worlds, a->n_worlds, a->world, sword_box(&a->link), game.item_level[ITEM_SWORD]);
+  if (items.sword_frames || items.spin_frames) terrain_sword(a->worlds, a->n_worlds, a->world, sword_box(&a->link), game.item_level[ITEM_SWORD]);
   TerrainEvents te = terrain_update(a->worlds, a->n_worlds, a->world, &a->link, dx, dy);
   if (te.damage) {
     game.health = (int16_t)(game.health - ring_damage_taken(te.damage));
@@ -821,7 +826,11 @@ int main(int argc, char **argv) {
     if (acc > TICK_NS * 5) acc = TICK_NS * 5;
     while (acc >= TICK_NS) {
       input_frame(&a.in, w, h);
-      if (shot) { a.in.held |= parse_buttons(hold); a.in.pressed = frame % 16 == 1 ? a.in.held : 0; }
+      if (shot) {
+        bool released = getenv("ORACLES_RELEASE_AT") && frame >= atoi(getenv("ORACLES_RELEASE_AT"));   // testing
+        if (!released) a.in.held |= parse_buttons(hold);
+        a.in.pressed = frame % 16 == 1 && !getenv("ORACLES_PRESS_ONCE") ? a.in.held : frame == 1 ? a.in.held : 0;
+      }
       update(&a);
       if (shot && getenv("ORACLES_KILL_AT") && frame == atoi(getenv("ORACLES_KILL_AT")))   // testing
         actors_kill_room(world_room_index(a.world, a.link.x, a.link.y));

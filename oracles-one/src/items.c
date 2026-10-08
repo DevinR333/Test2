@@ -1,6 +1,7 @@
 #include "items.h"
 #include "actors.h"
 #include "terrain.h"
+#include "rings.h"
 #include "audio.h"
 #include "rings.h"
 #include <stdio.h>
@@ -132,12 +133,47 @@ static void use_seed(Item item, Link *link) {
   }
 }
 
+int items_sword_damage(void) {
+  static const int by_level[4] = {0, 2, 3, 5};      // wooden, noble, master (the originals' -2, -3, -5)
+  int lvl = game.item_level[ITEM_SWORD] > 3 ? 3 : game.item_level[ITEM_SWORD];
+  if (!lvl && game.item_level[ITEM_FOOLS_ORE]) return ring_sword_damage(4);
+  return ring_sword_damage(by_level[lvl]);
+}
+
+void items_sword_hold(bool held, Link *link) {
+  (void)link;
+  if (items.spin_frames || items.sword_frames > 2) return;
+  if (held && (game.item_level[ITEM_SWORD] || game.item_level[ITEM_FOOLS_ORE])) {
+    if (items.charge < 1000) items.charge++;
+    int need = game.ring_worn == RING_CHARGE ? 20 : 40;
+    if (items.charge == need) sfx("SND_CHARGE_SWORD");
+    return;
+  }
+  int need = game.ring_worn == RING_CHARGE ? 20 : 40;
+  if (items.charge >= need) {
+    items.spin_frames = game.ring_worn == RING_SPIN ? 40 : 20;     // the Spin Ring spins twice
+    sfx("SND_SWORDSPIN");
+  }
+  items.charge = 0;
+}
+
 void items_use(Item item, Link *link, World *world) {
   if (item <= ITEM_NONE || item >= ITEM_COUNT || !game.item_level[item]) return;
   switch (item) {
   case ITEM_SWORD:
   case ITEM_FOOLS_ORE:
-    if (!items.sword_frames) { items.sword_frames = SWORD_FRAMES; sfx("SND_SWORDSLASH"); }
+    if (!items.sword_frames && !items.spin_frames) {
+      items.sword_frames = SWORD_FRAMES;
+      items.charge = 0;
+      sfx("SND_SWORDSLASH");
+      // the Noble and Master Swords throw a beam at full health (Light Rings: with hearts missing)
+      int missing = game.max_hearts * 4 - game.health;
+      int allowed = game.ring_worn == RING_LIGHT_L1 ? 8 : game.ring_worn == RING_LIGHT_L2 ? 12 : 0;
+      if (item == ITEM_SWORD && game.item_level[ITEM_SWORD] >= 2 && missing <= allowed && !shot_of(ITEM_SWORD)) {
+        Shot *b = new_shot(ITEM_SWORD, link, 3.2f, 150);
+        if (b) sfx("SND_SWORDBEAM");
+      }
+    }
     break;
   case ITEM_ROCS_FEATHER:
     if (items.z <= 0) { items.vz = FEATHER_JUMP; items.cape_glide = false; sfx("SND_JUMP"); }
@@ -215,6 +251,10 @@ static void update_shots(World *areas, World *w, Link *link) {
         continue;
       }
     }
+    if (s->kind == ITEM_SWORD) {                 // a sword beam
+      if ((wall && s->t > 6) || s->travelled >= s->range || actors_hit_area(s->x, s->y, 8, items_sword_damage())) s->live = false;
+      continue;
+    }
     if (s->kind == ITEM_SLINGSHOT || s->kind == ITEM_SEED_SHOOTER) {
       if (wall || actors_enemy_at(s->x, s->y, 7) >= 0 || s->travelled >= s->range) {
         seed_effect(areas, w, s->seed, s->x, s->y);
@@ -238,6 +278,7 @@ bool items_update(World *areas, World *world, Link *link) {
     if (items.z <= 0) { items.z = 0; items.vz = 0; }
   }
   if (items.sword_frames) items.sword_frames--;
+  if (items.spin_frames) items.spin_frames--;
   if (items.toast_frames) items.toast_frames--;
   if (items.pegasus_frames) items.pegasus_frames--;
   link_speed = items.pegasus_frames ? 1.6f : 1.0f;
@@ -246,6 +287,16 @@ bool items_update(World *areas, World *world, Link *link) {
 }
 
 void items_draw(SDL_Renderer *ren, const Link *link, const View *v, float hud_px) {
+  if ((items.spin_frames || items.charge > 0) && !items.sword_frames && items_icon) {
+    // charging: the blade held out in front; spinning: it sweeps all the way round
+    double angle = items.spin_frames ? link->dir * 90.0 - (double)items.spin_frames * 18.0 : link->dir * 90.0;
+    float rad = (float)(angle * SDL_PI_D / 180.0);
+    float cx = link->x + SDL_sinf(rad) * 13, cy = link->y + 2 - SDL_cosf(rad) * 13;
+    Item blade = game.item_level[ITEM_SWORD] ? ITEM_SWORD : ITEM_FOOLS_ORE;
+    int need = game.ring_worn == RING_CHARGE ? 20 : 40;
+    if (items.spin_frames || items.charge < need || (items.charge / 3) & 1)   // a charged blade flashes
+      items_icon(ren, blade, view_sx(v, cx), view_sy(v, cy), v->scale, angle);
+  }
   if (items.sword_frames && items_icon) {
     // the blade sweeps a quarter turn into the direction Link faces, then holds there
     float t = 1.0f - (float)items.sword_frames / SWORD_FRAMES;
@@ -261,6 +312,11 @@ void items_draw(SDL_Renderer *ren, const Link *link, const View *v, float hud_px
   for (int i = 0; i < (int)SDL_arraysize(items.shots); i++) {
     const Shot *s = &items.shots[i];
     if (!s->live) continue;
+    if (s->kind == ITEM_SWORD && items_icon) {
+      double ang = SDL_fabsf(s->vx) > SDL_fabsf(s->vy) ? (s->vx > 0 ? 90 : 270) : (s->vy > 0 ? 180 : 0);
+      items_icon(ren, ITEM_SWORD, view_sx(v, s->x), view_sy(v, s->y), v->scale, ang);
+      continue;
+    }
     if ((s->kind == ITEM_BOOMERANG || s->kind == ITEM_SWITCH_HOOK) && items_icon) {
       double spin = s->kind == ITEM_BOOMERANG ? s->t * 40.0 : link->dir * 90.0;
       items_icon(ren, (Item)s->kind, view_sx(v, s->x), view_sy(v, s->y), v->scale, spin);

@@ -24,6 +24,8 @@ typedef struct {
   float z, vz;              // height above the ground (Roc's Feather / Cape)
   bool cape_glide;          // the cape's second boost has been used
   int sword_frames;         // >0 while swinging
+  int charge;               // frames the sword has been held out after a swing (spin attack)
+  int spin_frames;          // >0 while spinning
   int magnet_polarity;      // 0 north, 1 south
   char toast[48];           // short message under Link ("SPRING", "N POLARITY"...)
   int toast_frames;
@@ -45,6 +47,10 @@ void items_give_all(void);
 extern void (*items_icon)(SDL_Renderer *ren, Item item, float cx, float cy, float px, double angle);
 // Seed satchel and shooters: which seed they use (A/B on the item in the menu cycles it).
 void items_next_seed(void);
+// The sword button: held after a swing charges a spin attack, which goes off on release.
+void items_sword_hold(bool held, Link *link);
+// Damage of a hit with the sword (its level, then the worn ring).
+int items_sword_damage(void);
 // The Flute: pressing it again in the menu picks the next companion.
 void items_next_companion(void);
 const char *companion_name(int c);
