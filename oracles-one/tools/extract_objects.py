@@ -484,8 +484,8 @@ def ages_progress(root, dialogue):
 
 
 # Story items characters hand over in their scripts (giveitem): what each kind of character gives.
-SKIP_GIFTS = ("TREASURE_GASHA_SEED", "TREASURE_TRADEITEM", "TREASURE_RING", "TREASURE_BOMBS", "TREASURE_HEART_CONTAINER",
-              "TREASURE_ORE_CHUNKS", "TREASURE_BIGGORON_SWORD", "TREASURE_BOMBCHUS", "TREASURE_BOMB_UPGRADE")
+SKIP_GIFTS = ("TREASURE_GASHA_SEED", "TREASURE_RING", "TREASURE_BOMBS", "TREASURE_HEART_CONTAINER",
+              "TREASURE_ORE_CHUNKS", "TREASURE_BOMBCHUS", "TREASURE_BOMB_UPGRADE")
 
 
 def gifts(root, game, dialogue):
@@ -526,6 +526,8 @@ def gifts(root, game, dialogue):
                 if (t, prm) not in [(a, b) for a, b, _ in found]:
                     found.append((t, prm, text))
         if found:
+            # trade items first: a trader gives theirs in exchange before anything else
+            found.sort(key=lambda g: 0 if g[0] == tre.get("TREASURE_TRADEITEM") else 1)
             out[oid] = found[:4]
     return out
 

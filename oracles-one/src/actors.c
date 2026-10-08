@@ -611,6 +611,22 @@ void actors_draw(SDL_Renderer *ren, const View *v, bool behind_link, float link_
 }
 
 bool (*actors_gone)(int game, int id, int subid);
+int actors_trade_chain(int g, int *out, int max) {
+  int n = 0;
+  for (int i = 0; i < n_kinds; i++) {
+    if (kinds[i].game != g) continue;
+    for (int k = 0; k < kinds[i].n_gifts; k++) {
+      if (kinds[i].gifts[k].treasure != 0x41) continue;
+      int p = kinds[i].gifts[k].param, dup = 0;
+      for (int j = 0; j < n; j++) dup |= out[j] == p;
+      if (!dup && n < max) out[n++] = p;
+    }
+  }
+  for (int i = 1; i < n; i++)                 // sorted: the chain goes up by parameter
+    for (int j = i; j > 0 && out[j] < out[j - 1]; j--) { int t = out[j]; out[j] = out[j - 1]; out[j - 1] = t; }
+  return n;
+}
+
 void actors_remove(int index) { if (index >= 0 && index < n_actors) actors[index].alive = false; }
 
 bool actors_talk(const Link *l, ActorTalk *out) {

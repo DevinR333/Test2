@@ -339,8 +339,27 @@ static const char *talk(App *a) {
     return offer;
   }
   // story items: the first of the character's gifts Link doesn't have yet
+  int chain[32], n_chain = actors_trade_chain(t.game, chain, 32);
   for (int i = 0; i < t.n_gifts; i++) {
     const ActorGift *g = &t.gifts[i];
+    if (g->treasure == 0x41) {
+      // the trading sequence: each trader wants the item before theirs in the chain
+      int at = -1, held = game.trade_item[t.game & 1];
+      for (int k = 0; k < n_chain; k++) if (chain[k] == g->param) at = k;
+      if (at < 0) continue;
+      int held_at = -1;
+      for (int k = 0; k < n_chain; k++) if (chain[k] == held) held_at = k;
+      if (held_at >= at) continue;                               // given already
+      if (held_at != at - 1) continue;                           // not yet: bring the one before
+      game.trade_item[t.game & 1] = (uint8_t)g->param;
+      sfx("SND_GETITEM");
+      snprintf(buf, sizeof buf, "%s%s%s", t.text, t.text[0] ? "\n" : "", g->text[0] ? g->text : "They traded with you!");
+      return buf;
+    }
+    if (g->treasure == TREASURE_BIGGORON_SWORD) {
+      // Biggoron forges his sword for the last item of the trading sequence
+      if (game.biggoron_sword || !n_chain || game.trade_item[t.game & 1] != chain[n_chain - 1]) continue;
+    }
     if (treasure_owned((WorldId)t.game, g->treasure, g->param)) continue;
     treasure_give((WorldId)t.game, 0, g->treasure, g->param);
     sfx("SND_GETITEM");
@@ -461,6 +480,21 @@ static bool side_view(const World *w, float x, float y) {
   return r >= 0 && w->coll_mode[r] == (w->id == WORLD_HOLODRUM ? 5 : 3);
 }
 
+// Riding, A and B are the companion's own move: Ricky's punch, Dimitri's bite, Moosh's stomp.
+static void companion_attack(App *a) {
+  static const float fx[4] = {0, 14, 0, -14}, fy[4] = {-12, 4, 18, 4};
+  float x = a->link.x + fx[a->link.dir], y = a->link.y + fy[a->link.dir];
+  switch (game.companion) {
+  case 0: actors_hit_area(x, y, 12, 3); terrain_hit_tile(a->worlds, a->world, x, y, BREAK_SWORD_L1); sfx("SND_STRONG_POUND"); break;
+  case 1: actors_hit_area(x, y, 10, 8); sfx("SND_DODONGO_EAT"); break;
+  default:
+    actors_hit_area(a->link.x, a->link.y + 4, 28, 4);
+    for (int k = 0; k < 4; k++) terrain_hit_tile(a->worlds, a->world, a->link.x + fx[k] * 1.2f, a->link.y + 4 + fy[k] * 0.9f, BREAK_SWORD_L1);
+    sfx("SND_STRONG_POUND");
+    break;
+  }
+}
+
 // Which of the originals' animations Link plays this frame.
 static void link_pose(App *a) {
   Link *l = &a->link;
@@ -530,6 +564,7 @@ static void update(App *a) {
   for (int b = 0; b < 2 && !busy; b++) {
     if (!(in->pressed & (b ? BTN_B : BTN_A))) continue;
     Item item = (Item)(b ? game.equip_b : game.equip_a);
+    if (a->riding) { companion_attack(a); continue; }
     if (!terrain_use(item, a->worlds, a->n_worlds, a->world, &a->link) && game.item_level[item]) items_use(item, &a->link, a->world);
   }
   {

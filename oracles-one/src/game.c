@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SAVE_VERSION 10
+#define SAVE_VERSION 11
 
 GameState game;
 
@@ -60,6 +60,7 @@ void game_new(void) {
   game.dir = 2;
   memset(game.ring_box, 0xff, sizeof game.ring_box);
   game.ring_worn = 0xff;
+  game.trade_item[0] = game.trade_item[1] = 0xff;
   // like the originals, Link starts with nothing: the Wooden Sword is in the Hero's Cave
 }
 

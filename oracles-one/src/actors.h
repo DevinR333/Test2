@@ -42,6 +42,8 @@ extern void (*pickup_icon)(SDL_Renderer *ren, int what, float cx, float cy, floa
 // The character Link faces, close enough to talk to: what they say and the secret they tell or take.
 typedef struct { int treasure, param; char *text; } ActorGift;
 typedef struct { const char *text; int tell, take, game, id, subid, index, n_gifts; const ActorGift *gifts; } ActorTalk;
+// The trading sequence of a game: the trade items characters give, in order (their parameters).
+int actors_trade_chain(int game, int *out, int max);
 // Takes a character away (an item bought off the shelf).
 void actors_remove(int index);
 // Set by main: whether a placed character stays away for good (sold shop goods).
