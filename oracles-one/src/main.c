@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "actors.h"
 #include "game.h"
 #include "gfx.h"
 #include "hud.h"
@@ -76,6 +77,9 @@ typedef struct {
   char banner[32];
   int banner_frames;              // counts down while the place name shows
   char area[32];                  // the area Link is in, to notice when he enters another
+  WarpTarget respawn;             // where Link came into this area: back there if he falls
+  int hurt_frames;                // >0: just hit, flickers and can't be hit again
+  float knock_x, knock_y;
   char message[200];              // a text box (chest contents, locked doors); play waits for A or B
   int message_frames;
 } App;
@@ -175,6 +179,8 @@ static void enter_area(App *a, WarpTarget t) {
   a->cam_x = a->link.x;
   a->cam_y = a->link.y;
   a->area[0] = 0;
+  a->respawn = t;
+  actors_enter(a->worlds, a->n_worlds, a->world);
   check_area(a);
 }
 
@@ -192,6 +198,39 @@ static bool at_door(App *a) {
   bool near = dx < 16 && dy < 20 && dy > -14;      // where Link arrives, just below the door
   if (!near || !(a->in.held & BTN_UP)) a->door_armed = true;
   return a->door_armed && in_doorway && a->link.dir == DIR_UP && (a->in.held & BTN_UP);
+}
+
+// The sword's reach during a swing: the 16x16 square in front of Link, sweeping across as he swings.
+static SDL_FRect sword_box(const Link *l) {
+  if (!items.sword_frames || items.sword_frames > 12) return (SDL_FRect){0, 0, 0, 0};
+  static const float ox[4] = {-8, 4, -8, -20}, oy[4] = {-20, -6, 6, -6};
+  return (SDL_FRect){l->x + ox[l->dir], l->y + oy[l->dir], 16, 16};
+}
+
+// Enemies, their hits on Link, his sword on them, and what they drop.
+static void combat(App *a) {
+  static const int sword_damage[4] = {0, 2, 3, 5};    // wooden, noble, master (the originals' -2, -3, -5)
+  int lvl = SDL_min(game.item_level[ITEM_SWORD], 3);
+  ActorEvents ev = actors_update(a->world, &a->link, sword_box(&a->link), sword_damage[lvl]);
+  if (ev.hearts) game.health = (int16_t)SDL_min(game.health + ev.hearts, game.max_hearts * 4);
+  if (ev.rupees) game.rupees = (uint16_t)SDL_min(game.rupees + ev.rupees, 999);
+  if (a->hurt_frames) {
+    a->hurt_frames--;
+    if (a->hurt_frames > 30) link_push(&a->link, a->world, a->knock_x, a->knock_y);
+    return;
+  }
+  if (!ev.damage || items.z > 0) return;
+  game.health = (int16_t)(game.health - ev.damage);
+  a->hurt_frames = 40;
+  a->knock_x = ev.push_x * 0.6f;
+  a->knock_y = ev.push_y * 0.6f;
+  if (game.health <= 0) {
+    // like the originals' continue: back where Link came in, with three hearts
+    game.health = (int16_t)SDL_min(12, game.max_hearts * 4);
+    a->hurt_frames = 0;
+    start_fade(a, a->respawn);
+    show_message(a, "You fell... but\nyou get up again.");
+  }
 }
 
 static void update(App *a) {
@@ -235,7 +274,9 @@ static void update(App *a) {
   int dx = !!(in->held & BTN_RIGHT) - !!(in->held & BTN_LEFT);
   int dy = !!(in->held & BTN_DOWN) - !!(in->held & BTN_UP);
   if (items.sword_frames) dx = dy = 0;
+  if (a->hurt_frames > 30) dx = dy = 0;      // knocked back
   link_update(&a->link, a->world, dx, dy);
+  combat(a);
   if (a->link.pushing == 20) {
     const char *msg = keydoor_push(a->worlds, a->n_worlds, a->world, front_x, front_y, a->link.dir);
     if (msg) show_message(a, msg);
@@ -276,7 +317,9 @@ static void render(App *a) {
   View v = make_view(a, w, h);
   SDL_SetRenderClipRect(a->ren, &v.viewport);
   world_draw(a->ren, a->world, &a->atlas, &v);
-  link_draw(a->ren, &a->link, &a->link_sheet, &v, items.z);
+  actors_draw(a->ren, &v, true, a->link.y);
+  if (!(a->hurt_frames & 2)) link_draw(a->ren, &a->link, &a->link_sheet, &v, items.z);
+  actors_draw(a->ren, &v, false, a->link.y);
   float px = hud_scale(w, h);
   items_draw(a->ren, &a->link, &v, px);
   SDL_SetRenderClipRect(a->ren, NULL);
@@ -374,13 +417,14 @@ int main(int argc, char **argv) {
   if (touch_hidden) a.in.touch_hidden = true;
   SDL_DisableScreenSaver();   // keeps a phone or handheld awake while playing with a controller
   if (!image_load(a.ren, "metatiles.rgba", &a.atlas) || !image_load(a.ren, "link.rgba", &a.link_sheet) ||
-      !hud_art_load(a.ren, &a.art) || !(a.n_worlds = world_load_all(&a.worlds)) || !warps_load() ||
+      !hud_art_load(a.ren, &a.art) || !actors_load(a.ren) || !(a.n_worlds = world_load_all(&a.worlds)) || !warps_load() ||
       (a.overworld[WORLD_HOLODRUM] = world_overworld(a.worlds, a.n_worlds, WORLD_HOLODRUM, 0)) < 0 ||
       (a.overworld[WORLD_LABRYNNA] = world_overworld(a.worlds, a.n_worlds, WORLD_LABRYNNA, 0)) < 0) {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is missing. Run tools/build_assets.sh first (see README).", a.win);
     return 1;
   }
   for (int i = 0; i < WORLD_COUNT; i++) build_house(&a.worlds[a.overworld[i]]);
+  link_blocker = actors_block;
   if (!chests_load(a.worlds, a.n_worlds)) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
 
   if (shot || !game_load()) game_new();
@@ -416,7 +460,7 @@ int main(int argc, char **argv) {
     if (acc > TICK_NS * 5) acc = TICK_NS * 5;
     while (acc >= TICK_NS) {
       input_frame(&a.in, w, h);
-      if (shot) { a.in.held |= parse_buttons(hold); a.in.pressed = frame == 1 ? a.in.held : 0; }
+      if (shot) { a.in.held |= parse_buttons(hold); a.in.pressed = frame % 16 == 1 ? a.in.held : 0; }
       update(&a);
       acc -= TICK_NS;
       frame++;
@@ -428,8 +472,9 @@ int main(int argc, char **argv) {
       if (!s || !SDL_SaveBMP(s, shot)) { SDL_Log("screenshot: %s", SDL_GetError()); return 1; }
       SDL_DestroySurface(s);
       int room = world_room_index(a.world, a.link.x, a.link.y);
-      SDL_Log("saved %s after %d frames: link at %.0f,%.0f in area %d (%s, group %d, room %02x)", shot, frame, a.link.x, a.link.y,
-              (int)(a.world - a.worlds), a.world->name, a.world->group, room >= 0 ? a.world->room_ids[room] : 0xff);
+      SDL_Log("saved %s after %d frames: link at %.0f,%.0f in area %d (%s, group %d, room %02x), health %d, rupees %d, enemies %d", shot, frame,
+              a.link.x, a.link.y, (int)(a.world - a.worlds), a.world->name, a.world->group, room >= 0 ? a.world->room_ids[room] : 0xff,
+              game.health, game.rupees, actors_enemies_alive());
       break;
     }
     SDL_RenderPresent(a.ren);

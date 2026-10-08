@@ -278,25 +278,58 @@ class Game:
 
 
 def png_to_2bpp(path):
-    im = Image.open(path)
-    if im.mode != "P":
-        im = im.convert("L")
-        lut = lambda v: 3 - (v * 4 // 256)
-    else:
-        lut = lambda v: v & 3
+    """The disassembly's own conversion (tools/gfx/gfx.py png_to_2bpp): colours ranked by brightness
+    (white is 0, or black for "spr_" files, which are also stored interleaved as 8x16 columns), plus
+    whatever the file's .properties override (invert, interleave, tile_padding)."""
+    props = {"invert": os.path.basename(path).startswith("spr_"), "interleave": os.path.basename(path).startswith("spr_"),
+             "tile_padding": 0}
+    pp = os.path.splitext(path)[0] + ".properties"
+    if os.path.exists(pp):
+        for line in open(pp):
+            k, _, v = line.partition(":")
+            v = v.strip()
+            if k.strip() in props and v not in ("", "null"):
+                props[k.strip()] = int(v) if v.isdigit() else v.lower() == "true"
+    im = Image.open(path).convert("RGBA")
     w, h = im.size
     px = im.load()
-    out = bytearray()
+    palette = []
+    for y in range(h):
+        for x in range(w):
+            if px[x, y] not in palette and len(palette) < 4:
+                palette.append(px[x, y])
+    for grey in ((255, 255, 255, 255), (0, 0, 0, 255), (0x55, 0x55, 0x55, 255), (0xaa, 0xaa, 0xaa, 255)):
+        if len(palette) >= 4:
+            break
+        if grey not in palette:
+            palette.append(grey)
+    palette.sort(key=sum)
+    if not props["invert"]:
+        palette.reverse()
+    index = {c: i for i, c in enumerate(palette)}
+    darkest = sorted(palette, key=sum)[0]
+    tiles = []
     for ty in range(h // 8):
         for tx in range(w // 8):
+            t = bytearray()
             for y in range(8):
                 lo = hi = 0
                 for x in range(8):
-                    c = lut(px[tx * 8 + x, ty * 8 + y])
+                    c = index.get(px[tx * 8 + x, ty * 8 + y], index[darkest])
                     lo |= (c & 1) << (7 - x)
                     hi |= (c >> 1 & 1) << (7 - x)
-                out += bytes((lo, hi))
-    return bytes(out)
+                t += bytes((lo, hi))
+            tiles.append(bytes(t))
+    if props["interleave"]:
+        cols = max(w // 8, 1)
+        rows = [tiles[i:i + cols] for i in range(0, len(tiles), cols)]
+        out = []
+        for top, bottom in zip(rows[::2], rows[1::2]):
+            for a, b in zip(top, bottom):
+                out += [a, b]
+        tiles = out
+    data = b"".join(tiles)
+    return data[:len(data) - props["tile_padding"] * 16] if props["tile_padding"] else data
 
 
 def draw_tile(px, ox, oy, vram, idx, attr, pals):
@@ -510,6 +543,7 @@ class Area:
         self.coll_mode = [0] * (rooms_w * rooms_h)
         self.room_names = [""] * (rooms_w * rooms_h)
         self.specials = [(VOID, 0xff, VOID, 0xff, VOID, 0xff, 0xf)] * (rooms_w * rooms_h)
+        self.state = [0] * (rooms_w * rooms_h)   # per screen: the season object conditions test
         W, H = rooms_w * room_w, rooms_h * room_h
         self.cells, self.colls, self.mts = [VOID] * (W * H), [0xff] * (W * H), [0] * (W * H)
 
@@ -534,6 +568,7 @@ class Area:
         out += struct.pack(f"<{n}H", *self.room_ids) + bytes(self.coll_mode)
         out += b"".join(nm.encode()[:31].ljust(32, b"\0") for nm in self.room_names)
         out += b"".join(struct.pack("<HBHBHBB", *sp) for sp in self.specials)
+        out += bytes(self.state)
         out += struct.pack(f"<{W * H}H", *self.cells) + bytes(self.colls) + bytes(self.mts)
         return out
 
@@ -551,6 +586,8 @@ def overworld(rooms, game, group, name, gw, gh, names=None, season="auto"):
         a.put(r % gw, r // gw, room, rr, rooms.special_cells(game, group, room, season))
         if names:
             a.room_names[r] = names[r]
+        if game == "seasons" and group == 0:
+            a.state[r] = rooms.seasons_auto[room] if season == "auto" else season
     return a
 
 
@@ -771,7 +808,7 @@ def main():
             areas.append(a)
             placed.add((gi, g, room))
     with open(os.path.join(out, "areas.bin"), "wb") as f:
-        f.write(b"OARE" + struct.pack("<HH", 3, len(areas)))
+        f.write(b"OARE" + struct.pack("<HH", 4, len(areas)))
         for a in areas:
             f.write(a.pack())
     # Holodrum in each season, for the Rod of Seasons: same layout as the HOLODRUM area

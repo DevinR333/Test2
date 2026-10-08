@@ -11,4 +11,5 @@ fi
 mkdir -p "$here/assets"
 python3 "$here/tools/extract_world.py" "$disasm" "$here/assets"
 python3 "$here/tools/extract_sprites.py" "$disasm" "$here/assets"
+python3 "$here/tools/extract_objects.py" "$disasm" "$here/assets"
 echo "assets ready in $here/assets"

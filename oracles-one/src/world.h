@@ -35,6 +35,7 @@ typedef struct {
   // per screen: what key blocks and doors ($a0) and chests ($f0) turn into, and the dungeon number
   uint16_t *floor_cell, *chest_cell, *closed_chest_cell;
   uint8_t *floor_coll, *chest_coll, *closed_chest_coll, *dungeon;
+  uint8_t *state;                // per screen: the season its objects' conditions test (Holodrum)
 } World;
 
 // Loads every area of both games; returns how many (0 on failure).

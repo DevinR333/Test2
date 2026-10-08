@@ -9,7 +9,10 @@
 #define BOX_T (-1)
 #define BOX_B 6
 
+bool (*link_blocker)(float x, float y);
+
 static bool box_blocked(const World *w, float x, float y) {
+  if (link_blocker && link_blocker(x, y + 2)) return true;
   int l = (int)SDL_floorf(x) + BOX_L, r = (int)SDL_floorf(x) + BOX_R;
   int t = (int)SDL_floorf(y) + BOX_T, b = (int)SDL_floorf(y) + BOX_B;
   for (int px = l; px <= r; px += 4) {
@@ -52,6 +55,11 @@ void link_update(Link *l, const World *w, int dx, int dy) {
   if (dy) moved |= move_axis(l, w, 0, dy * s);
   l->pushing = moved ? 0 : l->pushing + 1;
   l->walk_frames++;
+}
+
+void link_push(Link *l, const World *w, float dx, float dy) {
+  if (!box_blocked(w, l->x + dx, l->y)) l->x += dx;
+  if (!box_blocked(w, l->x, l->y + dy)) l->y += dy;
 }
 
 // Cells of gfx/common/spr_link.png (16x16 each): two walking frames per direction.

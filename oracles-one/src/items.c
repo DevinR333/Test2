@@ -90,4 +90,5 @@ void items_give_all(void) {
   for (int i = ITEM_NONE + 1; i < ITEM_COUNT; i++) {
     while (game.item_level[i] < item_info[i].max_level) game_give_item((Item)i);
   }
+  if (!game.equip_b) game.equip_b = ITEM_SWORD;
 }

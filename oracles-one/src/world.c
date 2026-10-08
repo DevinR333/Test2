@@ -41,7 +41,7 @@ int world_load_all(World **out) {
   Reader r = {d, d + size, false};
   const Uint8 *magic = take(&r, 4);
   unsigned version = u16(&r), count = u16(&r);
-  if (r.bad || memcmp(magic, "OARE", 4) != 0 || version != 3) { SDL_Log("areas.bin: wrong format"); SDL_free(d); return 0; }
+  if (r.bad || memcmp(magic, "OARE", 4) != 0 || version != 4) { SDL_Log("areas.bin: wrong format"); SDL_free(d); return 0; }
   World *areas = calloc(count, sizeof *areas);
   for (unsigned i = 0; i < count && !r.bad; i++) {
     World *w = &areas[i];
@@ -73,6 +73,9 @@ int world_load_all(World **out) {
       w->closed_chest_cell[k] = (uint16_t)u16(&r); w->closed_chest_coll[k] = (uint8_t)u8(&r);
       w->dungeon[k] = (uint8_t)u8(&r);
     }
+    w->state = malloc((size_t)rooms);
+    const Uint8 *st = take(&r, (size_t)rooms);
+    if (st) memcpy(w->state, st, (size_t)rooms);
     w->base.w = w->rooms_w * w->base.room_w;
     w->base.h = w->rooms_h * w->base.room_h;
     size_t n = (size_t)w->base.w * w->base.h;
@@ -105,7 +108,7 @@ void world_free(World *w) {
   for (int s = 0; s < 4; s++) { free(w->seasons[s].cells); free(w->seasons[s].coll); }
   free(w->room_season); free(w->room_ids); free(w->coll_mode); free(w->room_name); free(w->mt);
   free(w->floor_cell); free(w->chest_cell); free(w->floor_coll); free(w->chest_coll); free(w->dungeon);
-  free(w->closed_chest_cell); free(w->closed_chest_coll);
+  free(w->closed_chest_cell); free(w->closed_chest_coll); free(w->state);
   memset(w, 0, sizeof *w);
 }
 
