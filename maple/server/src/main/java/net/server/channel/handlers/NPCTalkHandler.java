@@ -45,7 +45,9 @@ public final class NPCTalkHandler extends AbstractPacketHandler {
             return;
         }
 
-        if (currentServerTime() - c.getPlayer().getNpcCooldown() < YamlConfig.config.server.BLOCK_NPC_RACE_CONDT) {
+        // real time on both sides (the cooldown is stored with System.currentTimeMillis(); the coarse server
+        // clock can lag it, which left NPCs ignoring you for a while after a conversation ended)
+        if (System.currentTimeMillis() - c.getPlayer().getNpcCooldown() < YamlConfig.config.server.BLOCK_NPC_RACE_CONDT) {
             c.sendPacket(PacketCreator.enableActions());
             return;
         }

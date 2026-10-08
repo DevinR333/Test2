@@ -109,6 +109,11 @@ function action(mode, type, selection) {
             cm.dispose();
             return;
         } else {
+            if (actionx["1stJob"] && status == 1 && mode == 0 && type == 1) { // "No" to the final choice
+                cm.sendOk("Make up your mind and visit me again.");
+                cm.dispose();
+                return;
+            }
             if (mode != 1 || status == 7 && type != 1 || (actionx["1stJob"] && status == 4) || (cm.haveItem(4031008) && status == 2) || (actionx["3thJob"] && status == 1)) {
                 if (mode == 0 && status == 2 && type == 1) {
                     cm.sendOk("Make up your mind and visit me again.");
@@ -124,7 +129,7 @@ function action(mode, type, selection) {
     if (actionx["1stJob"]) {
         if (status == 0) {
             if (cm.getLevel() >= 10 && cm.canGetFirstJob(jobType)) {
-                cm.sendNextPrev("It is an important and final choice. You will not be able to turn back.");
+                cm.sendYesNo("It is an important and final choice. You will not be able to turn back."); // offline: ask, as the other instructors do (Next used to make you one)
             } else {
                 cm.sendOk("Train a bit more until you reach the base requirements and I can show you the way of the #rWarrior#k.");
                 cm.dispose();

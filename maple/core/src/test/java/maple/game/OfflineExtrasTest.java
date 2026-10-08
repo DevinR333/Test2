@@ -449,7 +449,7 @@ public class OfflineExtrasTest {
             give(id, 1);
             Thread.sleep(350); // the server ignores item moves under 300 ms apart
             world.equip(firstOf(1, id).position);
-            stepUntil(() -> chr.getInventory(client.inventory.InventoryType.EQUIPPED).findById(id) != null, 5000);
+            stepUntil(() -> { try { return chr.getInventory(client.inventory.InventoryType.EQUIPPED).findById(id) != null; } catch (java.util.ConcurrentModificationException e) { return false; } }, 5000);
             assertNotNull("wearing " + id + " bag " + c.player.inventory(1).size() + " chat " + chat, chr.getInventory(client.inventory.InventoryType.EQUIPPED).findById(id));
         }
         int itemStr = 0;
@@ -720,6 +720,60 @@ public class OfflineExtrasTest {
         assertEquals("completed", 2, world.quests.state(Q));
     }
 
+    /** The warrior instructor asks before making you one: No keeps you a beginner, Yes makes you a Warrior. */
+    @Test(timeout = 120000)
+    public void firstJobAsksFirst() throws Exception {
+        final int DANCES = 1022000;
+        client.Character chr = server();
+        client.Job before = chr.getJob();
+        try {
+            chr.changeJob(client.Job.BEGINNER);
+            while (chr.getLevel() < 10) chr.levelUp(false);
+            warp = null;
+            chr.changeMap(102000003);
+            pump(() -> warp != null);
+            enterMap(warp[0]);
+            stepUntil(() -> npc(DANCES) != null, 5000);
+            player.spawn(npc(DANCES).x, npc(DANCES).y - 10);
+            for (int i = 0; i < 50; i++) step();
+            sendMove();
+            for (int i = 0; i < 50; i++) step();
+            for (int attempt = 0; attempt < 2; attempt++) {
+                boolean yes = attempt == 1;
+                world.talk = null;
+                Thread.sleep(600); // a player cannot reopen a conversation within half a second either
+                world.talkTo(npc(DANCES));
+                if (world.talk != null && world.talk.local != null) { // a quest menu first: "Talk to"
+                    java.util.regex.Matcher m = java.util.regex.Pattern.compile("#L(\\d+)#Talk to").matcher(world.talk.text);
+                    assertTrue(m.find());
+                    world.answer(1, Integer.parseInt(m.group(1)), null);
+                }
+                stepUntil(() -> world.talk != null && world.talk.local == null, 5000);
+                assertNotNull("attempt " + attempt + ": the instructor talks (job " + chr.getJob() + ", open cm " + chr.getClient().getCM()
+                        + ", chat " + chat + ")", world.talk);
+                assertEquals("first page: Next", 0, world.talk.type);
+                NpcTalk first = world.talk;
+                world.answer(1, 0, null);
+                stepUntil(() -> world.talk != null && world.talk != first, 5000);
+                assertEquals("the final choice asks yes or no: " + world.talk.text, 1, world.talk.type);
+                world.answer(yes ? 1 : 0, 0, null);
+                for (int i = 0; i < 100; i++) step();
+                if (!yes) {
+                    assertEquals("No: still a beginner", 0, chr.getJob().getId());
+                    if (world.talk != null) world.answer(0, 0, null);
+                } else {
+                    stepUntil(() -> chr.getJob().getId() == 100, 5000);
+                    assertEquals("Yes: a Warrior", 100, chr.getJob().getId());
+                    if (world.talk != null) world.answer(0, 0, null);
+                }
+                for (int i = 0; i < 50; i++) step();
+            }
+        } finally {
+            server().changeJob(before);
+            Thread.sleep(600); // let the next test talk to an NPC straight away
+        }
+    }
+
     static Npc npc(int id) {
         for (Npc n : world.npcs.values()) if (n.id == id) return n;
         return null;
@@ -752,6 +806,10 @@ public class OfflineExtrasTest {
     @Test(timeout = 120000)
     public void questBulbsStartAndComplete() throws Exception {
         int q = 4437, starter = 9250052, rooney = 1022101;
+        warp = null;
+        server().changeMap(100000000);
+        pump(() -> warp != null);
+        enterMap(warp[0]);
         stepUntil(() -> npc(starter) != null && npc(rooney) != null, 5000);
         assertTrue("quest offered", world.quests.startable(starter).contains(q));
         assertEquals("bulb over the NPC", 0, world.quests.marker(starter));
