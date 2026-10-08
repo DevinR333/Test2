@@ -745,6 +745,10 @@ def game_lines(root, rel, game):
         w = line.split()[0]
         if w == ".ifdef":
             stack.append(line.split()[1] == ("ROM_SEASONS" if game == "seasons" else "ROM_AGES"))
+        elif w == ".ifndef":
+            stack.append(line.split()[1] != ("ROM_SEASONS" if game == "seasons" else "ROM_AGES"))
+        elif w.startswith(".if"):
+            stack.append(True)
         elif w == ".else":
             stack[-1] = not stack[-1]
         elif w == ".endif":
@@ -841,6 +845,44 @@ def rings(root, out):
             f.write(name.encode("ascii", "replace")[:23].ljust(24, b"\0") + desc.encode("ascii", "replace")[:63].ljust(64, b"\0"))
 
 
+def gasha(root, out):
+    """gasha.bin: per game 16 spot ranks (gashaSpot.s @gashaSpotRanks), then 5 ranks x 5 maturity rows x
+    10 prize weights, then the 5 ring tiers (treasureAndDrops.s ringTierTable): u8 count + rings."""
+    ring_ids = enum_ids(root, "constants/common/rings.s", "seasons", "")
+    blob = b""
+    for game in GAMES:
+        cur, ranks, weights = None, [], {}
+        for line in game_lines(root, "object_code/common/interactions/gashaSpot.s", game):
+            m = re.match(r"(@\w+):$", line)
+            if m:
+                cur = m.group(1)
+                continue
+            if cur == "@gashaSpotRanks" and line.startswith("dbrel"):
+                ranks.append(int(re.search(r"@rank(\d)Spot", line).group(1)))
+            m2 = re.match(r"@rank(\d)Spot", cur or "")
+            if m2 and line.startswith(".db"):
+                weights.setdefault(int(m2.group(1)), []).append([num(t) for t in line[3:].split()])
+        blob += bytes((ranks + [4] * 16)[:16])
+        for r in range(5):
+            rows = (weights.get(r, []) + [[0] * 10] * 5)[:5]
+            for row in rows:
+                blob += bytes((row + [0] * 10)[:10])
+    cur, tiers = None, {}
+    for line in game_lines(root, "code/treasureAndDrops.s", "seasons"):
+        m = re.match(r"(@?\w+):$", line)
+        if m:
+            cur = m.group(1)
+            continue
+        m2 = re.match(r"@tier(\d)$", cur or "")
+        if m2 and line.startswith(".db"):
+            tiers.setdefault(int(m2.group(1)), []).extend(ring_ids.get(t, 0) for t in line[3:].split())
+    for t in range(5):
+        lst = tiers.get(t, [])[:16]
+        blob += bytes([len(lst)] + lst)
+    with open(os.path.join(out, "gasha.bin"), "wb") as f:
+        f.write(blob)
+
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__)
@@ -933,6 +975,7 @@ def main():
             f.write(bytes(o))
     companions(root, out)
     rings(root, out)
+    gasha(root, out)
     print("shop items:", shops(root, out))
     drawn = sum(1 for s in placed if s)
     print(f"{len(objects)} objects, {len(sprites)} kinds ({drawn} with sprites), sheet {sheet.size[0]}x{sheet.size[1]}")

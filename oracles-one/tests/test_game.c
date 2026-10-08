@@ -1,4 +1,5 @@
 // Checks the shared-state rules: hearts and rupees are one pool, extra hearts turn into rupees.
+#include "../src/rings.h"
 #include "../src/game.h"
 #include "../src/secrets.h"
 #include <stdio.h>
@@ -59,6 +60,22 @@ int main(void) {
   CHECK(secret_redeem(SECRET_PIRATE) && game.bomb_max == 20);
   secret_hear(SECRET_RUUL);
   CHECK(secret_redeem(SECRET_RUUL) && game.ring_box_size == 3);
+
+  // rings: wearing puts a ring in the box; Select cycles through the box, then no ring
+  game_new();
+  ring_wear(RING_POWER_L1);
+  ring_wear(RING_RED);
+  CHECK(game.ring_worn == RING_RED);
+  CHECK(ring_cycle() == -1 && game.ring_worn == 0xff);
+  CHECK(ring_cycle() == RING_POWER_L1);
+  CHECK(ring_cycle() == RING_RED);
+  for (int r = 10; r < 15; r++) ring_wear(r);          // a full box loses its oldest
+  CHECK(game.ring_box[4] == 14 && game.ring_box[0] == 10);
+  CHECK(ring_sword_damage(2) == 2);                     // ring 14 (GBA Time Ring) does nothing to the sword
+  game.ring_worn = RING_RED;
+  CHECK(ring_sword_damage(2) == 4);
+  game.ring_worn = RING_PROTECTION;
+  CHECK(ring_damage_taken(12) == 4);
 
   printf(failures ? "%d failures\n" : "all passed\n", failures);
   return failures != 0;

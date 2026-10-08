@@ -36,6 +36,8 @@ extern const ItemInfo item_info[ITEM_COUNT];
 
 #define PAGE_SLOTS 16
 
+typedef struct { bool planted; uint8_t game, group, room, kills; } GashaSpot;
+
 typedef struct {
   uint32_t version;
   // Link, shared by both worlds
@@ -51,7 +53,9 @@ typedef struct {
   uint8_t bombs, bomb_max, bombchus;
   uint8_t seed_selected;
   uint8_t companion;
-  uint8_t shop_bought[2][8];      // per game: one-time shop goods bought (shop item, then Subrosia's shop, by subid)              // the Flute calls: 0 Ricky, 1 Dimitri, 2 Moosh          // the seed the satchel and shooters use (SEED_*)
+  uint8_t shop_bought[2][8];
+  uint16_t gasha_maturity;        // enemies beaten (to 300): better Gasha prizes
+  GashaSpot gasha_spots[16];      // Gasha Trees planted      // per game: one-time shop goods bought (shop item, then Subrosia's shop, by subid)              // the Flute calls: 0 Ricky, 1 Dimitri, 2 Moosh          // the seed the satchel and shooters use (SEED_*)
   bool biggoron_sword;
   uint8_t gasha_seeds;
   uint16_t ore_chunks;

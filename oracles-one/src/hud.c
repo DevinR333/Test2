@@ -161,7 +161,7 @@ void menu_update(Menu *m, Uint32 pressed) {
       if (pressed & (BTN_DOWN | BTN_RIGHT)) m->ring_cursor = (m->ring_cursor + 1) % n;
       if (pressed & (BTN_UP | BTN_LEFT)) m->ring_cursor = (m->ring_cursor + n - 1) % n;
       if (m->ring_cursor >= n) m->ring_cursor = 0;
-      if (pressed & BTN_A) { game.ring_worn = (uint8_t)owned[m->ring_cursor]; sfx("SND_SELECTITEM"); }
+      if (pressed & BTN_A) { ring_wear(owned[m->ring_cursor]); sfx("SND_SELECTITEM"); }
     }
     if (pressed & BTN_B) { game.ring_worn = 0xff; sfx("SND_CLOSEMENU"); }
     float target = (float)m->at;
@@ -211,7 +211,9 @@ static void draw_rings_page(SDL_Renderer *ren, const Menu *m, const HudArt *art,
   fill_rect(ren, ox + 2 * px, oy + 2 * px, (PAGE_W - 4) * px, 14 * px, 48, 64, 128, 255);
   float tp = px * 0.5f;
   char line[48];
-  snprintf(line, sizeof line, "RINGS  Wearing: %s", game.ring_worn < 64 ? ring_name(game.ring_worn) : "none");
+  int boxed = 0;
+  for (int i = 0; i < 5; i++) boxed += game.ring_box[i] < 64;
+  snprintf(line, sizeof line, "RINGS  Wearing: %s  (box %d/5)", game.ring_worn < 64 ? ring_name(game.ring_worn) : "none", boxed);
   draw_game_text(ren, art, line, ox + 4 * px, oy + 2 * px, tp);
   int owned[64], n = 0;
   for (int r = 0; r < 64; r++) if (game.rings_owned >> r & 1) owned[n++] = r;
@@ -220,7 +222,9 @@ static void draw_rings_page(SDL_Renderer *ren, const Menu *m, const HudArt *art,
   for (int i = first; i < n && i < first + 8; i++) {
     float y = oy + (18 + (float)(i - first) * 9) * px;
     if (i == cur) fill_rect(ren, ox + 4 * px, y, (PAGE_W - 8) * px, 9 * px, 80, 100, 180, 255);
-    snprintf(line, sizeof line, "%s%s", owned[i] == game.ring_worn ? "* " : "  ", ring_name(owned[i]));
+    bool in_box = false;
+    for (int k = 0; k < 5; k++) in_box |= game.ring_box[k] == owned[i];
+    snprintf(line, sizeof line, "%s%s", owned[i] == game.ring_worn ? "* " : in_box ? "+ " : "  ", ring_name(owned[i]));
     draw_game_text(ren, art, line, ox + 6 * px, y + 0.5f * px, tp);
   }
   // the highlighted ring's description, in the text bar
@@ -237,7 +241,7 @@ static void draw_rings_page(SDL_Renderer *ren, const Menu *m, const HudArt *art,
     d += len;
     if (*d == '\n') d++;
   }
-  draw_game_text(ren, art, "A: wear  B: take off", ox + 6 * px, y + 20 * px, tp);
+  draw_game_text(ren, art, "A: wear  B: off  SELECT in play: swap", ox + 6 * px, y + 20 * px, tp * 0.85f);
 }
 
 // The page at a whole-pixel scale, with room above it for the touch-controls switch (between the

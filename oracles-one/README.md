@@ -56,7 +56,9 @@ or emulates the hardware.
 | Link's own animations from the originals (walking, sword, lifting, swimming, jumping, falling, drowning) | |
 | Both games' music in every room and their sound effects, from their own sound data | |
 | Shops at their original prices (Subrosia's for ore chunks), and the story items characters hand over: the Rod of Seasons, the Harp's tunes, flippers, Mermaid Suit, Pirate's Bell, keys, Island Chart... | Overworld keyholes are already open (the keys aren't needed) |
-| Shared hearts, rupees, items, rings, seeds and bombs; extra hearts become rupees | Rings and Gasha menus, minigames, the trading sequence |
+| Rings: a ring page in the Start menu (the originals' names and descriptions) and their effects; rings you wear go in the ring box, and Select during play swaps through them on the fly | Minigames, the trading sequence |
+| Gasha Seeds: plant them in Gasha spots, beat monsters, harvest the nut (the originals' prize odds by spot and progress) | |
+| Shared hearts, rupees, items, rings, seeds and bombs; extra hearts become rupees | |
 
 `--all-items` gives every item of both games, for testing.
 
@@ -75,7 +77,8 @@ ctest --test-dir build
 ./build/oracles-one
 ```
 
-Controls: arrows or WASD move, X is A, Z is B, Enter is Start, Tab or Right Shift is Select,
+Controls: arrows or WASD move, X is A, Z is B, Enter is Start, Tab or Right Shift is Select (in play:
+swap rings),
 +/- or the mouse wheel zoom, F2 changes the aspect ratio. Gamepads use their usual layout, with
 the shoulder buttons zooming.
 

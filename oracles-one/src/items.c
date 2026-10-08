@@ -293,5 +293,6 @@ void items_give_all(void) {
   game.bombchus = 20;
   game.rings_owned = ~0ull;
   game.ring_box_size = 5;
+  game.gasha_seeds = 5;
   for (int s = 0; s < 5; s++) game.seeds[s] = 20;
 }

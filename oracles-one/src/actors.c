@@ -49,6 +49,7 @@ enum { SHOT_ROCK, SHOT_ARROW, SHOT_FIRE };
 typedef struct { bool live; float x, y, vx, vy; int t, kind; } EShot;
 static EShot eshots[MAX_SHOTS];
 enum { B_WALK, B_SHOOT, B_TURRET, B_FLY, B_HOP, B_CHARGE, B_BURROW, B_HARMLESS, B_SEEDTREE, B_BOSS };
+int actors_kills;                       // enemies beaten so far (Gasha Trees grow by it)
 static int pending_boss;                // a boss beaten by a bomb or seed, reported on the next update
 static float pending_x, pending_y;
 
@@ -262,7 +263,7 @@ void actors_enter(const World *areas, int n, const World *w) {
       if (pl->game != w->id || pl->group != w->group || pl->room != room) continue;
       if (pl->cond != 0xff && !(pl->cond >> state & 1)) continue;
       const Kind *k = find_kind(pl->game, pl->kind, pl->id, pl->subid);
-      bool gives = k && (k->n_gifts || k->take != 0xff || k->tell != 0xff);   // story characters may have no sprite here
+      bool gives = k && (k->n_gifts || k->take != 0xff || k->tell != 0xff || (pl->kind == ACTOR_INTERACTION && pl->id == 0xb6));   // story characters may have no sprite here
       if (!k || (!k->n_frames && pl->kind != ACTOR_ENEMY && !gives)) continue;
       if (pl->kind == ACTOR_INTERACTION && pl->random == 2 && !gives) continue;   // placed by a script later
       if (pl->kind == ACTOR_INTERACTION && !shown_now(k)) continue;     // not at this point in the story
@@ -531,6 +532,7 @@ ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int
       a->vx = -dx / len * 2.5f; a->vy = -dy / len * 2.5f;
       if (a->hp <= 0) {
         a->alive = false;
+        actors_kills++;
         if (a->boss) { ev.boss = a->boss; ev.boss_x = a->x; ev.boss_y = a->y; }
         else drop(a->x, a->y);
         continue;
@@ -619,7 +621,7 @@ bool actors_talk(const Link *l, ActorTalk *out) {
   for (int i = 0; i < n_actors; i++) {
     const Actor *a = &actors[i];
     if (!a->alive || a->kind != ACTOR_INTERACTION || !a->k) continue;
-    bool shop = a->k->id == 0x47 || (a->k->game == WORLD_HOLODRUM && a->k->id == 0x81);
+    bool shop = a->k->id == 0x47 || (a->k->game == WORLD_HOLODRUM && a->k->id == 0x81) || a->k->id == 0xb6;
     if (!shop && !say(a->k)[0] && a->k->tell == 0xff && a->k->take == 0xff && !a->k->n_gifts) continue;
     float dx = a->x - px, dy = a->y - py, d = dx * dx + dy * dy;
     if (d < best_d) { best_d = d; best = a; }
@@ -652,6 +654,7 @@ int actors_hit_area(float x, float y, float r, int damage) {
     a->vx = dx / len * 2.5f; a->vy = dy / len * 2.5f;
     if (a->hp <= 0) {
       a->alive = false;
+      actors_kills++;
       if (a->boss) { pending_boss = a->boss; pending_x = a->x; pending_y = a->y; }
       else drop(a->x, a->y);
     }

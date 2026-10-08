@@ -68,3 +68,24 @@ void rings_update(void) {
   regen_timer = 0;
   if (game.health > 0 && game.health < game.max_hearts * 4) game.health++;
 }
+
+void ring_wear(int r) {
+  if (r < 0 || r >= RING_COUNT) return;
+  game.ring_worn = (uint8_t)r;
+  for (int i = 0; i < 5; i++) if (game.ring_box[i] == r) return;
+  for (int i = 0; i < 5; i++) if (game.ring_box[i] == 0xff) { game.ring_box[i] = (uint8_t)r; return; }
+  memmove(game.ring_box, game.ring_box + 1, 4);     // full: the oldest makes room
+  game.ring_box[4] = (uint8_t)r;
+}
+
+int ring_cycle(void) {
+  int box[5], n = 0, at = -1;
+  for (int i = 0; i < 5; i++)
+    if (game.ring_box[i] < RING_COUNT) { if (game.ring_box[i] == game.ring_worn) at = n; box[n++] = game.ring_box[i]; }
+  if (!n) return game.ring_worn < RING_COUNT ? game.ring_worn : -1;
+  int next = at + 1;                          // -1 (none) -> first; last -> none
+  if (game.ring_worn >= RING_COUNT) next = 0;
+  if (next >= n) { game.ring_worn = 0xff; return -1; }
+  game.ring_worn = (uint8_t)box[next];
+  return box[next];
+}

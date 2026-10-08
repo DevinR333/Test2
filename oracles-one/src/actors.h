@@ -57,6 +57,8 @@ void actors_get_pos(int i, float *x, float *y);
 void actors_set_pos(int i, float x, float y);
 // Enemies still up in one screen of the area (shutters and chests wait for them).
 int actors_room_enemies(int room);
+// Enemies beaten so far (counted up as they fall).
+extern int actors_kills;
 // For tests: beats every enemy in one screen.
 void actors_kill_room(int room);
 // For tests: how many enemies are still up.

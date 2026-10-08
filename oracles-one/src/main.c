@@ -8,6 +8,7 @@
 
 #include "actors.h"
 #include "audio.h"
+#include "gasha.h"
 #include "rings.h"
 #include "companion.h"
 #include "game.h"
@@ -322,6 +323,13 @@ static const char *talk(App *a) {
   static char buf[800];
   ActorTalk t;
   if (!actors_talk(&a->link, &t)) { a->shop_pending = -1; return NULL; }
+  // a Gasha spot: plant, wait, harvest
+  if (t.id == 0xb6) {
+    int r = world_room_index(a->world, a->link.x, a->link.y);
+    const char *g = gasha_talk(t.game, a->world->group, r >= 0 ? a->world->room_ids[r] : 0, t.subid);
+    if (g) sfx("SND_GETSEED");
+    return g;
+  }
   // goods in a shop: A once for the price, again to buy
   bool bought;
   int key = t.game << 16 | t.id << 8 | t.subid;
@@ -491,6 +499,13 @@ static void update(App *a) {
     return;
   }
   if (a->gale_open) { gale_update(a, in->pressed); return; }
+  // Select during play swaps rings on the fly, through the ones in the ring box
+  if ((in->pressed & BTN_SELECT) && !a->message[0]) {
+    int r = ring_cycle();
+    snprintf(items.toast, sizeof items.toast, "%s", r >= 0 ? ring_name(r) : "NO RING");
+    items.toast_frames = 90;
+    sfx("SND_SELECTITEM");
+  }
   if (a->message[0]) {
     // the text box stays at least a moment, then A or B closes it
     if (++a->message_frames > 15 && (in->pressed & (BTN_A | BTN_B))) {
@@ -559,6 +574,8 @@ static void update(App *a) {
     if (game.health <= 0) { game.health = (int16_t)SDL_min(12, game.max_hearts * 4); start_fade(a, a->respawn); }
   }
   combat(a);
+  static int kills_seen;
+  while (kills_seen < actors_kills) { kills_seen++; gasha_kill(); }
   room_events_update(a->worlds, a->n_worlds, a->world, a->link.x, a->link.y);
   link_pose(a);
   if (a->riding) companion_update(game.companion, &a->link);
@@ -745,6 +762,7 @@ int main(int argc, char **argv) {
   link_blocker = block_at;
   trees_load();
   rings_load();
+  gasha_load();
   shops_load();
   actors_gone = shop_sold_out;
   a.shop_pending = -1;

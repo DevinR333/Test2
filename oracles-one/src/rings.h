@@ -30,5 +30,10 @@ int ring_heart_drop(int quarters);
 int ring_bomb_damage(int damage);
 int ring_boomerang_damage(int damage);
 float ring_swim_speed(void);
+// Wears a ring and keeps it in the ring box (the quick-swap list; the oldest drops out when full).
+void ring_wear(int ring);
+// Select during play: the next ring in the box (after the last one, no ring). Returns the ring worn
+// now, or -1 for none.
+int ring_cycle(void);
 // Per frame: heart rings mend Link slowly.
 void rings_update(void);
