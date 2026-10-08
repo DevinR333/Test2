@@ -2,88 +2,128 @@
 #include <stdlib.h>
 #include <string.h>
 
+// ---- loading -----------------------------------------------------------------------------------
+
+typedef struct { const Uint8 *p, *end; bool bad; } Reader;
+static const Uint8 *take(Reader *r, size_t n) {
+  if (r->bad || (size_t)(r->end - r->p) < n) { r->bad = true; return NULL; }
+  const Uint8 *at = r->p;
+  r->p += n;
+  return at;
+}
+static unsigned u8(Reader *r) { const Uint8 *b = take(r, 1); return b ? b[0] : 0; }
+static unsigned u16(Reader *r) { const Uint8 *b = take(r, 2); return b ? (unsigned)(b[0] | b[1] << 8) : 0; }
+
 static bool map_load(Map *m, const char *name) {
   size_t size;
   Uint8 *d = asset_load(name, &size);
   if (!d) { SDL_Log("missing map %s", name); return false; }
-  Uint16 hdr[5];
-  memcpy(hdr, d + 4, sizeof hdr);
-  if (size < 14 || memcmp(d, "OWLD", 4) != 0 || SDL_Swap16LE(hdr[0]) != 1) { SDL_Log("%s is not a version 1 map", name); SDL_free(d); return false; }
-  m->w = SDL_Swap16LE(hdr[1]);
-  m->h = SDL_Swap16LE(hdr[2]);
-  m->room_w = SDL_Swap16LE(hdr[3]);
-  m->room_h = SDL_Swap16LE(hdr[4]);
+  Reader r = {d, d + size, false};
+  const Uint8 *magic = take(&r, 4);
+  unsigned version = u16(&r);
+  m->w = (int)u16(&r); m->h = (int)u16(&r); m->room_w = (int)u16(&r); m->room_h = (int)u16(&r);
+  if (r.bad || memcmp(magic, "OWLD", 4) != 0 || version != 1) { SDL_Log("%s is not a version 1 map", name); SDL_free(d); return false; }
   size_t n = (size_t)m->w * m->h;
-  if (size < 14 + n * 3) { SDL_Log("%s is truncated", name); SDL_free(d); return false; }
   m->cells = malloc(n * 2);
   m->coll = malloc(n);
-  for (size_t i = 0; i < n; i++) m->cells[i] = (uint16_t)(d[14 + i * 2] | d[15 + i * 2] << 8);
-  memcpy(m->coll, d + 14 + n * 2, n);
+  for (size_t i = 0; i < n; i++) m->cells[i] = (uint16_t)u16(&r);
+  const Uint8 *c = take(&r, n);
+  if (c) memcpy(m->coll, c, n);
   SDL_free(d);
-  return true;
+  if (r.bad) SDL_Log("%s is truncated", name);
+  return !r.bad;
 }
 
-static void names_load(World *w, const char *file) {
-  int rooms = (w->base.w / w->base.room_w) * (w->base.h / w->base.room_h);
-  w->area_name = calloc((size_t)rooms, sizeof *w->area_name);
+int world_load_all(World **out) {
   size_t size;
-  char *d = asset_load(file, &size);
-  if (!d) return;
-  size_t at = 0;
-  for (int r = 0; r < rooms && at < size; r++) {
-    size_t n = 0;
-    while (at < size && d[at] != '\n') {
-      if (n + 1 < sizeof w->area_name[r]) w->area_name[r][n++] = d[at];
-      at++;
+  Uint8 *d = asset_load("areas.bin", &size);
+  if (!d) { SDL_Log("missing areas.bin"); return 0; }
+  Reader r = {d, d + size, false};
+  const Uint8 *magic = take(&r, 4);
+  unsigned version = u16(&r), count = u16(&r);
+  if (r.bad || memcmp(magic, "OARE", 4) != 0 || version != 1) { SDL_Log("areas.bin: wrong format"); SDL_free(d); return 0; }
+  World *areas = calloc(count, sizeof *areas);
+  for (unsigned i = 0; i < count && !r.bad; i++) {
+    World *w = &areas[i];
+    w->id = (WorldId)u8(&r);
+    w->kind = (AreaKind)u8(&r);
+    w->group = (int)u8(&r);
+    u8(&r);
+    w->rooms_w = (int)u16(&r); w->rooms_h = (int)u16(&r);
+    w->base.room_w = (int)u16(&r); w->base.room_h = (int)u16(&r);
+    const Uint8 *name = take(&r, 32);
+    if (name) { memcpy(w->name, name, 31); w->name[31] = 0; }
+    int rooms = w->rooms_w * w->rooms_h;
+    w->room_ids = malloc((size_t)rooms * 2);
+    for (int k = 0; k < rooms; k++) w->room_ids[k] = (uint16_t)u16(&r);
+    w->coll_mode = malloc((size_t)rooms);
+    w->room_name = calloc((size_t)rooms, sizeof *w->room_name);
+    const Uint8 *cm = take(&r, (size_t)rooms);
+    if (cm) memcpy(w->coll_mode, cm, (size_t)rooms);
+    for (int k = 0; k < rooms; k++) {
+      const Uint8 *nm = take(&r, 32);
+      if (nm) { memcpy(w->room_name[k], nm, 31); w->room_name[k][31] = 0; }
     }
-    at++;
+    w->base.w = w->rooms_w * w->base.room_w;
+    w->base.h = w->rooms_h * w->base.room_h;
+    size_t n = (size_t)w->base.w * w->base.h;
+    w->base.cells = malloc(n * 2);
+    for (size_t k = 0; k < n; k++) w->base.cells[k] = (uint16_t)u16(&r);
+    w->base.coll = malloc(n);
+    w->mt = malloc(n);
+    const Uint8 *c = take(&r, n), *m = take(&r, n);
+    if (c) memcpy(w->base.coll, c, n);
+    if (m) memcpy(w->mt, m, n);
   }
   SDL_free(d);
-}
-
-const char *world_area_name(const World *w, float px, float py) {
-  if (!w->area_name || px < 0 || py < 0) return "";
-  int rx = (int)px / (w->base.room_w * MT), ry = (int)py / (w->base.room_h * MT);
-  int cols = w->base.w / w->base.room_w;
-  if (rx >= cols || ry >= w->base.h / w->base.room_h) return "";
-  return w->area_name[ry * cols + rx];
-}
-
-bool world_load(World *w, WorldId id) {
-  memset(w, 0, sizeof *w);
-  w->id = id;
-  if (id == WORLD_LABRYNNA) {
-    w->name = "LABRYNNA";
-    if (!map_load(&w->base, "labrynna.map")) return false;
-    names_load(w, "labrynna.names");
-    return true;
+  if (r.bad) { SDL_Log("areas.bin is truncated"); return 0; }
+  // Holodrum (the Seasons overworld) also has its map in each season, for the Rod of Seasons
+  int hol = world_overworld(areas, (int)count, WORLD_HOLODRUM, 0);
+  if (hol >= 0) {
+    World *w = &areas[hol];
+    static const char *files[4] = {"holodrum_spring.map", "holodrum_summer.map", "holodrum_autumn.map", "holodrum_winter.map"};
+    for (int s = 0; s < 4; s++) if (!map_load(&w->seasons[s], files[s])) return 0;
+    int rooms = w->rooms_w * w->rooms_h;
+    w->room_season = malloc((size_t)rooms);
+    memset(w->room_season, SEASON_DEFAULT, (size_t)rooms);
   }
-  w->name = "HOLODRUM";
-  static const char *files[4] = {"holodrum_spring.map", "holodrum_summer.map", "holodrum_autumn.map", "holodrum_winter.map"};
-  if (!map_load(&w->base, "holodrum.map")) return false;
-  names_load(w, "holodrum.names");
-  for (int s = 0; s < 4; s++) if (!map_load(&w->seasons[s], files[s])) return false;
-  int rooms = (w->base.w / w->base.room_w) * (w->base.h / w->base.room_h);
-  w->room_season = malloc((size_t)rooms);
-  memset(w->room_season, SEASON_DEFAULT, (size_t)rooms);
-  return true;
+  *out = areas;
+  return (int)count;
 }
 
 void world_free(World *w) {
   free(w->base.cells); free(w->base.coll);
   for (int s = 0; s < 4; s++) { free(w->seasons[s].cells); free(w->seasons[s].coll); }
-  free(w->room_season);
-  free(w->area_name);
+  free(w->room_season); free(w->room_ids); free(w->coll_mode); free(w->room_name); free(w->mt);
   memset(w, 0, sizeof *w);
+}
+
+int world_overworld(const World *areas, int n, WorldId game, int group) {
+  for (int i = 0; i < n; i++)
+    if (areas[i].kind == AREA_OVERWORLD && areas[i].id == game && areas[i].group == group) return i;
+  return -1;
 }
 
 int world_px_w(const World *w) { return w->base.w * MT; }
 int world_px_h(const World *w) { return w->base.h * MT; }
 
+int world_room_index(const World *w, float px, float py) {
+  if (px < 0 || py < 0) return -1;
+  int rx = (int)px / (w->base.room_w * MT), ry = (int)py / (w->base.room_h * MT);
+  if (rx >= w->rooms_w || ry >= w->rooms_h) return -1;
+  return ry * w->rooms_w + rx;
+}
+
+const char *world_area_name(const World *w, float px, float py) {
+  int r = world_room_index(w, px, py);
+  if (r < 0) return "";
+  return w->room_name[r][0] ? w->room_name[r] : w->name;
+}
+
 // The map a metatile is read from: the base map, or a season layer where the rod changed it.
 static const Map *map_at(const World *w, int tx, int ty) {
   if (!w->room_season) return &w->base;
-  int room = (ty / w->base.room_h) * (w->base.w / w->base.room_w) + tx / w->base.room_w;
+  int room = (ty / w->base.room_h) * w->rooms_w + tx / w->base.room_w;
   int s = w->room_season[room];
   return s == SEASON_DEFAULT ? &w->base : &w->seasons[s];
 }
@@ -139,4 +179,126 @@ void world_draw(SDL_Renderer *ren, const World *w, const Image *atlas, const Vie
       image_draw(ren, atlas, (c % cols) * MT, (c / cols) * MT, MT, MT, sx, sy, sx2 - sx, sy2 - sy, false);
     }
   }
+}
+
+// ---- warps -------------------------------------------------------------------------------------
+
+typedef struct { uint8_t game, group, room, positioned, mask_or_yx, dest_index, dest_group, transition; } WarpSource;
+typedef struct { uint8_t game, group, index, room, yx, param_transition; } WarpDest;
+
+static WarpSource *sources;
+static WarpDest *dests;
+static int n_sources, n_dests;
+static uint8_t warp_tile_ids[2][8][16];   // per game, per collision mode: tiles that warp, 0-ended
+
+bool warps_load(void) {
+  size_t size;
+  Uint8 *d = asset_load("warps.bin", &size);
+  if (!d) { SDL_Log("missing warps.bin"); return false; }
+  Reader r = {d, d + size, false};
+  const Uint8 *magic = take(&r, 4);
+  unsigned version = u16(&r);
+  n_sources = (int)u16(&r);
+  n_dests = (int)u16(&r);
+  if (r.bad || memcmp(magic, "OWRP", 4) != 0 || version != 1) { SDL_free(d); return false; }
+  sources = calloc((size_t)n_sources, sizeof *sources);
+  dests = calloc((size_t)n_dests, sizeof *dests);
+  const Uint8 *s = take(&r, (size_t)n_sources * 8), *t = take(&r, (size_t)n_dests * 7), *tiles = take(&r, sizeof warp_tile_ids);
+  if (r.bad) { SDL_free(d); return false; }
+  for (int i = 0; i < n_sources; i++) memcpy(&sources[i], s + i * 8, 8);
+  for (int i = 0; i < n_dests; i++) {
+    const Uint8 *e = t + i * 7;
+    dests[i] = (WarpDest){e[0], e[1], e[2], e[3], e[4], (uint8_t)(e[5] << 4 | e[6])};
+  }
+  memcpy(warp_tile_ids, tiles, sizeof warp_tile_ids);
+  SDL_free(d);
+  return true;
+}
+
+// Where a room of a game sits: its area and the top-left world pixel of that screen.
+static bool find_room(const World *areas, int n, int game, int group, int room, int *area, float *ox, float *oy) {
+  // the overworld first (rooms of one group can also appear as single-room areas elsewhere)
+  for (int pass = 0; pass < 2; pass++)
+    for (int i = 0; i < n; i++) {
+      const World *w = &areas[i];
+      if ((int)w->id != game || w->group != group || (pass == 0) != (w->kind != AREA_ROOM)) continue;
+      for (int k = 0; k < w->rooms_w * w->rooms_h; k++)
+        if (w->room_ids[k] == room) {
+          *area = i;
+          *ox = (float)((k % w->rooms_w) * w->base.room_w * MT);
+          *oy = (float)((k / w->rooms_w) * w->base.room_h * MT);
+          return true;
+        }
+    }
+  return false;
+}
+
+static bool resolve(const World *areas, int n, const WarpSource *s, WarpTarget *out) {
+  for (int i = 0; i < n_dests; i++) {
+    const WarpDest *d = &dests[i];
+    if (d->game != s->game || d->group != s->dest_group || d->index != s->dest_index) continue;
+    float ox, oy;
+    if (!find_room(areas, n, d->game, d->group, d->room, &out->area, &ox, &oy)) return false;
+    int yx = d->yx == 0xff ? 0x44 : d->yx;    // $ff: the game places Link itself; the middle will do
+    out->x = ox + (float)((yx & 15) * MT + MT / 2);
+    out->y = oy + (float)((yx >> 4) * MT + MT / 2);
+    return true;
+  }
+  return false;
+}
+
+bool world_on_warp_tile(const World *w, float px, float py) {
+  int r = world_room_index(w, px, py);
+  if (r < 0) return false;
+  int tx = (int)px / MT, ty = (int)py / MT;
+  uint8_t mt = w->mt[ty * w->base.w + tx];
+  const uint8_t *list = warp_tile_ids[w->id][w->coll_mode[r] & 7];
+  for (int i = 0; i < 16 && list[i]; i++) if (list[i] == mt) return true;
+  return false;
+}
+
+bool warp_from_tile(const World *areas, int n, const World *w, float px, float py, WarpTarget *out) {
+  int r = world_room_index(w, px, py);
+  if (r < 0 || w->room_ids[r] == 0xffff) return false;
+  int room = w->room_ids[r];
+  int lx = ((int)px / MT) % w->base.room_w, ly = ((int)py / MT) % w->base.room_h;
+  const WarpSource *whole = NULL;
+  for (int i = 0; i < n_sources; i++) {
+    const WarpSource *s = &sources[i];
+    if (s->game != w->id || s->group != w->group || s->room != room) continue;
+    if (s->positioned && s->mask_or_yx == (ly << 4 | lx)) return resolve(areas, n, s, out);
+    if (!s->positioned && s->mask_or_yx == 0 && !whole) whole = s;   // the screen's tile warp
+  }
+  return whole && resolve(areas, n, whole, out);
+}
+
+bool warp_from_edge(const World *areas, int n, const World *w, float px, float py, WarpTarget *out) {
+  // code/bank4 findScreenEdgeWarpSource: only the top and bottom edges warp. The source's bits are
+  // the half of that edge Link leaves by: 0 top-left, 1 top-right, 2 bottom-left, 3 bottom-right,
+  // split at x $60 (Seasons) or $58 (Ages) in small rooms and $80 in large ones (getLinkWarpQuadrant).
+  float cx = SDL_clamp(px, 0, (float)world_px_w(w) - 1), cy = SDL_clamp(py, 0, (float)world_px_h(w) - 1);
+  int r = world_room_index(w, cx, cy);
+  if (r < 0 || w->room_ids[r] == 0xffff) return false;
+  float rw = (float)(w->base.room_w * MT), rh = (float)(w->base.room_h * MT);
+  float lx = SDL_fmodf(cx, rw), ly = SDL_fmodf(cy, rh);
+  float split = w->base.room_w > 10 ? 0x80 : w->id == WORLD_LABRYNNA ? 0x58 : 0x60;
+  int bit = 1 << ((ly >= rh / 2 ? 2 : 0) + (lx >= split ? 1 : 0));
+  for (int i = 0; i < n_sources; i++) {
+    const WarpSource *s = &sources[i];
+    if (s->game != w->id || s->group != w->group || s->room != w->room_ids[r] || s->positioned) continue;
+    if (s->mask_or_yx & bit) return resolve(areas, n, s, out);
+  }
+  return false;
+}
+
+int warps_resolvable(const World *areas, int n, int *total) {
+  int ok = 0;
+  *total = n_sources;
+  for (int i = 0; i < n_sources; i++) {
+    WarpTarget t;
+    if (resolve(areas, n, &sources[i], &t)) ok++;
+    else SDL_Log("warp %s group %d room %02x -> group %d dest %02x: no such room",
+                 sources[i].game ? "ages" : "seasons", sources[i].group, sources[i].room, sources[i].dest_group, sources[i].dest_index);
+  }
+  return ok;
 }

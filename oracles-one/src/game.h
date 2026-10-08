@@ -63,7 +63,8 @@ typedef struct {
   uint32_t secrets_earned;        // a bit per Secret heard: its taker recognises it (secrets.h)
   uint32_t secrets_told;          // a bit per Secret whose reward Link has had
   // where Link is
-  uint8_t world;
+  uint8_t world;                  // the game whose world it is (WorldId)
+  uint16_t area;                  // the area (overworld, dungeon floor, room) in areas.bin
   float x, y;
   int8_t dir;
 } GameState;

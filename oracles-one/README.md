@@ -48,7 +48,8 @@ inventory work. Most of the game itself isn't in yet:
 
 | Done | Not yet |
 | --- | --- |
-| Holodrum and present Labrynna overworlds from the disassembly, each Holodrum area in its season | Houses, caves, dungeons, Subrosia, Labrynna's past |
+| Every place in both games from the disassembly: Holodrum (each area in its season), Subrosia, Labrynna present and past, every house, shop and cave, and all dungeons, each dungeon floor one seamless map (423 areas) | Side-view (2D) rooms play top-down for now |
+| All 1,098 of the originals' warps: doors, stairs, cave mouths, leaving a house by its doorway (tested: every one leads somewhere) | Dungeon shutters, key doors and switches |
 | Link walking, the originals' tile collision, sliding around corners | Ledges, holes, water, stairs, bushes and rocks |
 | The two town houses' doors, in both directions | Sprites for NPCs, enemies and Seasons' Maku Tree |
 | Shared hearts, rupees and items; extra hearts become rupees (tested) | Enemies, NPCs, scripts, text, chests, shops |
@@ -122,12 +123,14 @@ its first or second page), `--touch`, `--all-items`.
 ## Layout
 
 - `tools/extract_world.py`: room layouts, tilesets, graphics and palettes from the disassembly
-  become `metatiles.rgba` (every distinct 16x16 tile) and one `.map` per world (atlas index and
-  the game's collision byte per tile). It writes Holodrum in its default seasons, plus each
-  season in full for the rod, and `.names` with each screen's area name.
+  become `metatiles.rgba` (every distinct 16x16 tile), `areas.bin` (every overworld, dungeon floor
+  and room of both games: atlas index, collision byte and original metatile per tile, and each
+  screen's room number and map-screen name) and `warps.bin` (both games' warp tables). Holodrum
+  is also written in each season, for the rod.
 - `tools/extract_sprites.py`: Link, the HUD art, both games' item icons, their original item
   pages, the inventory cursor and the font, in the games' palettes.
-- `src/world.c`: maps, drawing, and the originals' collision rules (`checkGivenCollision_allowHoles`).
+- `src/world.c`: areas, drawing, the originals' collision rules (`checkGivenCollision_allowHoles`)
+  and their warps (warp tiles, and the top/bottom screen-edge warps of `findScreenEdgeWarpSource`).
 - `src/link.c`: walking and collision. `src/items.c`: using items. `src/game.c`: the shared save
   and its rules.
 - `src/hud.c`: the HUD and the Start menu with both games' item pages. `src/input.c`: keyboard, gamepad, touch, pinch.

@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#define SAVE_VERSION 2
+#define SAVE_VERSION 3
 
 GameState game;
 
@@ -53,6 +53,7 @@ void game_new(void) {
   game.max_hearts = 3;
   game.health = 3 * 4;
   game.world = WORLD_HOLODRUM;
+  game.area = 0;                // areas.bin starts with Holodrum
   // Horon Village, just south of the Maku Tree's gate
   game.x = 9 * 160 + 80;
   game.y = 13 * 128 + 96;

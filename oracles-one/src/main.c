@@ -48,6 +48,7 @@ static void build_house(World *w) {
         int src = (h->src_y + y) * l->w + h->src_x + x, dst = (h->dst_y + y) * l->w + h->dst_x + x;
         l->cells[dst] = l->cells[src];   // within the same layer, so each season's house matches
         l->coll[dst] = l->coll[src];
+        w->mt[dst] = 0;                  // its doorway leads to the other world, not the copied house
       }
   }
 }
@@ -57,8 +58,10 @@ typedef struct {
   SDL_Renderer *ren;
   Image atlas, link_sheet;
   HudArt art;
-  World worlds[WORLD_COUNT];
-  World *world;
+  World *worlds;                  // every area of both games
+  int n_worlds;
+  int overworld[WORLD_COUNT];     // the area index of Holodrum and Labrynna's present
+  World *world;                   // the area Link is in
   Link link;
   Input in;
   Menu menu;
@@ -66,8 +69,9 @@ typedef struct {
   float zoom;
   float cam_x, cam_y;             // camera centre, eases after Link
   int fade;                       // >0: door transition in progress (counts down)
-  WorldId fade_to;
+  WarpTarget fade_to;
   bool door_armed;                // false right after arriving, until Link leaves the doorway
+  bool warp_armed;                // false while Link still stands on the warp tile he arrived on
   char banner[32];
   int banner_frames;              // counts down while the place name shows
   char area[32];                  // the area Link is in, to notice when he enters another
@@ -138,23 +142,29 @@ static void toggle_touch(App *a) {
   settings_save(a);
 }
 
-static void enter_world(App *a, WorldId id, bool via_door) {
-  a->world = &a->worlds[id];
-  game.world = (uint8_t)id;
-  if (via_door) {
-    a->link.x = door_x(id);
-    a->link.y = door_y(id) + 8;
-    a->link.dir = DIR_DOWN;
-    a->door_armed = false;
-  }
+static void enter_area(App *a, WarpTarget t) {
+  a->world = &a->worlds[t.area];
+  game.world = (uint8_t)a->world->id;
+  game.area = (uint16_t)t.area;
+  a->link.x = t.x;
+  a->link.y = t.y;
+  a->door_armed = false;
+  a->warp_armed = false;          // arriving on stairs or a doorway doesn't send Link straight back
   a->cam_x = a->link.x;
   a->cam_y = a->link.y;
   a->area[0] = 0;
   check_area(a);
 }
 
+static void start_fade(App *a, WarpTarget t) {
+  a->fade = FADE_FRAMES;
+  a->fade_to = t;
+}
+
+// The town house door to the other world (only on the two main overworlds).
 static bool at_door(App *a) {
   WorldId id = a->world->id;
+  if (a->world != &a->worlds[a->overworld[id]]) return false;
   float dx = SDL_fabsf(a->link.x - door_x(id)), dy = a->link.y - door_y(id);
   bool in_doorway = dx < 6 && dy < 6 && dy > -14;
   bool near = dx < 16 && dy < 20 && dy > -14;      // where Link arrives, just below the door
@@ -165,7 +175,7 @@ static bool at_door(App *a) {
 static void update(App *a) {
   Input *in = &a->in;
   if (a->fade) {
-    if (--a->fade == FADE_FRAMES / 2) enter_world(a, a->fade_to, true);
+    if (--a->fade == FADE_FRAMES / 2) enter_area(a, a->fade_to);
     return;
   }
   if (in->pressed & BTN_ASPECT) { a->aspect = (a->aspect + 1) % ASPECT_COUNT; set_banner(a, aspect_names[a->aspect]); }
@@ -193,8 +203,22 @@ static void update(App *a) {
   if (items.sword_frames) dx = dy = 0;
   link_update(&a->link, a->world, dx, dy);
   if (at_door(a)) {
-    a->fade = FADE_FRAMES;
-    a->fade_to = a->world->id == WORLD_HOLODRUM ? WORLD_LABRYNNA : WORLD_HOLODRUM;
+    WorldId other = a->world->id == WORLD_HOLODRUM ? WORLD_LABRYNNA : WORLD_HOLODRUM;
+    a->link.dir = DIR_DOWN;
+    start_fade(a, (WarpTarget){a->overworld[other], door_x(other), door_y(other) + 8});
+  } else {
+    // the originals' warps: doors, stairs and cave mouths are warp tiles; houses and caves are left
+    // by walking off the edge of their screen
+    float fx = a->link.x, fy = a->link.y + 4;      // Link's feet
+    bool on_tile = world_on_warp_tile(a->world, fx, fy);
+    if (!on_tile) a->warp_armed = true;
+    WarpTarget t;
+    float wh = (float)world_px_h(a->world);
+    if (on_tile && a->warp_armed && warp_from_tile(a->worlds, a->n_worlds, a->world, fx, fy, &t)) start_fade(a, t);
+    else if (a->world->kind != AREA_OVERWORLD &&
+             ((dy > 0 && a->link.y >= wh - 9) || (dy < 0 && a->link.y <= 3)) &&
+             warp_from_edge(a->worlds, a->n_worlds, a->world, a->link.x, a->link.y + dy * 12, &t))
+      start_fade(a, t);
   }
   game.x = a->link.x;
   game.y = a->link.y;
@@ -258,7 +282,10 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--frames") && i + 1 < argc) frames = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--hold") && i + 1 < argc) hold = argv[++i];
     else if (!strcmp(argv[i], "--size") && i + 1 < argc) sscanf(argv[++i], "%dx%d", &win_w, &win_h);
-    else if (!strcmp(argv[i], "--world") && i + 1 < argc) start_world = !strcmp(argv[++i], "labrynna") ? WORLD_LABRYNNA : WORLD_HOLODRUM;
+    else if (!strcmp(argv[i], "--world") && i + 1 < argc) {
+      i++;   // holodrum, labrynna, or an area number from areas.bin
+      start_world = !strcmp(argv[i], "labrynna") ? WORLD_LABRYNNA : !strcmp(argv[i], "holodrum") ? WORLD_HOLODRUM : WORLD_COUNT + atoi(argv[i]);
+    }
     else if (!strcmp(argv[i], "--pos") && i + 1 < argc) sscanf(argv[++i], "%f,%f", &start_x, &start_y);
     else if (!strcmp(argv[i], "--zoom") && i + 1 < argc) zoom = (float)atof(argv[++i]);
     else if (!strcmp(argv[i], "--aspect") && i + 1 < argc) { i++; aspect = !strcmp(argv[i], "4:3") ? ASPECT_4_3 : !strcmp(argv[i], "16:9") ? ASPECT_16_9 : ASPECT_FILL; }
@@ -286,22 +313,22 @@ int main(int argc, char **argv) {
   if (touch_hidden) a.in.touch_hidden = true;
   SDL_DisableScreenSaver();   // keeps a phone or handheld awake while playing with a controller
   if (!image_load(a.ren, "metatiles.rgba", &a.atlas) || !image_load(a.ren, "link.rgba", &a.link_sheet) ||
-      !hud_art_load(a.ren, &a.art) ||
-      !world_load(&a.worlds[WORLD_HOLODRUM], WORLD_HOLODRUM) || !world_load(&a.worlds[WORLD_LABRYNNA], WORLD_LABRYNNA)) {
+      !hud_art_load(a.ren, &a.art) || !(a.n_worlds = world_load_all(&a.worlds)) || !warps_load() ||
+      (a.overworld[WORLD_HOLODRUM] = world_overworld(a.worlds, a.n_worlds, WORLD_HOLODRUM, 0)) < 0 ||
+      (a.overworld[WORLD_LABRYNNA] = world_overworld(a.worlds, a.n_worlds, WORLD_LABRYNNA, 0)) < 0) {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is missing. Run tools/build_assets.sh first (see README).", a.win);
     return 1;
   }
-  for (int i = 0; i < WORLD_COUNT; i++) build_house(&a.worlds[i]);
+  for (int i = 0; i < WORLD_COUNT; i++) build_house(&a.worlds[a.overworld[i]]);
 
   if (shot || !game_load()) game_new();
   if (all_items) items_give_all();
-  if (start_world >= 0) game.world = (uint8_t)start_world;
+  if (start_world >= 0) game.area = (uint16_t)(start_world < WORLD_COUNT ? a.overworld[start_world] : start_world - WORLD_COUNT);
   if (start_x >= 0) { game.x = start_x; game.y = start_y; }
-  a.link.x = game.x;
-  a.link.y = game.y;
+  if (game.area >= a.n_worlds) game.area = (uint16_t)a.overworld[WORLD_HOLODRUM];
   a.link.dir = game.dir;
-  enter_world(&a, (WorldId)game.world, false);
-  a.door_armed = true;
+  enter_area(&a, (WarpTarget){game.area, game.x, game.y});
+  a.door_armed = a.warp_armed = true;
   if (menu_page >= 0) { menu_open(&a.menu, a.world->id); a.menu.at = a.menu.slide = menu_page; }
 
   Uint64 last = SDL_GetTicksNS(), acc = 0, autosave = 0;
@@ -336,13 +363,16 @@ int main(int argc, char **argv) {
       SDL_Surface *s = SDL_RenderReadPixels(a.ren, NULL);
       if (!s || !SDL_SaveBMP(s, shot)) { SDL_Log("screenshot: %s", SDL_GetError()); return 1; }
       SDL_DestroySurface(s);
-      SDL_Log("saved %s after %d frames: link at %.0f,%.0f in %s", shot, frame, a.link.x, a.link.y, a.world->name);
+      int room = world_room_index(a.world, a.link.x, a.link.y);
+      SDL_Log("saved %s after %d frames: link at %.0f,%.0f in area %d (%s, group %d, room %02x)", shot, frame, a.link.x, a.link.y,
+              (int)(a.world - a.worlds), a.world->name, a.world->group, room >= 0 ? a.world->room_ids[room] : 0xff);
       break;
     }
     SDL_RenderPresent(a.ren);
   }
   if (!shot) game_save();
-  for (int i = 0; i < WORLD_COUNT; i++) world_free(&a.worlds[i]);
+  for (int i = 0; i < a.n_worlds; i++) world_free(&a.worlds[i]);
+  free(a.worlds);
   SDL_Quit();
   return 0;
 }

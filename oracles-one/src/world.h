@@ -5,11 +5,11 @@
 #define MT 16                    // metatile size in world pixels
 #define CELL_VOID 0xffff         // unused screen: drawn as nothing, solid
 
-typedef enum { WORLD_HOLODRUM, WORLD_LABRYNNA, WORLD_COUNT } WorldId;
+// Which original game a place belongs to (its inventory page, its music, its warp tables).
+typedef enum { WORLD_HOLODRUM, WORLD_LABRYNNA, WORLD_COUNT } WorldId;   // Seasons, Ages
 typedef enum { SPRING, SUMMER, AUTUMN, WINTER, SEASON_DEFAULT } Season;
+typedef enum { AREA_OVERWORLD, AREA_ROOM, AREA_DUNGEON } AreaKind;
 
-// One overworld from tools/extract_world.py: rooms laid edge to edge, so walking off a screen just
-// keeps going.
 typedef struct {
   int w, h;                      // metatiles
   int room_w, room_h;            // metatiles per original screen
@@ -17,26 +17,54 @@ typedef struct {
   uint8_t *coll;                 // the game's collision byte per metatile
 } Map;
 
+// An area from tools/extract_world.py: an overworld, a dungeon floor or a single room, its screens
+// laid edge to edge so walking off one just keeps going.
 typedef struct {
-  WorldId id;
-  const char *name;
+  WorldId id;                    // the game it is from
+  AreaKind kind;
+  int group;                     // the original room group
+  int rooms_w, rooms_h;
+  char name[32];
+  uint16_t *room_ids;            // per screen: the original room number, 0xffff none
+  uint8_t *coll_mode;            // per screen: the tileset's collision mode (which tiles warp)
+  char (*room_name)[32];         // per screen: map-screen label ("Horon Village"), may be empty
+  uint8_t *mt;                   // per metatile: the original metatile index (warp tiles)
   Map base;                      // Holodrum: every area in its default season
   Map seasons[4];                // Holodrum only: the whole map in each season (Rod of Seasons)
   int8_t *room_season;           // Holodrum only: per screen, SEASON_DEFAULT or a season set with the rod
-  char (*area_name)[32];         // per screen, from the map screen's labels ("Horon Village")
 } World;
 
-bool world_load(World *w, WorldId id);
+// Loads every area of both games; returns how many (0 on failure).
+int world_load_all(World **out);
 void world_free(World *w);
 int world_px_w(const World *w);
 int world_px_h(const World *w);
+// The overworld of a game (Holodrum, Labrynna's present): its index in the area list.
+int world_overworld(const World *areas, int n, WorldId game, int group);
 
 // The collision byte of the metatile under a world pixel (out of bounds: wall).
 uint8_t world_collision(const World *w, int px, int py);
 // Whether Link can't stand on this pixel (the game's checkGivenCollision_allowHoles).
 bool world_solid(const World *w, int px, int py);
-
+// The screen under a world pixel: its index in the area's room grid, or -1.
+int world_room_index(const World *w, float px, float py);
 // The area name of the screen under a world pixel ("" when unknown).
 const char *world_area_name(const World *w, float px, float py);
 
 void world_draw(SDL_Renderer *ren, const World *w, const Image *atlas, const View *v);
+
+// ---- warps (data/{game}/warpSources.s, warpDestinations.s) -----------------------------------
+typedef struct {
+  int area;                      // where Link arrives
+  float x, y;
+} WarpTarget;
+
+bool warps_load(void);
+// Whether the metatile under this pixel starts a warp (warpTiles.s for the screen's collision mode).
+bool world_on_warp_tile(const World *w, float px, float py);
+// The warp for stepping on a warp tile at px, py (positioned warps first, then the screen's own).
+bool warp_from_tile(const World *areas, int n, const World *w, float px, float py, WarpTarget *out);
+// The warp for walking off the edge of a screen that leads elsewhere (leaving a house).
+bool warp_from_edge(const World *areas, int n, const World *w, float px, float py, WarpTarget *out);
+// For tests: how many warp sources lead to a room that exists; *total gets the number of sources.
+int warps_resolvable(const World *areas, int n, int *total);

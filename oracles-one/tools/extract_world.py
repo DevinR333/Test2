@@ -31,7 +31,7 @@ def save_rgba(im, path):
         f.write(im.size[0].to_bytes(4, "little") + im.size[1].to_bytes(4, "little") + im.tobytes())
 
 ROOM_W, ROOM_H = 10, 8          # small (overworld) rooms, in metatiles
-ATLAS_COLS = 64
+ATLAS_COLS = 128
 VOID = 0xffff                   # map cell with nothing in it
 
 # name, game, room group, season (Seasons only: 0 spring .. 3 winter), grid size in rooms
@@ -348,15 +348,17 @@ def map_texts(root, game):
     return names
 
 
-def area_names(root, game, gw, gh, maku_room):
-    """Per overworld screen, its area name from presentMapTextIndices. Entries with bit 7 set pick
-    their text in code from story progress (code/bank2.s mapGetRoomText); those take the Maku
-    Tree's name on its screen and their neighbour's name elsewhere."""
-    vals = []
+def area_names(root, game, gw, gh, maku_room, table="presentMapTextIndices"):
+    """Per overworld screen, its area name from the map screen's table (presentMapTextIndices, or
+    pastMapTextIndices: Labrynna's past, Subrosia). Entries with bit 7 set pick their text in code
+    from story progress (code/bank2.s mapGetRoomText); those take the Maku Tree's name on its screen
+    and their neighbour's name elsewhere."""
+    vals, on = [], False
     for line in lines_of(os.path.join(root, f"data/{game}/mapTextAndPopups.s")):
-        if line.startswith("pastMapTextIndices"):
-            break
-        if line.startswith(".db"):
+        if line.endswith(":") or line.split(":")[0].endswith("MapTextIndices"):
+            on = line.startswith(table)
+            continue
+        if on and line.startswith(".db"):
             vals += [num(t) for t in line[3:].split()]
     texts = map_texts(root, game)
     maku = next((k for k, v in texts.items() if v.endswith("Maku Tree")), None)
@@ -378,6 +380,262 @@ def area_names(root, game, gw, gh, maku_room):
     return [n or "" for n in names]
 
 
+# ---- rooms, areas and warps -------------------------------------------------------------------
+
+GAMES = ("seasons", "ages")
+LARGE_W, LARGE_H, LARGE_STRIDE = 15, 11, 16     # dungeon rooms: 15x11 metatiles in 16-byte rows
+
+
+def tileset_tables(root, game):
+    """group -> 256 tileset bytes (data/{game}/tilesetAssignments.s; several groups share one)."""
+    out, pending = {}, []
+    for line in lines_of(os.path.join(root, f"data/{game}/tilesetAssignments.s")):
+        m = re.match(r"group(\d)Tilesets:", line)
+        if m:
+            pending.append(int(m.group(1)))
+            continue
+        m = re.match(r'\.incbin "(.*)"', line)
+        if m and pending:
+            with open(os.path.join(root, m.group(1)), "rb") as f:
+                data = f.read()
+            for g in pending:
+                out[g] = data
+            pending = []
+    return out
+
+
+class Rooms:
+    """Renders any room of either game into the shared metatile atlas."""
+
+    def __init__(self, root):
+        self.root = root
+        self.games = {g: Game(root, g) for g in GAMES}
+        self.tables = {g: tileset_tables(root, g) for g in GAMES}
+        self.seasons_auto = default_seasons(root)
+        self.atlas, self.atlas_index, self.ts_cache = [], {}, {}
+
+    def tileset(self, game, group, room, season):
+        g = self.games[game]
+        tsv = self.tables[game][group][room] & 0x7f
+        if game == "seasons" and group == 0:
+            season = self.seasons_auto[room] if season == "auto" else season
+        else:
+            season = None
+        return g.tileset(tsv, season)
+
+    def aliases(self, game):
+        """roomLayoutData.s stacks labels on one file: room labels -> the file they share."""
+        if not hasattr(self, "_aliases"):
+            self._aliases = {}
+        if game not in self._aliases:
+            out, pending = {}, []
+            for line in lines_of(os.path.join(self.root, f"data/{game}/roomLayoutData.s")):
+                m = re.match(r"(room[0-9a-f]{4}):$", line)
+                if m:
+                    pending.append(m.group(1))
+                    continue
+                m = re.match(r"m_RoomLayoutData\s+(room[0-9a-f]{4})", line)
+                if m:
+                    for label in pending:
+                        out[label] = m.group(1)
+                    pending = []
+            self._aliases[game] = out
+        return self._aliases[game]
+
+    def layout(self, game, ts, room):
+        name = f"room{ts[6]:02x}{room:02x}"
+        for candidate in (name, self.aliases(game).get(name)):
+            if not candidate:
+                continue
+            for kind, size in (("small", (ROOM_W, ROOM_H, ROOM_W)), ("large", (LARGE_W, LARGE_H, LARGE_STRIDE))):
+                p = os.path.join(self.root, f"rooms/{game}/{kind}/{candidate}.bin")
+                if os.path.exists(p):
+                    with open(p, "rb") as f:
+                        return f.read(), size
+        return None, None
+
+    def size(self, game, group, room):
+        ts = self.tileset(game, group, room, "auto")
+        data, size = self.layout(game, ts, room)
+        return None if data is None else size[:2]
+
+    def render(self, game, group, room, season="auto"):
+        """(w, h, cells, collisions, metatile ids, collision mode) or None when there's no layout."""
+        ts = self.tileset(game, group, room, season)
+        data, size = self.layout(game, ts, room)
+        if data is None:
+            return None
+        w, h, stride = size
+        key = (game, ts)
+        if key not in self.ts_cache:
+            self.ts_cache[key] = self.games[game].metatiles(ts)
+        tiles, coll = self.ts_cache[key]
+        cells, colls, mts = [], [], []
+        for y in range(h):
+            for x in range(w):
+                mt = data[y * stride + x]
+                img = tiles[mt]
+                if img not in self.atlas_index:
+                    self.atlas_index[img] = len(self.atlas)
+                    self.atlas.append(img)
+                cells.append(self.atlas_index[img])
+                colls.append(coll[mt])
+                mts.append(mt)
+        return w, h, cells, colls, mts, ts[0] >> 4
+
+
+class Area:
+    def __init__(self, game, kind, group, name, rooms_w, rooms_h, room_w, room_h):
+        self.game, self.kind, self.group, self.name = game, kind, group, name
+        self.rooms_w, self.rooms_h, self.room_w, self.room_h = rooms_w, rooms_h, room_w, room_h
+        self.room_ids = [0xffff] * (rooms_w * rooms_h)
+        self.coll_mode = [0] * (rooms_w * rooms_h)
+        self.room_names = [""] * (rooms_w * rooms_h)
+        W, H = rooms_w * room_w, rooms_h * room_h
+        self.cells, self.colls, self.mts = [VOID] * (W * H), [0xff] * (W * H), [0] * (W * H)
+
+    def put(self, rx, ry, room, rendered):
+        w, h, cells, colls, mts, mode = rendered
+        W = self.rooms_w * self.room_w
+        self.room_ids[ry * self.rooms_w + rx] = room
+        self.coll_mode[ry * self.rooms_w + rx] = mode
+        for y in range(h):
+            for x in range(w):
+                i = (ry * self.room_h + y) * W + rx * self.room_w + x
+                self.cells[i], self.colls[i], self.mts[i] = cells[y * w + x], colls[y * w + x], mts[y * w + x]
+
+    def pack(self):
+        n = self.rooms_w * self.rooms_h
+        W, H = n and self.rooms_w * self.room_w, self.rooms_h * self.room_h
+        out = struct.pack("<BBBB", GAMES.index(self.game), self.kind, self.group, 0)
+        out += struct.pack("<HHHH", self.rooms_w, self.rooms_h, self.room_w, self.room_h)
+        out += self.name.encode()[:31].ljust(32, b"\0")
+        out += struct.pack(f"<{n}H", *self.room_ids) + bytes(self.coll_mode)
+        out += b"".join(nm.encode()[:31].ljust(32, b"\0") for nm in self.room_names)
+        out += struct.pack(f"<{W * H}H", *self.cells) + bytes(self.colls) + bytes(self.mts)
+        return out
+
+
+AREA_OVERWORLD, AREA_ROOM, AREA_DUNGEON = 0, 1, 2
+
+
+def overworld(rooms, game, group, name, gw, gh, names=None, season="auto"):
+    a = Area(game, AREA_OVERWORLD, group, name, gw, gh, ROOM_W, ROOM_H)
+    for r in range(gw * gh):
+        room = (r // gw) * 16 + r % gw          # rooms are numbered on a 16-wide grid
+        rr = rooms.render(game, group, room, season)
+        if rr is None or len(set(rr[4])) <= 2:
+            continue                            # unused filler screen (the "N"/"X" rooms)
+        a.put(r % gw, r // gw, room, rr)
+        if names:
+            a.room_names[r] = names[r]
+    return a
+
+
+def dungeon_floors(root, rooms, game):
+    """One area per dungeon floor: dungeonLayouts.s holds an 8x8 room grid per floor; the group is
+    4 or 5 per dungeonData.s. Cropped to the rooms used."""
+    layouts, cur = {}, None
+    for line in lines_of(os.path.join(root, f"data/{game}/dungeonLayouts.s")):
+        m = re.match(r"(\w+):$", line)
+        if m:
+            cur = m.group(1)
+            layouts[cur] = []
+            continue
+        if cur and line.startswith(".db"):
+            layouts[cur] += [num(t) for t in line[3:].split()]
+    order = list(layouts.keys())
+    flat = []
+    for k in order:
+        flat += layouts[k]
+    areas, used = [], set()
+    d = 0
+    for line in lines_of(os.path.join(root, f"data/{game}/dungeonData.s")):
+        m = re.match(r"m_DungeonData\s+>wGroup(\d)RoomFlags,\s*(\$?\w+),\s*(\w+),\s*(\$?\w+)", line)
+        if not m:
+            continue
+        group, label, floors = int(m.group(1)), m.group(3), num(m.group(4))
+        start = sum(len(layouts[k]) for k in order[:order.index(label)])
+        for f in range(floors):
+            grid = flat[start + f * 64:start + f * 64 + 64]
+            cells = [(i % 8, i // 8, r) for i, r in enumerate(grid) if r and rooms.size(game, group, r)]
+            if not cells:
+                continue
+            x0, x1 = min(c[0] for c in cells), max(c[0] for c in cells)
+            y0, y1 = min(c[1] for c in cells), max(c[1] for c in cells)
+            w, h = rooms.size(game, group, cells[0][2])
+            a = Area(game, AREA_DUNGEON, group, f"LEVEL {d}", x1 - x0 + 1, y1 - y0 + 1, w, h)
+            for x, y, r in cells:
+                rr = rooms.render(game, group, r)
+                if (rr[0], rr[1]) == (w, h):
+                    a.put(x - x0, y - y0, r, rr)
+                    used.add((group, r))
+            areas.append(a)
+        d += 1
+    return areas, used
+
+
+def warps(root, game):
+    """(sources, dests). sources: (group, room, kind 0 whole-screen/1 position, mask or YX, dest
+    index, dest group, transition); dests: (group, index, room, YX, parameter, transition)."""
+    lines = list(lines_of(os.path.join(root, f"data/{game}/warpSources.s")))
+    labels, cur = {}, None
+    for line in lines:
+        m = re.match(r"(\w+):$", line)
+        if m:
+            cur = m.group(1)
+            labels[cur] = []
+        elif cur:
+            labels[cur].append(line)
+    sources = []
+    for g in range(8):
+        for line in labels.get(f"group{g}WarpSources", []):
+            p = line.split()
+            if p[0] == "m_StandardWarp":
+                mask, room, di, dg, tr = (num(x) for x in p[1:6])
+                sources.append((g, room, 0, mask, di, dg, tr))
+            elif p[0] == "m_PointerWarp":
+                room = num(p[1])
+                for l2 in labels.get(p[2], []):
+                    q = l2.split()
+                    if q[0] == "m_PositionWarp":
+                        yx, di, dg, tr = (num(x) for x in q[1:5])
+                        sources.append((g, room, 1, yx, di, dg, tr))
+    dests, cur = [], None
+    for line in lines_of(os.path.join(root, f"data/{game}/warpDestinations.s")):
+        m = re.match(r"group(\d)WarpDestTable:", line)
+        if m:
+            cur, idx = int(m.group(1)), 0
+            continue
+        if cur is not None and line.startswith("m_WarpDest"):
+            room, yx, param, tr = (num(x) for x in line.split()[1:5])
+            dests.append((cur, idx, room, yx, param, tr))
+            idx += 1
+    return sources, dests
+
+
+def warp_tiles(root, game):
+    """collision mode -> metatile ids that start a warp when Link steps on them (warpTiles.s)."""
+    order, lists, cur = [], {}, []
+    for line in lines_of(os.path.join(root, f"data/{game}/tile_properties/warpTiles.s")):
+        m = re.match(r"\.dw @(\w+)", line)
+        if m:
+            order.append(m.group(1))
+            continue
+        m = re.match(r"@(\w+):", line)
+        if m:
+            cur.append(m.group(1))
+            continue
+        if line.startswith(".db") and cur:
+            v = num(line[3:].split()[0])
+            if v == 0:
+                cur = []
+                continue
+            for name in cur:
+                lists.setdefault(name, []).append(v)
+    return [lists.get(n, []) for n in order]
+
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__)
@@ -385,64 +643,76 @@ def main():
     root, out = sys.argv[1], sys.argv[2]
     previews = "--previews" in sys.argv
     os.makedirs(out, exist_ok=True)
-    games = {g: Game(root, g) for g in ("seasons", "ages")}
-    atlas, atlas_index, ts_cache = [], {}, {}
-    seasons_auto = default_seasons(root)
-    for name, game, group, season, gw, gh in WORLDS:
-        g = games[game]
-        with open(os.path.join(root, f"rooms/{game}/group{group}Tilesets.bin"), "rb") as f:
-            room_ts = f.read()
-        W, H = gw * ROOM_W, gh * ROOM_H
-        cells = [0] * (W * H)
-        colls = [0] * (W * H)
-        for r in range(gw * gh):
-            room = (r // gw) * 16 + r % gw          # rooms are numbered on a 16-wide grid
-            room_season = seasons_auto[room] if season == "auto" else season
-            ts = g.tileset(room_ts[room] & 0x7f, room_season)
-            key = (game, ts)
-            if key not in ts_cache:
-                ts_cache[key] = g.metatiles(ts)
-            tiles, coll = ts_cache[key]
-            path = os.path.join(root, f"rooms/{game}/small/room{ts[6]:02x}{room:02x}.bin")
-            with open(path, "rb") as f:
-                layout = f.read()
-            rx, ry = r % gw, r // gw
-            if len(set(layout[:ROOM_W * ROOM_H])) <= 2:
-                # unused filler screen (the "N"/"X" rooms): nothing to draw, nothing to walk on
-                for i in range(ROOM_W * ROOM_H):
-                    x, y = rx * ROOM_W + i % ROOM_W, ry * ROOM_H + i // ROOM_W
-                    cells[y * W + x], colls[y * W + x] = VOID, 0xff
+    rooms = Rooms(root)
+    areas = []
+    hol_names = area_names(root, "seasons", 16, 16, 0xc9)
+    areas.append(overworld(rooms, "seasons", 0, "HOLODRUM", 16, 16, hol_names))
+    areas.append(overworld(rooms, "seasons", 1, "SUBROSIA", 11, 8, area_names(root, "seasons", 11, 8, -1, "pastMapTextIndices")))
+    areas.append(overworld(rooms, "ages", 0, "LABRYNNA", 14, 14, area_names(root, "ages", 14, 14, 0x38)))
+    areas.append(overworld(rooms, "ages", 1, "LABRYNNA PAST", 14, 14, area_names(root, "ages", 14, 14, -1, "pastMapTextIndices")))
+    placed = set()
+    for a in areas:
+        placed |= {(GAMES.index(a.game), a.group, r) for r in a.room_ids if r != 0xffff}
+    all_sources, all_dests = [], []
+    for gi, game in enumerate(GAMES):
+        floors, used = dungeon_floors(root, rooms, game)
+        areas += floors
+        placed |= {(gi, g, r) for g, r in used}
+        sources, dests = warps(root, game)
+        all_sources += [(gi,) + s for s in sources]
+        all_dests += [(gi,) + d for d in dests]
+        # every other room a warp leads to gets an area of its own
+        for g, idx, room, yx, param, tr in dests:
+            if (gi, g, room) in placed:
                 continue
-            for i, mt in enumerate(layout[:ROOM_W * ROOM_H]):
-                img = tiles[mt]
-                if img not in atlas_index:
-                    atlas_index[img] = len(atlas)
-                    atlas.append(img)
-                x, y = rx * ROOM_W + i % ROOM_W, ry * ROOM_H + i // ROOM_W
-                cells[y * W + x] = atlas_index[img]
-                colls[y * W + x] = coll[mt]
-        with open(os.path.join(out, name + ".map"), "wb") as f:
+            rr = rooms.render(game, g, room)
+            if rr is None:
+                continue
+            a = Area(game, AREA_ROOM, g, "", 1, 1, rr[0], rr[1])
+            a.put(0, 0, room, rr)
+            areas.append(a)
+            placed.add((gi, g, room))
+    with open(os.path.join(out, "areas.bin"), "wb") as f:
+        f.write(b"OARE" + struct.pack("<HH", 1, len(areas)))
+        for a in areas:
+            f.write(a.pack())
+    # Holodrum in each season, for the Rod of Seasons: same layout as the HOLODRUM area
+    for s, name in enumerate(("spring", "summer", "autumn", "winter")):
+        a = overworld(rooms, "seasons", 0, name, 16, 16, season=s)
+        W, H = 16 * ROOM_W, 16 * ROOM_H
+        with open(os.path.join(out, f"holodrum_{name}.map"), "wb") as f:
             f.write(b"OWLD" + struct.pack("<HHHHH", 1, W, H, ROOM_W, ROOM_H))
-            f.write(struct.pack(f"<{W * H}H", *cells))
-            f.write(bytes(colls))
-        if season in ("auto", None):
-            # one name per screen, row by row, for the banner shown on entering a new area
-            maku_room = 0xc9 if game == "seasons" else 0x38
-            with open(os.path.join(out, name + ".names"), "w") as f:
-                f.write("\n".join(area_names(root, game, gw, gh, maku_room)) + "\n")
-        if previews:
-            im = Image.new("RGBA", (W * 16, H * 16))
-            for i, c in enumerate(cells):
-                if c == VOID:
-                    continue
-                im.paste(Image.frombytes("RGBA", (16, 16), atlas[c]), ((i % W) * 16, (i // W) * 16))
-            im.save(os.path.join(out, name + ".png"))
-        print(f"{name}: {W}x{H} metatiles, atlas now {len(atlas)}")
-    rows = (len(atlas) + ATLAS_COLS - 1) // ATLAS_COLS
+            f.write(struct.pack(f"<{W * H}H", *a.cells))
+            f.write(bytes(a.colls))
+    with open(os.path.join(out, "warps.bin"), "wb") as f:
+        tiles = [warp_tiles(root, g) for g in GAMES]
+        f.write(b"OWRP" + struct.pack("<HHH", 1, len(all_sources), len(all_dests)))
+        for s in all_sources:
+            f.write(bytes(s))
+        for d in all_dests:
+            f.write(bytes(d))
+        for t in tiles:                          # per game: 8 collision modes, 16 tiles each, 0-ended
+            for mode in range(8):
+                lst = (t[mode] if mode < len(t) else [])[:15]
+                f.write(bytes(lst + [0] * (16 - len(lst))))
+    rows = (len(rooms.atlas) + ATLAS_COLS - 1) // ATLAS_COLS
     sheet = Image.new("RGBA", (ATLAS_COLS * 16, rows * 16))
-    for i, img in enumerate(atlas):
+    for i, img in enumerate(rooms.atlas):
         sheet.paste(Image.frombytes("RGBA", (16, 16), img), ((i % ATLAS_COLS) * 16, (i // ATLAS_COLS) * 16))
     save_rgba(sheet, os.path.join(out, "metatiles.rgba"))
+    if previews:
+        for i, a in enumerate(areas):
+            if a.kind == AREA_ROOM:
+                continue
+            W, H = a.rooms_w * a.room_w, a.rooms_h * a.room_h
+            im = Image.new("RGBA", (W * 16, H * 16))
+            for j, c in enumerate(a.cells):
+                if c != VOID:
+                    im.paste(Image.frombytes("RGBA", (16, 16), rooms.atlas[c]), ((j % W) * 16, (j // W) * 16))
+            im.save(os.path.join(out, f"area{i:03d}_{a.game}_{a.name.replace(' ', '_')}.png"))
+    kinds = [sum(1 for a in areas if a.kind == k) for k in range(3)]
+    print(f"{len(areas)} areas ({kinds[0]} overworlds, {kinds[2]} dungeon floors, {kinds[1]} rooms), "
+          f"{len(all_sources)} warps, atlas {len(rooms.atlas)} metatiles ({ATLAS_COLS * 16}x{rows * 16})")
 
 
 if __name__ == "__main__":
