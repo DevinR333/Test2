@@ -28,7 +28,10 @@ typedef struct {
   int at;                   // index into order
   float slide;              // drawn position, eases toward `at`
   int cursor[PAGE_COUNT];
+  int ring_cursor;          // the rings page: which owned ring is highlighted
 } Menu;
+
+#define MENU_PAGES (PAGE_COUNT + 1)   // both games' item pages, then the rings
 
 // Start opens the inventory on the page of the world Link is in; Select slides to the other game's
 // page, like the originals' Select moves between subscreens. A/B equip the highlighted item.

@@ -8,6 +8,7 @@
 
 #include "actors.h"
 #include "audio.h"
+#include "rings.h"
 #include "companion.h"
 #include "game.h"
 #include "gfx.h"
@@ -290,22 +291,22 @@ static bool final_room_locked(App *a) {
 static void combat(App *a) {
   static const int sword_damage[4] = {0, 2, 3, 5};    // wooden, noble, master (the originals' -2, -3, -5)
   int lvl = SDL_min(game.item_level[ITEM_SWORD], 3);
-  ActorEvents ev = actors_update(a->world, &a->link, sword_box(&a->link), sword_damage[lvl]);
+  ActorEvents ev = actors_update(a->world, &a->link, sword_box(&a->link), ring_sword_damage(sword_damage[lvl]));
   boss_events(a, &ev);
-  if (ev.hearts) game.health = (int16_t)SDL_min(game.health + ev.hearts, game.max_hearts * 4);
+  if (ev.hearts) game.health = (int16_t)SDL_min(game.health + ring_heart_drop(ev.hearts), game.max_hearts * 4);
   if (ev.seeds && game.item_level[ITEM_SEED_SATCHEL]) game.seeds[ev.seed_kind] = (uint8_t)SDL_min(game.seeds[ev.seed_kind] + ev.seeds, 20 + 30 * (game.item_level[ITEM_SEED_SATCHEL] - 1));
-  if (ev.rupees) game.rupees = (uint16_t)SDL_min(game.rupees + ev.rupees, 999);
+  if (ev.rupees) game.rupees = (uint16_t)SDL_min(game.rupees + ring_rupee_drop(ev.rupees), 999);
   if (a->hurt_frames) {
     a->hurt_frames--;
     if (a->hurt_frames > 30) link_push(&a->link, a->world, a->knock_x, a->knock_y);
     return;
   }
   if (!ev.damage || items.z > 0) return;
-  game.health = (int16_t)(game.health - ev.damage);
+  game.health = (int16_t)(game.health - ring_damage_taken(ev.damage));
   a->hurt_frames = 40;
   sfx("SND_DAMAGE_LINK");
-  a->knock_x = ev.push_x * 0.6f;
-  a->knock_y = ev.push_y * 0.6f;
+  a->knock_x = ring_knockback(ev.push_x * 0.6f);
+  a->knock_y = ring_knockback(ev.push_y * 0.6f);
   if (game.health <= 0) {
     // like the originals' continue: back where Link came in, with three hearts
     game.health = (int16_t)SDL_min(12, game.max_hearts * 4);
@@ -519,6 +520,8 @@ static void update(App *a) {
   }
   items_update(a->worlds, a->world, &a->link);
   if (a->riding && game.companion == 0) link_speed *= 1.4f;      // Ricky bounds along
+  if (terrain_swimming()) link_speed *= ring_swim_speed();
+  rings_update();
   terrain_airborne = items.z;
   terrain_companion = a->riding ? game.companion : -1;
   item_request(a);
@@ -551,7 +554,7 @@ static void update(App *a) {
   if (items.sword_frames) terrain_sword(a->worlds, a->n_worlds, a->world, sword_box(&a->link), game.item_level[ITEM_SWORD]);
   TerrainEvents te = terrain_update(a->worlds, a->n_worlds, a->world, &a->link, dx, dy);
   if (te.damage) {
-    game.health = (int16_t)(game.health - te.damage);
+    game.health = (int16_t)(game.health - ring_damage_taken(te.damage));
     if (!a->hurt_frames) a->hurt_frames = 30;
     if (game.health <= 0) { game.health = (int16_t)SDL_min(12, game.max_hearts * 4); start_fade(a, a->respawn); }
   }
@@ -741,6 +744,7 @@ int main(int argc, char **argv) {
   for (int i = 0; i < WORLD_COUNT; i++) build_house(&a.worlds[a.overworld[i]]);
   link_blocker = block_at;
   trees_load();
+  rings_load();
   shops_load();
   actors_gone = shop_sold_out;
   a.shop_pending = -1;

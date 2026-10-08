@@ -246,7 +246,8 @@ def all_texts(root, game):
                 lines = []
                 continue
             if lines is not None and raw.startswith("      "):
-                text = re.sub(r"\\col\([^)]*\)", "", raw.strip())
+                text = raw.strip().replace("\\up", "+").replace("\\down", "-")
+                text = re.sub(r"\\col\([^)]*\)", "", text)
                 text = re.sub(r"\\(sym|item)\([^)]*\)", "", text)
                 text = re.sub(r"\\[a-z]+(\([^)]*\))?", "", text)
                 lines.append(text)
@@ -830,6 +831,16 @@ def shops(root, out):
     return len(rows)
 
 
+def rings(root, out):
+    """rings.bin: the 64 rings' names (TX_3040+) and descriptions (TX_3080+), 24 + 64 bytes each."""
+    texts = all_texts(root, "seasons")
+    with open(os.path.join(out, "rings.bin"), "wb") as f:
+        for i in range(64):
+            name = texts.get(0x3040 + i, "").replace("\n", " ").strip()
+            desc = texts.get(0x3080 + i, "").strip()
+            f.write(name.encode("ascii", "replace")[:23].ljust(24, b"\0") + desc.encode("ascii", "replace")[:63].ljust(64, b"\0"))
+
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__)
@@ -921,6 +932,7 @@ def main():
         for o in objects:
             f.write(bytes(o))
     companions(root, out)
+    rings(root, out)
     print("shop items:", shops(root, out))
     drawn = sum(1 for s in placed if s)
     print(f"{len(objects)} objects, {len(sprites)} kinds ({drawn} with sprites), sheet {sheet.size[0]}x{sheet.size[1]}")

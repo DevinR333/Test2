@@ -2,6 +2,7 @@
 #include "actors.h"
 #include "terrain.h"
 #include "audio.h"
+#include "rings.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -106,7 +107,7 @@ static void use_seed(Item item, Link *link) {
   }
   if (item == ITEM_SEED_SATCHEL) {
     game.seeds[seed]--;
-    if (seed == SEED_PEGASUS) { items.pegasus_frames = 60 * 6; toast("PEGASUS!"); return; }
+    if (seed == SEED_PEGASUS) { items.pegasus_frames = game.ring_worn == RING_PEGASUS ? 60 * 9 : 60 * 6; toast("PEGASUS!"); return; }
     if (seed == SEED_GALE) { items.request = REQ_GALE; return; }
     Shot *s = new_shot(ITEM_NONE, link, 0, 0);       // dropped at Link's feet in front, then takes effect
     if (s) { s->seed = seed; s->t = 30; }
@@ -199,7 +200,7 @@ static void update_shots(World *areas, World *w, Link *link) {
       s->travelled += SDL_fabsf(s->vx) + SDL_fabsf(s->vy);
     }
     bool wall = world_solid(w, (int)s->x, (int)s->y) && !(s->kind == ITEM_BOOMERANG && s->returning);
-    int dmg = s->kind == ITEM_BOOMERANG ? game.item_level[ITEM_BOOMERANG] : s->kind == ITEM_SWITCH_HOOK ? 1 : 0;
+    int dmg = s->kind == ITEM_BOOMERANG ? ring_boomerang_damage(game.item_level[ITEM_BOOMERANG]) : s->kind == ITEM_SWITCH_HOOK ? 1 : 0;
     if (s->kind == ITEM_SWITCH_HOOK && !s->returning) {
       int e = actors_enemy_at(s->x, s->y, 8);
       if (e >= 0) {
@@ -290,5 +291,7 @@ void items_give_all(void) {
   if (game.bomb_max < 10) game.bomb_max = 10;
   game.bombs = game.bomb_max;
   game.bombchus = 20;
+  game.rings_owned = ~0ull;
+  game.ring_box_size = 5;
   for (int s = 0; s < 5; s++) game.seeds[s] = 20;
 }

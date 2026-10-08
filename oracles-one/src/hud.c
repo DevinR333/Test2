@@ -2,6 +2,7 @@
 #include "input.h"
 #include "items.h"
 #include "audio.h"
+#include "rings.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -150,8 +151,24 @@ void menu_open(Menu *m, WorldId world) {
 }
 
 void menu_update(Menu *m, Uint32 pressed) {
-  if (pressed & BTN_SELECT) { m->at = (m->at + 1) % PAGE_COUNT; sfx("SND_OPENMENU"); }
+  if (pressed & BTN_SELECT) { m->at = (m->at + 1) % MENU_PAGES; sfx("SND_OPENMENU"); }
   if (pressed & (BTN_LEFT | BTN_RIGHT | BTN_UP | BTN_DOWN)) sfx("SND_MENU_MOVE");
+  if (m->at == PAGE_COUNT) {
+    // the rings Link has (both games' rings are one collection): A wears one, B takes it off
+    int owned[64], n = 0;
+    for (int r = 0; r < 64; r++) if (game.rings_owned >> r & 1) owned[n++] = r;
+    if (n) {
+      if (pressed & (BTN_DOWN | BTN_RIGHT)) m->ring_cursor = (m->ring_cursor + 1) % n;
+      if (pressed & (BTN_UP | BTN_LEFT)) m->ring_cursor = (m->ring_cursor + n - 1) % n;
+      if (m->ring_cursor >= n) m->ring_cursor = 0;
+      if (pressed & BTN_A) { game.ring_worn = (uint8_t)owned[m->ring_cursor]; sfx("SND_SELECTITEM"); }
+    }
+    if (pressed & BTN_B) { game.ring_worn = 0xff; sfx("SND_CLOSEMENU"); }
+    float target = (float)m->at;
+    m->slide += (target - m->slide) * 0.25f;
+    if (SDL_fabsf(target - m->slide) < 0.001f) m->slide = target;
+    return;
+  }
   Page page = m->order[m->at];
   int *c = &m->cursor[page];
   if (pressed & BTN_LEFT) *c = (*c + PAGE_SLOTS - 1) % PAGE_SLOTS;
@@ -188,6 +205,41 @@ static void draw_page(SDL_Renderer *ren, const Menu *m, const HudArt *art, Page 
   }
 }
 
+// The rings page: the rings Link has, the one he wears, and what the highlighted one does.
+static void draw_rings_page(SDL_Renderer *ren, const Menu *m, const HudArt *art, float ox, float oy, float px) {
+  fill_rect(ren, ox, oy, PAGE_W * px, PAGE_H * px, 24, 32, 72, 255);
+  fill_rect(ren, ox + 2 * px, oy + 2 * px, (PAGE_W - 4) * px, 14 * px, 48, 64, 128, 255);
+  float tp = px * 0.5f;
+  char line[48];
+  snprintf(line, sizeof line, "RINGS  Wearing: %s", game.ring_worn < 64 ? ring_name(game.ring_worn) : "none");
+  draw_game_text(ren, art, line, ox + 4 * px, oy + 2 * px, tp);
+  int owned[64], n = 0;
+  for (int r = 0; r < 64; r++) if (game.rings_owned >> r & 1) owned[n++] = r;
+  if (!n) { draw_game_text(ren, art, "No rings yet.", ox + 8 * px, oy + 30 * px, tp); return; }
+  int cur = m->ring_cursor < n ? m->ring_cursor : 0, first = cur > 6 ? cur - 6 : 0;
+  for (int i = first; i < n && i < first + 8; i++) {
+    float y = oy + (18 + (float)(i - first) * 9) * px;
+    if (i == cur) fill_rect(ren, ox + 4 * px, y, (PAGE_W - 8) * px, 9 * px, 80, 100, 180, 255);
+    snprintf(line, sizeof line, "%s%s", owned[i] == game.ring_worn ? "* " : "  ", ring_name(owned[i]));
+    draw_game_text(ren, art, line, ox + 6 * px, y + 0.5f * px, tp);
+  }
+  // the highlighted ring's description, in the text bar
+  const char *d = ring_desc(owned[cur]);
+  float y = oy + 92 * px;
+  fill_rect(ren, ox + 2 * px, y - 2 * px, (PAGE_W - 4) * px, 34 * px, 8, 8, 24, 255);
+  char row[40];
+  for (int k = 0; *d && k < 2; k++) {
+    int len = 0;
+    while (d[len] && d[len] != '\n' && len < 39) len++;
+    memcpy(row, d, (size_t)len);
+    row[len] = 0;
+    draw_game_text(ren, art, row, ox + 6 * px, y + (float)k * 9 * px, tp);
+    d += len;
+    if (*d == '\n') d++;
+  }
+  draw_game_text(ren, art, "A: wear  B: take off", ox + 6 * px, y + 20 * px, tp);
+}
+
 // The page at a whole-pixel scale, with room above it for the touch-controls switch (between the
 // hearts and the A/B badges) and below it for the on-screen Select/Start.
 static float page_scale(int win_w, int win_h) {
@@ -211,6 +263,7 @@ void menu_draw(SDL_Renderer *ren, const Menu *m, const HudArt *art, int win_w, i
   SDL_SetRenderClipRect(ren, &clip);
   // the two games' pages sit side by side and slide like the originals' subscreens
   for (int i = 0; i < PAGE_COUNT; i++) draw_page(ren, m, art, m->order[i], ox + (i - m->slide) * pw, oy, px);
+  draw_rings_page(ren, m, art, ox + (PAGE_COUNT - m->slide) * pw, oy, px);
   SDL_SetRenderClipRect(ren, NULL);
   SDL_FRect sw = menu_touch_switch(win_w, win_h);
   const char *label = touch_hidden ? "TOUCH CONTROLS: OFF" : "TOUCH CONTROLS: ON ";

@@ -2,6 +2,7 @@
 #include "actors.h"
 #include "treasure.h"
 #include "audio.h"
+#include "rings.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -194,7 +195,7 @@ bool terrain_use(Item item, World *areas, int n, World *w, Link *l) {
     T.flying = true;
     T.fx = l->x; T.fy = l->y; T.fz = 14;
     T.fvx = (float)dir_x[l->dir] * 2.5f; T.fvy = (float)dir_y[l->dir] * 2.5f;
-    T.fly_t = 18;
+    T.fly_t = game.ring_worn == RING_TOSS ? 28 : 18;
     T.fly_cell = T.carry_cell;
     sfx("SND_THROW");
     return true;
@@ -370,9 +371,9 @@ TerrainEvents terrain_update(World *areas, int n, World *w, Link *l, int dx, int
         const BreakMode *m = breaks(w, tx, ty, BREAK_BOMB);
         if (m) break_tile(areas, w, tx, ty, m);
       }
-    actors_hit_area(bx, by, 20, 4);
+    actors_hit_area(bx, by, 20, ring_bomb_damage(4));
     float lx = l->x - bx, ly = l->y - by;
-    if (lx * lx + ly * ly < 16 * 16) ev.damage = 2;
+    if (lx * lx + ly * ly < 16 * 16 && game.ring_worn != RING_BOMBPROOF) ev.damage = 2;
   }
   // a ledge jump in progress
   if (T.jump_t) {
