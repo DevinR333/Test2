@@ -25,6 +25,9 @@ ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int
 // Whether a character stands in the way at this pixel (Link walks around them).
 bool actors_block(float px, float py);
 void actors_draw(SDL_Renderer *ren, const View *v, bool behind_link, float link_y);
+// The character Link faces, close enough to talk to: what they say and the secret they tell or take.
+typedef struct { const char *text; int tell, take; } ActorTalk;
+bool actors_talk(const Link *l, ActorTalk *out);
 // Drops a heart or rupee (half the time), as a cut bush or beaten enemy does.
 void actors_drop(float x, float y);
 // Hits every enemy within r of (x, y) (bombs, thrown pots); returns how many.

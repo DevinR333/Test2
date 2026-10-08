@@ -14,6 +14,8 @@ typedef struct {
   uint8_t health;
   int n_frames;
   Frame frames[MAX_FRAMES];
+  uint8_t tell, take;            // linked secret told / taken ($ff none)
+  char *text;                    // what the character says
 } Kind;
 typedef struct { uint8_t game, group, room, kind, id, subid, y, x, count, random, cond; } Placement;
 
@@ -39,7 +41,7 @@ bool actors_load(SDL_Renderer *ren) {
   if (!image_load(ren, "sprites.rgba", &sheet)) return false;
   size_t size;
   Uint8 *d = asset_load("objects.bin", &size);
-  if (!d || size < 10 || memcmp(d, "OOBJ", 4) != 0 || (d[4] | d[5] << 8) != 1) { SDL_free(d); return false; }
+  if (!d || size < 10 || memcmp(d, "OOBJ", 4) != 0 || (d[4] | d[5] << 8) != 2) { SDL_free(d); return false; }
   n_kinds = d[6] | d[7] << 8;
   n_places = d[8] | d[9] << 8;
   kinds = calloc((size_t)n_kinds, sizeof *kinds);
@@ -51,6 +53,14 @@ bool actors_load(SDL_Renderer *ren) {
     k->radius_y = p[4]; k->radius_x = p[5]; k->damage = (int8_t)p[6]; k->health = p[7];
     k->n_frames = p[8];
     p += 9;
+    if (p + 4 > end) break;
+    k->tell = p[0]; k->take = p[1];
+    int tl = p[2] | p[3] << 8;
+    p += 4;
+    if (p + tl > end) break;
+    k->text = calloc((size_t)tl + 1, 1);
+    memcpy(k->text, p, (size_t)tl);
+    p += tl;
     for (int f = 0; f < k->n_frames && p + 11 <= end; f++, p += 11) {
       Frame *fr = &k->frames[f];
       fr->x = (uint16_t)(p[0] | p[1] << 8); fr->y = (uint16_t)(p[2] | p[3] << 8);
@@ -209,6 +219,25 @@ void actors_draw(SDL_Renderer *ren, const View *v, bool behind_link, float link_
     float x1 = view_sx(v, a->x + fr->ox + fr->w), y1 = view_sy(v, a->y + fr->oy + fr->h);
     image_draw(ren, &sheet, fr->x, fr->y, fr->w, fr->h, x0, y0, x1 - x0, y1 - y0, false);
   }
+}
+
+bool actors_talk(const Link *l, ActorTalk *out) {
+  static const float fx[4] = {0, 12, 0, -12}, fy[4] = {-10, 2, 14, 2};
+  float px = l->x + fx[l->dir], py = l->y + fy[l->dir];
+  const Actor *best = NULL;
+  float best_d = 15 * 15;
+  for (int i = 0; i < n_actors; i++) {
+    const Actor *a = &actors[i];
+    if (!a->alive || a->kind != ACTOR_INTERACTION || !a->k) continue;
+    if (!(a->k->text && a->k->text[0]) && a->k->tell == 0xff && a->k->take == 0xff) continue;
+    float dx = a->x - px, dy = a->y - py, d = dx * dx + dy * dy;
+    if (d < best_d) { best_d = d; best = a; }
+  }
+  if (!best) return false;
+  out->text = best->k->text ? best->k->text : "";
+  out->tell = best->k->tell == 0xff ? -1 : best->k->tell;
+  out->take = best->k->take == 0xff ? -1 : best->k->take;
+  return true;
 }
 
 int actors_hit_area(float x, float y, float r, int damage) {

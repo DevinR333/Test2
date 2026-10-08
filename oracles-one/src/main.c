@@ -14,6 +14,7 @@
 #include "items.h"
 #include "link.h"
 #include "treasure.h"
+#include "secrets.h"
 #include "terrain.h"
 #include "world.h"
 
@@ -81,8 +82,9 @@ typedef struct {
   WarpTarget respawn;             // where Link came into this area: back there if he falls
   int hurt_frames;                // >0: just hit, flickers and can't be hit again
   float knock_x, knock_y;
-  char message[200];              // a text box (chest contents, locked doors); play waits for A or B
+  char message[800];              // a text box (chest contents, locked doors); play waits for A or B
   int message_frames;
+  int message_line;               // the first line shown (long texts go on a box at a time)
 } App;
 
 // Shows a text box. The originals' texts already break their lines; anything longer than a line of
@@ -102,6 +104,7 @@ static void show_message(App *a, const char *text) {
   }
   a->message[o] = 0;
   a->message_frames = 1;
+  a->message_line = 0;
 }
 
 #define BANNER_FRAMES 150
@@ -236,6 +239,26 @@ static void combat(App *a) {
   }
 }
 
+// A facing a character: what they say. Those who tell a linked secret teach it to Link; those who
+// take one recognise it and give their reward, no typing (secrets.h).
+static const char *talk(App *a) {
+  static char buf[800];
+  ActorTalk t;
+  if (!actors_talk(&a->link, &t)) return NULL;
+  if (t.take >= 0 && secret_redeem((Secret)t.take)) {
+    snprintf(buf, sizeof buf, "%s%sYou know the %s! Here is your reward.", t.text, t.text[0] ? "\n" : "", secret_info[t.take].name);
+    return buf;
+  }
+  if (t.tell >= 0) {
+    bool had = secret_known((Secret)t.tell);
+    secret_hear((Secret)t.tell);
+    snprintf(buf, sizeof buf, "%s%s%s %s - %s %s.", t.text, t.text[0] ? "\n" : "", had ? "Remember the" : "You learned the",
+             secret_info[t.tell].name, had ? "take it to" : "the one to tell is", secret_info[t.tell].taker);
+    return buf;
+  }
+  return t.text[0] ? t.text : NULL;
+}
+
 static void update(App *a) {
   Input *in = &a->in;
   if (a->fade) {
@@ -260,7 +283,12 @@ static void update(App *a) {
   }
   if (a->message[0]) {
     // the text box stays at least a moment, then A or B closes it
-    if (++a->message_frames > 15 && (in->pressed & (BTN_A | BTN_B))) a->message[0] = 0;
+    if (++a->message_frames > 15 && (in->pressed & (BTN_A | BTN_B))) {
+      int lines = 1;
+      for (const char *p = a->message; *p; p++) lines += *p == '\n';
+      if (a->message_line + 4 < lines) { a->message_line += 4; a->message_frames = 1; }
+      else a->message[0] = 0;
+    }
     return;
   }
   // the tile just in front of Link, for chests and locked doors
@@ -269,6 +297,7 @@ static void update(App *a) {
   if (in->pressed & BTN_A && !terrain_carrying()) {
     const char *got = chest_open_at(a->worlds, a->n_worlds, a->world, front_x, front_y);
     if (!got) got = terrain_read(a->world, &a->link);
+    if (!got) got = talk(a);
     if (got) { show_message(a, got); in->pressed &= ~(Uint32)BTN_A; }
   }
 
@@ -364,6 +393,7 @@ static void render(App *a) {
     fill_rect(a->ren, bx, by, bw, bh, 8, 8, 24, 235);
     char line[64];
     const char *p = a->message;
+    for (int skip = a->message_line; skip > 0 && *p; p++) skip -= *p == '\n';
     for (int row = 0; *p && row < 4; row++) {
       int n = 0;
       while (*p && *p != '\n' && n < 63) line[n++] = *p++;

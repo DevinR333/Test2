@@ -4,11 +4,13 @@
 Writes into OUT_DIR:
   sprites.rgba  the animation frames of every placed interaction, enemy and part, packed in rows
   objects.bin   (little endian)
-    "OOBJ", u16 version 1, u16 sprite count, u16 object count
+    "OOBJ", u16 version 2, u16 sprite count, u16 object count
     sprites: u8 game, u8 kind (0 interaction, 1 enemy, 2 part), u8 id, u8 subid,
              u8 radius y, u8 radius x, s8 damage (quarter hearts, negative), u8 health,
-             u8 frame count (<= 4), then per frame: u16 x, u16 y (in sprites.rgba), u8 w, u8 h,
-             s16 origin x, s16 origin y (top-left relative to the object's position), u8 duration
+             u8 frame count (<= 4), u8 secret told, u8 secret taken ($ff none), u16 text length,
+             the text (what the character says first), then per frame: u16 x, u16 y (in
+             sprites.rgba), u8 w, u8 h, s16 origin x, s16 origin y (top-left relative to the
+             object's position), u8 duration
     objects: u8 game, u8 group, u8 room, u8 kind, u8 id, u8 subid, u8 y, u8 x (in the room),
              u8 count (random enemies; else 1), u8 random (1: place at random), u8 condition
              (bit n: present in room state n, i.e. Holodrum's season; $ff always)
@@ -217,6 +219,153 @@ class Sprites:
         return im, x0, y0
 
 
+# ---- what characters say (scripts/{game}/*.s, object_code/{game}/interactions/*.s) -------------
+
+TEXT_OPS = ("showtext", "showtextlowindex", "rungenericnpc", "rungenericnpclowindex", "showtextnonexitable",
+            "showtextnonexitablelowindex", "showtextdifferentforlinked")
+
+
+def all_texts(root, game):
+    """TX_xxxx -> the message (as extract_world.text_strings, every group in one pass)."""
+    out, cur, lines = {}, None, None
+    with open(os.path.join(root, f"text/{game}/text.yaml")) as f:
+        for raw in f:
+            m = re.match(r"\s*- name: TX_([0-9a-f]{4})$", raw)
+            if m:
+                if cur is not None and lines is not None:
+                    out[cur] = "\n".join(lines).strip()
+                cur, lines = int(m.group(1), 16), None
+                continue
+            if cur is None:
+                continue
+            if raw.strip().startswith("text:"):
+                lines = []
+                continue
+            if lines is not None and raw.startswith("      "):
+                text = re.sub(r"\\col\([^)]*\)", "", raw.strip())
+                text = re.sub(r"\\(sym|item)\([^)]*\)", "", text)
+                text = re.sub(r"\\[a-z]+(\([^)]*\))?", "", text)
+                lines.append(text)
+    if cur is not None and lines:
+        out[cur] = "\n".join(lines).strip()
+    return out
+
+
+class Dialogue:
+    """(id, subid) -> the first thing a character's script says."""
+
+    def __init__(self, root, game):
+        self.texts = all_texts(root, game)
+        self.scripts, self.sections, order = {}, {}, []
+        files = [os.path.join(root, f"scripts/{game}/{f}") for f in ("scripts.s", "scripts2.s", "scriptHelper.s")]
+        files.append(os.path.join(root, "scripts/common/commonScripts.s"))
+        section = None
+        for f in files:
+            if not os.path.exists(f):
+                continue
+            cur = None
+            for raw in open(f):
+                m = re.match(r";\s*(INTERAC_\w+)", raw.strip())
+                if m:
+                    section = m.group(1)
+                    continue
+                line = raw.split(";", 1)[0].strip()
+                if not line:
+                    continue
+                m = re.match(r"([A-Za-z_]\w*):", line)
+                if m:
+                    cur = m.group(1)
+                    self.scripts[cur] = []
+                    if section:
+                        self.sections.setdefault(section, []).append(cur)
+                    continue
+                if cur:
+                    self.scripts[cur].append(line)
+        # interaction id -> its code's script references, in order
+        consts = {}
+        for line in lines_of(os.path.join(root, f"constants/{game}/interactions.s")):
+            m = re.match(r"\.define\s+(INTERAC_\w+)\s+\$(\w+)", line)
+            if m:
+                consts[int(m.group(2), 16)] = m.group(1)
+        self.names = consts
+        self.code = {}
+        d = os.path.join(root, f"object_code/{game}/interactions")
+        for fn in sorted(os.listdir(d)):
+            ids, refs, txs = [], [], []
+            for line in lines_of(os.path.join(d, fn)):
+                m = re.match(r"interactionCode([0-9a-f]{2}):", line)
+                if m:
+                    ids.append(int(m.group(1), 16))
+                for r in re.findall(r"(?:mainScripts|scripts2|commonScripts)\.(\w+)", line):
+                    refs.append(r)
+                for t in re.findall(r"[<>]?TX_([0-9a-f]{4})", line):
+                    txs.append(int(t, 16))
+            for i in ids:
+                self.code[i] = (len(ids), refs, txs)
+
+    def script_text(self, label, depth=0):
+        for line in self.scripts.get(label, []):
+            p = line.replace(",", " ").split()
+            if not p:
+                continue
+            if p[0] in TEXT_OPS and len(p) > 1:
+                m = re.match(r"<?TX_([0-9a-f]{4})", p[1])
+                if m:
+                    return self.texts.get(int(m.group(1), 16))
+            if p[0] == "scriptjump" and len(p) > 1 and depth < 3 and not p[1].startswith(("@", "-", "+")):
+                return self.script_text(p[1], depth + 1)
+        return None
+
+    def text(self, oid, subid):
+        shared, refs, txs = self.code.get(oid, (0, [], []))
+        cands = []
+        if shared == 1 and refs:
+            cands.append(refs[subid] if subid < len(refs) else refs[0])
+        sec = self.sections.get(self.names.get(oid, ""), [])
+        if sec:
+            cands.append(sec[subid] if subid < len(sec) else sec[0])
+            cands += sec
+        if shared == 1:
+            cands += refs
+        for c in cands:
+            t = self.script_text(c)
+            if t:
+                return t
+        # characters whose code picks the text (genericNpcScript with a textID)
+        for tx in (txs if shared == 1 else []):
+            if tx in self.texts and tx >> 8 not in (0x00,):
+                return self.texts[tx]
+        return None
+
+
+# Who tells which linked secret (the linked game's NPCs running linkedGameNpcScript, with the secret
+# index each sets) and who takes it (askforsecret in their scripts). Secret numbers as src/secrets.h.
+SECRETS = ["CLOCK_SHOP", "GRAVEYARD", "SUBROSIAN", "DIVER", "SMITH", "PIRATE", "TEMPLE", "DEKU", "BIGGORON", "RUUL",
+           "KING_ZORA", "FAIRY", "TROY", "PLEN", "LIBRARY", "TOKAY", "MAMAMU", "TINGLE", "ELDER", "SYMMETRY"]
+ANY = None
+SECRET_TELLERS = {   # (game, id, subid) -> secret
+    (0, 0xe7, ANY): "KING_ZORA", (0, 0xd8, ANY): "FAIRY", (0, 0xbc, ANY): "TROY", (0, 0xbd, ANY): "TROY",
+    (0, 0xbe, ANY): "TROY", (0, 0x30, 0x25): "PLEN", (0, 0xcb, ANY): "LIBRARY", (0, 0xdb, 0): "TOKAY",
+    (0, 0xdb, 1): "MAMAMU", (0, 0xdb, 2): "SYMMETRY", (0, 0xd5, ANY): "TINGLE", (0, 0x3b, 7): "ELDER",
+    (1, 0x3d, 4): "CLOCK_SHOP", (1, 0x3d, 5): "RUUL", (1, 0xcb, ANY): "GRAVEYARD", (1, 0x4e, 3): "SUBROSIAN",
+    (1, 0x4e, 4): "SMITH", (1, 0xcd, ANY): "DIVER", (1, 0x3b, 6): "PIRATE", (1, 0xd5, ANY): "TEMPLE",
+    (1, 0xd6, ANY): "DEKU", (1, 0x66, 0x0f): "BIGGORON",
+}
+SECRET_TAKERS = {
+    (0, 0x24, 3): "RUUL", (0, 0x40, ANY): "PIRATE", (0, 0x52, ANY): "BIGGORON", (0, 0xa4, ANY): "SMITH",
+    (0, 0xca, ANY): "CLOCK_SHOP", (0, 0xcb, ANY): "GRAVEYARD", (0, 0xcc, ANY): "SUBROSIAN", (0, 0xcd, ANY): "DIVER",
+    (0, 0xd5, ANY): "TEMPLE", (0, 0xd6, ANY): "DEKU",
+    (1, 0x30, 2): "ELDER", (1, 0x48, 0x19): "TOKAY", (1, 0x49, ANY): "FAIRY", (1, 0x9c, ANY): "KING_ZORA",
+    (1, 0xc8, ANY): "TINGLE", (1, 0xca, ANY): "TROY", (1, 0xcc, ANY): "PLEN", (1, 0x52, 0): "LIBRARY",
+    (1, 0x53, ANY): "MAMAMU", (1, 0xbf, 8): "SYMMETRY", (1, 0xbf, 9): "SYMMETRY",
+}
+
+
+def secret_of(table, game, oid, subid):
+    s = table.get((game, oid, subid)) or table.get((game, oid, ANY))
+    return SECRETS.index(s) if s else 0xff
+
+
 def object_lists(root, game):
     """(group, room) -> [(kind, id, subid, y, x, count, random, condition)] as at the start of a game."""
     files = [os.path.join(root, f"objects/{game}", f) for f in sorted(os.listdir(os.path.join(root, f"objects/{game}"))) if f.endswith(".s")]
@@ -275,14 +424,18 @@ def main():
         sys.exit(2)
     root, out = sys.argv[1], sys.argv[2]
     os.makedirs(out, exist_ok=True)
-    objects, sprites, sprite_index = [], [], {}
+    objects, sprites, sprite_index, talk = [], [], {}, {}
     for gi, game in enumerate(GAMES):
         sp = Sprites(root, game)
+        dialogue = Dialogue(root, game)
         for (group, room), objs in sorted(object_lists(root, game).items()):
             for kind, oid, subid, y, x, count, rnd, cond in objs:
                 key = (gi, kind, oid, subid)
                 if key not in sprite_index:
                     frames, stats = sp.frames(kind, oid, subid)
+                    if kind == KIND_INTERACTION:
+                        talk[key] = (dialogue.text(oid, subid) or "", secret_of(SECRET_TELLERS, gi, oid, subid),
+                                     secret_of(SECRET_TAKERS, gi, oid, subid))
                     sprite_index[key] = len(sprites)
                     sprites.append((key, frames or [], stats))
                 objects.append((gi, group, room, kind, oid, subid, y, x, count, rnd, cond))
@@ -308,10 +461,13 @@ def main():
     with open(os.path.join(out, "sprites.rgba"), "wb") as f:
         f.write(sheet.size[0].to_bytes(4, "little") + sheet.size[1].to_bytes(4, "little") + sheet.tobytes())
     with open(os.path.join(out, "objects.bin"), "wb") as f:
-        f.write(b"OOBJ" + struct.pack("<HHH", 1, len(sprites), len(objects)))
+        f.write(b"OOBJ" + struct.pack("<HHH", 2, len(sprites), len(objects)))
         for (key, frames, stats), pf in zip(sprites, placed):
             ry, rx, dmg, hp = stats if stats else (0, 0, 0, 0)
             f.write(struct.pack("<BBBBBBbBB", *key, ry & 0xff, rx & 0xff, dmg - 256 if dmg >= 128 else dmg, hp & 0xff, len(pf)))
+            text, tell, take = talk.get(key, ("", 0xff, 0xff))
+            tb = text.encode("ascii", "replace")[:399]
+            f.write(struct.pack("<BBH", tell, take, len(tb)) + tb)
             for fx, fy, im, ox, oy, dur in pf:
                 f.write(struct.pack("<HHBBhhB", fx, fy, min(im.width, 255), min(im.height, 255), ox, oy, dur))
         for o in objects:
