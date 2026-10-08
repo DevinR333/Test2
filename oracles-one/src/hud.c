@@ -153,6 +153,12 @@ void menu_open(Menu *m, WorldId world) {
 void menu_update(Menu *m, Uint32 pressed) {
   if (pressed & BTN_SELECT) { m->at = (m->at + 1) % MENU_PAGES; sfx("SND_OPENMENU"); }
   if (pressed & (BTN_LEFT | BTN_RIGHT | BTN_UP | BTN_DOWN)) sfx("SND_MENU_MOVE");
+  if (m->at == PAGE_COUNT + 1) {           // the map: nothing to pick
+    float target = (float)m->at;
+    m->slide += (target - m->slide) * 0.25f;
+    if (SDL_fabsf(target - m->slide) < 0.001f) m->slide = target;
+    return;
+  }
   if (m->at == PAGE_COUNT) {
     // the rings Link has (both games' rings are one collection): A wears one, B takes it off
     int owned[64], n = 0;
@@ -258,6 +264,8 @@ SDL_FRect menu_touch_switch(int win_w, int win_h) {
   return (SDL_FRect){((float)win_w - w) / 2, page_top(win_h, px) - h - 4 * px, w, h};
 }
 
+void (*menu_map)(SDL_Renderer *ren, SDL_FRect box);
+
 void menu_draw(SDL_Renderer *ren, const Menu *m, const HudArt *art, int win_w, int win_h, bool touch_hidden) {
   if (!m->open) return;
   float px = page_scale(win_w, win_h);
@@ -268,6 +276,12 @@ void menu_draw(SDL_Renderer *ren, const Menu *m, const HudArt *art, int win_w, i
   // the two games' pages sit side by side and slide like the originals' subscreens
   for (int i = 0; i < PAGE_COUNT; i++) draw_page(ren, m, art, m->order[i], ox + (i - m->slide) * pw, oy, px);
   draw_rings_page(ren, m, art, ox + (PAGE_COUNT - m->slide) * pw, oy, px);
+  float mx = ox + (PAGE_COUNT + 1 - m->slide) * pw;
+  if (mx < ox + pw && mx > ox - pw) {
+    fill_rect(ren, mx, oy, PAGE_W * px, PAGE_H * px, 16, 24, 48, 255);
+    draw_game_text(ren, art, "MAP", mx + 4 * px, oy + 1 * px, px * 0.5f);
+    if (menu_map) menu_map(ren, (SDL_FRect){mx + 4 * px, oy + 10 * px, (PAGE_W - 8) * px, (PAGE_H - 14) * px});
+  }
   SDL_SetRenderClipRect(ren, NULL);
   SDL_FRect sw = menu_touch_switch(win_w, win_h);
   const char *label = touch_hidden ? "TOUCH CONTROLS: OFF" : "TOUCH CONTROLS: ON ";

@@ -31,7 +31,9 @@ typedef struct {
   int ring_cursor;          // the rings page: which owned ring is highlighted
 } Menu;
 
-#define MENU_PAGES (PAGE_COUNT + 1)   // both games' item pages, then the rings
+#define MENU_PAGES (PAGE_COUNT + 2)   // both games' item pages, the rings, the map
+// Set by main: draws the map page's map into a box (the area Link is in).
+extern void (*menu_map)(SDL_Renderer *ren, SDL_FRect box);
 
 // Start opens the inventory on the page of the world Link is in; Select slides to the other game's
 // page, like the originals' Select moves between subscreens. A/B equip the highlighted item.

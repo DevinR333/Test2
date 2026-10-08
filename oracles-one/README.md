@@ -59,6 +59,7 @@ or emulates the hardware.
 | Sword: spin attack (hold, release), beams from the Noble and Master Swords at full health; the trading sequence up to the Biggoron's Sword; riding, Ricky punches, Dimitri bites and Moosh stomps | |
 | Rings: a ring page in the Start menu (the originals' names and descriptions) and their effects; rings you wear go in the ring box, and Select during play swaps through them on the fly | Minigames (their prizes come from talking to their hosts) |
 | Gasha Seeds: plant them in Gasha spots, beat monsters, harvest the nut (the originals' prize odds by spot and progress) | |
+| A title screen (Continue, New Game, music and effects volume, touch controls) and a map page in the Start menu showing the whole area and where Link is | |
 | Shared hearts, rupees, items, rings, seeds and bombs; extra hearts become rupees | |
 
 `--all-items` gives every item of both games, for testing.

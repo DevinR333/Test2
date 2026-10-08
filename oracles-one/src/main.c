@@ -9,6 +9,7 @@
 #include "actors.h"
 #include "audio.h"
 #include "gasha.h"
+#include "minimap.h"
 #include "rings.h"
 #include "companion.h"
 #include "game.h"
@@ -93,6 +94,10 @@ typedef struct {
   int gale_sel;
   bool riding;                    // on the Flute's companion
   int shop_pending;               // the shop item Link was told the price of (-1 none)
+  bool title;                     // the title screen is up
+  bool has_save;
+  int title_sel, title_confirm;
+  int music_vol, sfx_vol;         // 0-10, kept in settings.txt
   float side_vy;                  // side-view rooms: falling or jumping speed
   bool side_ground;
 } App;
@@ -173,11 +178,14 @@ static void settings_load(App *a) {
   char *d = SDL_LoadFile(settings_path, &n);
   if (!d) return;
   if (SDL_strstr(d, "touch_controls=off")) a->in.touch_hidden = true;
+  const char *m = SDL_strstr(d, "music="), *e = SDL_strstr(d, "effects=");
+  if (m) a->music_vol = SDL_clamp(SDL_atoi(m + 6), 0, 10);
+  if (e) a->sfx_vol = SDL_clamp(SDL_atoi(e + 8), 0, 10);
   SDL_free(d);
 }
 static void settings_save(const App *a) {
-  char buf[64];
-  int n = snprintf(buf, sizeof buf, "touch_controls=%s\n", a->in.touch_hidden ? "off" : "on");
+  char buf[128];
+  int n = snprintf(buf, sizeof buf, "touch_controls=%s\nmusic=%d\neffects=%d\n", a->in.touch_hidden ? "off" : "on", a->music_vol, a->sfx_vol);
   SDL_SaveFile(settings_path, buf, (size_t)n);
 }
 
@@ -509,7 +517,79 @@ static void link_pose(App *a) {
   for (int i = 0; i < steps; i++) link_anim_update(l, true);
 }
 
+// ---- the title screen: Continue, New Game, sound and touch settings --------------------------
+static void new_game(App *a) {
+  // the world as it first was: reload the areas and their chests, then a fresh save
+  for (int i = 0; i < a->n_worlds; i++) world_free(&a->worlds[i]);
+  free(a->worlds);
+  a->n_worlds = world_load_all(&a->worlds);
+  for (int i = 0; i < WORLD_COUNT; i++) build_house(&a->worlds[a->overworld[i]]);
+  chests_load(a->worlds, a->n_worlds);
+  game_new();
+  chests_restore(a->worlds, a->n_worlds);
+  a->link.dir = game.dir;
+  enter_area(a, (WarpTarget){game.area < a->n_worlds ? game.area : (uint16_t)a->overworld[WORLD_HOLODRUM], game.x, game.y});
+  game_save();
+}
+
+static void title_update(App *a, Uint32 pressed) {
+  int first = a->has_save ? 0 : 1, last = 4;    // 0 Continue, 1 New Game, 2 Music, 3 Effects, 4 Touch
+  if (a->title_sel < first) a->title_sel = first;
+  if (pressed & BTN_DOWN) { a->title_sel = a->title_sel >= last ? first : a->title_sel + 1; a->title_confirm = 0; sfx("SND_MENU_MOVE"); }
+  if (pressed & BTN_UP) { a->title_sel = a->title_sel <= first ? last : a->title_sel - 1; a->title_confirm = 0; sfx("SND_MENU_MOVE"); }
+  int step = (pressed & BTN_RIGHT) ? 1 : (pressed & BTN_LEFT) ? -1 : 0;
+  if (step && (a->title_sel == 2 || a->title_sel == 3)) {
+    int *v = a->title_sel == 2 ? &a->music_vol : &a->sfx_vol;
+    *v = SDL_clamp(*v + step, 0, 10);
+    audio_volume((float)a->music_vol / 10.0f * 0.8f, (float)a->sfx_vol / 10.0f);
+    settings_save(a);
+    sfx("SND_MENU_MOVE");
+  }
+  if (!(pressed & (BTN_A | BTN_START))) return;
+  switch (a->title_sel) {
+  case 0: a->title = false; sfx("SND_SELECTITEM"); break;
+  case 1:
+    if (a->has_save && !a->title_confirm) { a->title_confirm = 1; sfx("SND_ERROR"); break; }   // A again: really start over
+    new_game(a);
+    a->title = false;
+    sfx("SND_SELECTITEM");
+    break;
+  case 4: toggle_touch(a); break;
+  default: break;
+  }
+}
+
+static void title_draw(App *a, int w, int h) {
+  // the whole of Holodrum behind, dimmed
+  const World *hol = &a->worlds[a->overworld[WORLD_HOLODRUM]];
+  fill_rect(a->ren, 0, 0, (float)w, (float)h, 0, 0, 0, 255);
+  float side = (float)SDL_max(w, h) * 1.25f;              // covers the screen, whatever its shape
+  minimap_draw(a->ren, hol, &a->atlas, -100, -100, (SDL_FRect){((float)w - side) / 2, ((float)h - side) / 2, side, side}, 0);
+  fill_rect(a->ren, 0, 0, (float)w, (float)h, 0, 0, 16, 170);
+  float px = SDL_floorf(SDL_max(1.0f, hud_scale(w, h) * 0.75f));
+  float big = px * 2.5f;
+  const char *t1 = "ORACLES ONE";
+  draw_game_text(a->ren, &a->art, t1, ((float)w - 8 * big * (float)strlen(t1)) / 2, (float)h * 0.10f, big);
+  const char *t2 = "Seasons & Ages";
+  draw_game_text(a->ren, &a->art, t2, ((float)w - 8 * px * (float)strlen(t2)) / 2, (float)h * 0.10f + 17 * big, px);
+  char rows[5][40];
+  snprintf(rows[0], 40, "Continue");
+  snprintf(rows[1], 40, "%s", a->title_confirm ? "New Game? (A again)" : "New Game");
+  snprintf(rows[2], 40, "Music   < %2d >", a->music_vol);
+  snprintf(rows[3], 40, "Effects < %2d >", a->sfx_vol);
+  snprintf(rows[4], 40, "Touch controls: %s", a->in.touch_hidden ? "off" : "on");
+  float y = (float)h * 0.10f + 17 * big + 30 * px;
+  for (int i = a->has_save ? 0 : 1; i < 5; i++, y += 18 * px) {
+    char line[48];
+    snprintf(line, sizeof line, "%c %s", i == a->title_sel ? '>' : ' ', rows[i]);
+    float lw = 8 * px * (float)strlen(line);
+    if (i == a->title_sel) fill_rect(a->ren, ((float)w - lw) / 2 - 4 * px, y - 1 * px, lw + 8 * px, 17 * px, 60, 80, 160, 200);
+    draw_game_text(a->ren, &a->art, line, ((float)w - lw) / 2, y, px);
+  }
+}
+
 static void update(App *a) {
+  if (a->title) { title_update(a, a->in.pressed); return; }
   Input *in = &a->in;
   if (a->fade) {
     if (--a->fade == FADE_FRAMES / 2) enter_area(a, a->fade_to);
@@ -706,10 +786,19 @@ static void render(App *a) {
       draw_game_text(a->ren, &a->art, line, bx + 4 * tp, by + 4 * tp + row * 16 * tp, tp);
     }
   }
+  if (a->title) { title_draw(a, w, h); input_draw_touch(a->ren, &a->in, w, h); return; }
   if (a->fade) {
     float t = 1.0f - SDL_fabsf((float)a->fade - FADE_FRAMES / 2.0f) / (FADE_FRAMES / 2.0f);
     fill_rect(a->ren, 0, 0, (float)w, (float)h, 255, 255, 255, (Uint8)(t * 255));
   }
+}
+
+static App *g_app;
+static void draw_map(SDL_Renderer *ren, SDL_FRect box) {
+  App *a = g_app;
+  minimap_draw(ren, a->world, &a->atlas, a->link.x, a->link.y, box, (int)(SDL_GetTicks() / 16));
+  float tp = SDL_max(1.0f, box.w / 300.0f);
+  draw_game_text(ren, &a->art, world_area_name(a->world, a->link.x, a->link.y), box.x + 30 * tp, box.y - 9 * tp * 1.6f, tp);
 }
 
 static bool block_at(float x, float y) { return actors_block(x, y) || terrain_block(x, y); }
@@ -801,6 +890,8 @@ int main(int argc, char **argv) {
   for (int i = 0; i < WORLD_COUNT; i++) build_house(&a.worlds[a.overworld[i]]);
   link_blocker = block_at;
   trees_load();
+  g_app = &a;
+  menu_map = draw_map;
   rings_load();
   gasha_load();
   shops_load();
@@ -813,7 +904,13 @@ int main(int argc, char **argv) {
   if (!tiles_load(a.worlds, a.n_worlds)) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
   if (!chests_load(a.worlds, a.n_worlds)) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
 
-  if (shot || !game_load()) game_new();
+  a.music_vol = a.sfx_vol = 8;
+  settings_load(&a);
+  audio_volume((float)a.music_vol / 10.0f * 0.8f, (float)a.sfx_vol / 10.0f);
+  a.has_save = !shot && game_load();
+  if (!a.has_save) game_new();
+  a.title = !shot || getenv("ORACLES_TITLE");
+  a.title_sel = a.has_save ? 0 : 1;
   if (all_items) items_give_all();
   if (equip_a >= 0) game.equip_a = (uint8_t)equip_a;
   if (getenv("ORACLES_COMPANION")) game.companion = (uint8_t)atoi(getenv("ORACLES_COMPANION"));   // testing
