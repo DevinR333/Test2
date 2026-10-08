@@ -647,6 +647,11 @@ int actors_enemy_at(float x, float y, float r) {
 void actors_get_pos(int i, float *x, float *y) { *x = actors[i].x; *y = actors[i].y; }
 void actors_set_pos(int i, float x, float y) { actors[i].x = x; actors[i].y = y; }
 
+void actors_kill_room(int room) {
+  for (int i = 0; i < n_actors; i++)
+    if (actors[i].kind == ACTOR_ENEMY && actors[i].room == room && !actors[i].invincible) actors[i].alive = false;
+}
+
 int actors_room_enemies(int room) {
   int n = 0;
   for (int i = 0; i < n_actors; i++) {

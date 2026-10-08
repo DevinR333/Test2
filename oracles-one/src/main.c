@@ -777,6 +777,8 @@ int main(int argc, char **argv) {
       input_frame(&a.in, w, h);
       if (shot) { a.in.held |= parse_buttons(hold); a.in.pressed = frame % 16 == 1 ? a.in.held : 0; }
       update(&a);
+      if (shot && getenv("ORACLES_KILL_AT") && frame == atoi(getenv("ORACLES_KILL_AT")))   // testing
+        actors_kill_room(world_room_index(a.world, a.link.x, a.link.y));
       acc -= TICK_NS;
       frame++;
       if (++autosave % (60 * 30) == 0) game_save();

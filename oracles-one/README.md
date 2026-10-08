@@ -45,9 +45,10 @@ or emulates the hardware.
 
 | In the game | Still simplified |
 | --- | --- |
-| Every place in both games (423 areas: Holodrum in its seasons, Subrosia, Labrynna present and past, every house, cave and dungeon floor), all 1,098 warps, all 241 chests | Cutscenes and story events (who says what changes as the story moves on) |
+| Every place in both games (423 areas: Holodrum in its seasons, Subrosia, Labrynna present and past, every house, cave and dungeon floor), all 1,098 warps, all 241 chests | Cutscenes, and scripted story events beyond who appears and what they say |
 | Every character and enemy the originals place, with their own sprites (4,315 objects); characters say their original lines | Enemies act by family (shooters, fliers, hoppers, chargers, burrowers) rather than each one's exact code |
-| Every item of both games, in both worlds: sword, shield, bombs, bombchus, boomerang, satchel / slingshot / shooter with all five seeds (Gale Seeds fly to the originals' trees), Roc's Feather and Cape, Rod of Seasons, Harp of Ages (present and past), Switch Hook, Cane of Somaria, Magnetic Gloves, shovel, bracelet and gloves, Fool's Ore, flippers / mermaid suit, the Flute's Ricky, Dimitri and Moosh | Companions are abilities (Ricky and Moosh cross holes, Dimitri swims) without their own sprites |
+| Every item of both games, in both worlds: sword, shield, bombs, bombchus, boomerang, satchel / slingshot / shooter with all five seeds (Gale Seeds fly to the originals' trees), Roc's Feather and Cape, Rod of Seasons, Harp of Ages (present and past), Switch Hook, Cane of Somaria, Magnetic Gloves, shovel, bracelet and gloves, Fool's Ore, flippers / mermaid suit, and the Flute's Ricky, Dimitri and Moosh (drawn under Link, each with their ability) | Companions' own moves (Ricky's punches, Dimitri eating, Moosh's stomp) |
+| Who appears and what they say follow the story: Horon Village's and the Sunken City's people by the originals' stages, Ages' villagers by their progress tables | |
 | Cutting, lifting and throwing, ledges, holes, water, lava, conveyors, push blocks, bombable walls, digging, burning, signs; side-view rooms with gravity, ladders and jumps | |
 | Shutters close behind Link until a room's enemies are beaten; chests the originals make appear show up then | |
 | Bosses give a heart container and their essence; Onox and Veran end their games; Twinrova and Ganon wait in the Room of Rites until both are beaten | |
