@@ -24,6 +24,7 @@ bool terrain_swimming(void);
 bool terrain_carrying(void);
 // Frames left of falling into a hole or water (0: not falling).
 int terrain_falling(void);
+bool terrain_drowning(void);
 // Draws an item's icon (set by main: the bomb Link puts down).
 extern void (*terrain_icon)(SDL_Renderer *ren, Item item, float x, float y, float px);
 

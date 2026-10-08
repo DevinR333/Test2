@@ -10,7 +10,19 @@ typedef struct {
   int walk_frames;     // frames spent walking, drives the step animation
   bool moving;
   int pushing;         // frames spent walking into a wall
+  int anim_mode, anim_frame, anim_count;   // the original animation playing (LINK_ANIM_MODE_*)
 } Link;
+
+// The originals' animation modes used here (constants/common/linkAnimations.s).
+enum { LINK_ANIM_DROWN = 0x0a, LINK_ANIM_SWIM = 0x0b, LINK_ANIM_FALLINHOLE = 0x0d, LINK_ANIM_WALK = 0x10,
+       LINK_ANIM_LIFT = 0x12, LINK_ANIM_THROW = 0x16, LINK_ANIM_JUMP = 0x18, LINK_ANIM_SWORD = 0x23,
+       LINK_ANIM_GETITEM = 0x0f };
+
+bool link_anims_load(void);
+// Switches to an animation (from its start, unless it's already playing).
+void link_set_anim(Link *l, int mode);
+// Steps the animation a frame (advance false: hold, as Link standing still).
+void link_anim_update(Link *l, bool advance);
 
 // Walking speed multiplier (Pegasus Seeds).
 extern float link_speed;

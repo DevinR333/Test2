@@ -424,6 +424,20 @@ static void gale_draw(App *a, int w, int h) {
   }
 }
 
+// Which of the originals' animations Link plays this frame.
+static void link_pose(App *a) {
+  Link *l = &a->link;
+  int mode = LINK_ANIM_WALK, steps = l->moving ? 1 : 0;
+  if (terrain_falling()) { mode = terrain_drowning() ? LINK_ANIM_DROWN : LINK_ANIM_FALLINHOLE; steps = 1; }
+  else if (items.sword_frames) { mode = LINK_ANIM_SWORD; steps = 2; }       // the swing, at our sword's pace
+  else if (items.z > 0 || terrain_z() > 0) { mode = LINK_ANIM_JUMP; steps = 1; }
+  else if (terrain_swimming()) { mode = LINK_ANIM_SWIM; steps = 1; }
+  else if (terrain_carrying()) { mode = LINK_ANIM_LIFT; steps = 1; }
+  link_set_anim(l, mode);
+  if (mode == LINK_ANIM_WALK && !l->moving) { l->anim_frame = 0; l->anim_count = 0; }
+  for (int i = 0; i < steps; i++) link_anim_update(l, true);
+}
+
 static void update(App *a) {
   Input *in = &a->in;
   if (a->fade) {
@@ -493,6 +507,7 @@ static void update(App *a) {
   }
   combat(a);
   room_events_update(a->worlds, a->n_worlds, a->world, a->link.x, a->link.y);
+  link_pose(a);
   if (a->link.pushing == 20) {
     const char *msg = keydoor_push(a->worlds, a->n_worlds, a->world, front_x, front_y, a->link.dir);
     if (msg) show_message(a, msg);
@@ -539,8 +554,7 @@ static void render(App *a) {
   world_draw(a->ren, a->world, &a->atlas, &v);
   terrain_draw(a->ren, &a->atlas, &v, &a->link, false);
   actors_draw(a->ren, &v, true, a->link.y);
-  int falling = terrain_falling();
-  if (!(a->hurt_frames & 2) && (!falling || (falling > 15 && (falling / 3) & 1)))
+  if (!(a->hurt_frames & 2))
     link_draw(a->ren, &a->link, &a->link_sheet, &v, items.z + terrain_z());
   actors_draw(a->ren, &v, false, a->link.y);
   terrain_draw(a->ren, &a->atlas, &v, &a->link, true);
@@ -664,7 +678,7 @@ int main(int argc, char **argv) {
   if (touch_hidden) a.in.touch_hidden = true;
   SDL_DisableScreenSaver();   // keeps a phone or handheld awake while playing with a controller
   if (!image_load(a.ren, "metatiles.rgba", &a.atlas) || !image_load(a.ren, "link.rgba", &a.link_sheet) ||
-      !hud_art_load(a.ren, &a.art) || !actors_load(a.ren) || !(a.n_worlds = world_load_all(&a.worlds)) || !warps_load() ||
+      !hud_art_load(a.ren, &a.art) || !actors_load(a.ren) || !link_anims_load() || !(a.n_worlds = world_load_all(&a.worlds)) || !warps_load() ||
       (a.overworld[WORLD_HOLODRUM] = world_overworld(a.worlds, a.n_worlds, WORLD_HOLODRUM, 0)) < 0 ||
       (a.overworld[WORLD_LABRYNNA] = world_overworld(a.worlds, a.n_worlds, WORLD_LABRYNNA, 0)) < 0) {
     SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is missing. Run tools/build_assets.sh first (see README).", a.win);

@@ -16,6 +16,8 @@ Writes into OUT_DIR:
 Usage: extract_sprites.py DISASM_DIR OUT_DIR
 """
 import os
+import re
+import struct
 import sys
 
 from PIL import Image
@@ -149,6 +151,98 @@ def find_png(root, game, name):
     raise FileNotFoundError(name)
 
 
+def link_animations(root, out):
+    """link_anims.bin from data/seasons/specialObjectAnimationData.s and specialObjectOamData.s:
+    Link's animations (by LINK_ANIM_MODE), the gfx frames they show (a piece of spr_link and the OAM
+    layout to draw it with) and those layouts. Little endian:
+      u16 animations, per animation: u8 frame count, u8 loop frame ($ff: holds the last), frames
+        (u8 duration, u8 gfx frame, u8 parameter)
+      u16 gfx frames, per frame: u8 OAM layout, u16 first tile in spr_link
+      u16 layouts, per layout: u8 count, then (y, x, tile, attributes) per sprite"""
+    def lines(rel):
+        for raw in open(os.path.join(root, rel)):
+            line = raw.split(";", 1)[0].strip()
+            if line:
+                yield line
+
+    def n(t):
+        t = t.strip().rstrip(",")
+        return int(t[1:], 16) if t.startswith("$") else int(t, 0)
+
+    labels, pending, cur, blocks = {}, [], None, {}
+    order = []
+    for line in lines("data/seasons/specialObjectAnimationData.s"):
+        m = re.match(r"(\w+):$", line)
+        if m:
+            cur = m.group(1)
+            blocks[cur] = []
+            order.append(cur)
+            continue
+        if cur:
+            blocks[cur].append(line)
+    # follow stacked labels: an empty block takes the next one's lines
+    for i in range(len(order) - 2, -1, -1):
+        if not blocks[order[i]]:
+            blocks[order[i]] = blocks[order[i + 1]]
+    anim_ptrs = [l.split()[1] for l in blocks["specialObject00AnimationDataPointers"] if l.startswith(".dw")]
+    gfx_ptrs = []
+    for l in blocks["specialObject00GfxPointers"]:
+        m = re.match(r"m_SpecialObjectGfxPointer\s+(\$?\w+)\s+\w+\s+(\$?\w+)", l)
+        if m:
+            gfx_ptrs.append((n(m.group(1)), n(m.group(2)) // 16))
+    oam_ptrs = [l.split()[1] for l in blocks["specialObject00OamDataPointers"] if l.startswith(".dw")]
+    # animation frames: each animation runs through following labels until a loop
+    frames_by_label = {}
+    for i, lab in enumerate(order):
+        seq, loop = [], 0xff
+        j = i
+        while j < len(order) and len(seq) < 64:
+            ls = blocks[order[j]] if j == i or order[j].startswith("animationLoop") else None
+            if ls is None:
+                break
+            for l in ls:
+                if l.startswith("m_AnimationLoop"):
+                    target = l.split()[1]
+                    k = order.index(target)
+                    loop = 0
+                    for q in range(i, k):
+                        loop += sum(1 for x in blocks[order[q]] if x.startswith(".db"))
+                    break
+                if l.startswith(".db"):
+                    v = [n(t) for t in l[3:].split()]
+                    if len(v) == 3:
+                        seq.append(v)
+            else:
+                j += 1
+                continue
+            break
+        frames_by_label[lab] = (seq, loop)
+    oam = {}
+    for line in lines("data/seasons/specialObjectOamData.s"):
+        m = re.match(r"(\w+):$", line)
+        if m:
+            cur = m.group(1)
+            oam[cur] = []
+            continue
+        if line.startswith(".db"):
+            oam[cur] += [n(t) for t in line[3:].split()]
+    blob = struct.pack("<H", len(anim_ptrs))
+    for lab in anim_ptrs:
+        seq, loop = frames_by_label.get(lab, ([], 0xff))
+        if loop != 0xff and loop >= len(seq):
+            loop = 0xff
+        blob += bytes([len(seq), loop]) + b"".join(bytes(f) for f in seq)
+    blob += struct.pack("<H", len(gfx_ptrs)) + b"".join(struct.pack("<BH", o, t) for o, t in gfx_ptrs)
+    blob += struct.pack("<H", len(oam_ptrs))
+    for lab in oam_ptrs:
+        d = oam.get(lab, [0])
+        cnt = d[0] if d else 0
+        blob += bytes([cnt]) + bytes(d[1:1 + cnt * 4]).ljust(cnt * 4, b"\0")
+    with open(os.path.join(out, "link_anims.bin"), "wb") as f:
+        f.write(blob)
+    return len(anim_ptrs), len(gfx_ptrs), len(oam_ptrs)
+
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__)
@@ -156,6 +250,7 @@ def main():
     root, out = sys.argv[1], sys.argv[2]
     os.makedirs(out, exist_ok=True)
     save_rgba(recolour(os.path.join(root, "gfx/common/spr_link.png"), LINK), os.path.join(out, "link.rgba"))
+    print("link animations, gfx frames, layouts:", link_animations(root, out))
     hud_png = os.path.join(root, "gfx_compressible/seasons/gfx_hud.png")
     hud = recolour(hud_png, HUD_HEARTS)
     digits = outline(recolour(hud_png, HUD_DIGITS).crop((0, 8, 128, 16)))

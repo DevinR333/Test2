@@ -21,6 +21,7 @@ static struct {
   float jx0, jy0, jx1, jy1, jump_h;
   // falling into a hole, drowning, burning
   int fall_t, fall_damage;
+  bool fall_water;
   float safe_x, safe_y;
   bool swimming;
   // lifted and thrown
@@ -57,6 +58,7 @@ static const int dir_x[4] = {0, 1, 0, -1}, dir_y[4] = {-1, 0, 1, 0};
 // the point in front of Link that his hands, sword or shoulder touch (as for chests)
 static const int front_x[4] = {0, 9, 0, -9}, front_y[4] = {-6, 4, 14, 4};
 
+bool terrain_drowning(void) { return T.fall_t > 0 && T.fall_water; }
 float terrain_airborne;
 int terrain_companion = -1;
 
@@ -428,11 +430,12 @@ TerrainEvents terrain_update(World *areas, int n, World *w, Link *l, int dx, int
   } else if ((under->type == TT_HOLE && !hops) || under->type == TT_LAVA) {
     T.fall_t = 30;
     T.fall_damage = under->type == TT_LAVA ? 4 : 2;
+    T.fall_water = false;
     T.carrying = false;
     sfx("SND_LINK_FALL");
   } else if (under->type == TT_WATER || under->type == TT_SEAWATER) {
     if (game.item_level[ITEM_MERMAID_SUIT] || terrain_companion == 1) T.swimming = true;   // flippers, mermaid suit, Dimitri
-    else { T.fall_t = 30; T.fall_damage = 2; T.carrying = false; sfx("SND_SPLASH"); }
+    else { T.fall_t = 30; T.fall_damage = 2; T.fall_water = true; T.carrying = false; sfx("SND_SPLASH"); }
   } else if (on_safe_ground(w, l)) {
     T.safe_x = l->x; T.safe_y = l->y;
   }
