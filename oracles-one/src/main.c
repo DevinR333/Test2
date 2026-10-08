@@ -213,11 +213,71 @@ static SDL_FRect sword_box(const Link *l) {
   return (SDL_FRect){l->x + ox[l->dir], l->y + oy[l->dir], w[l->dir], h[l->dir]};
 }
 
+static const char *essence_names[WORLD_COUNT][8] = {
+  {"Fertile Soil", "Gift of Time", "Bright Sun", "Soothing Rain", "Nurturing Warmth", "Blowing Wind", "Seed of Life", "Changing Seasons"},
+  {"Eternal Spirit", "Ancient Wood", "Echoing Howl", "Burning Flame", "Sacred Soil", "Lonely Peak", "Rolling Sea", "Falling Star"},
+};
+
+static int essence_count(void) {
+  int n = 0;
+  for (int g = 0; g < WORLD_COUNT; g++) for (int i = 0; i < 8; i++) n += game.essences[g] >> i & 1;
+  return n;
+}
+
+// Bosses beaten and what they leave: each dungeon's boss a heart container and its essence; Onox and
+// Veran end their games; Twinrova, once both are beaten, brings Ganon.
+static void boss_events(App *a, const ActorEvents *ev) {
+  static char buf[300];
+  int r = world_room_index(a->world, a->link.x, a->link.y);
+  int dungeon = r >= 0 ? a->world->dungeon[r] & 15 : 0;
+  WorldId g = a->world->id;
+  switch (ev->boss) {
+  case BOSS_DUNGEON:
+    actors_place_pickup(DROP_CONTAINER, ev->boss_x - 10, ev->boss_y);
+    if (dungeon >= 1 && dungeon <= 8) actors_place_pickup(DROP_ESSENCE, ev->boss_x + 10, ev->boss_y);
+    break;
+  case BOSS_ONOX:
+  case BOSS_VERAN:
+    if (ev->boss == BOSS_ONOX) game.onox_beaten = true; else game.veran_beaten = true;
+    snprintf(buf, sizeof buf, "%s is defeated! %s", ev->boss == BOSS_ONOX ? "General Onox" : "Veran",
+             game.onox_beaten && game.veran_beaten ? "Both lands are saved... but Twinrova waits in the Room of Rites."
+             : ev->boss == BOSS_ONOX ? "Holodrum is saved. Labrynna still needs you." : "Labrynna is saved. Holodrum still needs you.");
+    show_message(a, buf);
+    break;
+  case BOSS_TWINROVA:
+    actors_spawn(g, 0x04, 0, ev->boss_x, ev->boss_y);
+    show_message(a, "Twinrova falls... and from the flames, Ganon rises!");
+    break;
+  case BOSS_GANON:
+    game.ganon_beaten = true;
+    show_message(a, "Ganon is defeated! Holodrum and Labrynna are at peace. THE END. Thank you for playing!");
+    break;
+  default:
+    break;
+  }
+  if (ev->container) { treasure_give(g, dungeon, TREASURE_HEART_CONTAINER, 0); show_message(a, "You got a Heart Container!"); }
+  if (ev->essence && dungeon >= 1 && dungeon <= 8) {
+    game.essences[g] |= (uint8_t)(1 << (dungeon - 1));
+    snprintf(buf, sizeof buf, "You got the Essence: %s! (%d of 16)", essence_names[g][dungeon - 1], essence_count());
+    show_message(a, buf);
+  }
+}
+
+// The Room of Rites, where Twinrova and Ganon wait: only once both games' last bosses are beaten.
+static bool final_room_locked(App *a) {
+  int r = world_room_index(a->world, a->link.x, a->link.y);
+  if (r < 0 || a->world->group != 5) return false;
+  int room = a->world->room_ids[r];
+  bool rites = (a->world->id == WORLD_HOLODRUM && room == 0x9e) || (a->world->id == WORLD_LABRYNNA && room == 0xf5);
+  return rites && !(game.onox_beaten && game.veran_beaten);
+}
+
 // Enemies, their hits on Link, his sword on them, and what they drop.
 static void combat(App *a) {
   static const int sword_damage[4] = {0, 2, 3, 5};    // wooden, noble, master (the originals' -2, -3, -5)
   int lvl = SDL_min(game.item_level[ITEM_SWORD], 3);
   ActorEvents ev = actors_update(a->world, &a->link, sword_box(&a->link), sword_damage[lvl]);
+  boss_events(a, &ev);
   if (ev.hearts) game.health = (int16_t)SDL_min(game.health + ev.hearts, game.max_hearts * 4);
   if (ev.rupees) game.rupees = (uint16_t)SDL_min(game.rupees + ev.rupees, 999);
   if (a->hurt_frames) {
@@ -369,6 +429,10 @@ static void update(App *a) {
              warp_from_edge(a->worlds, a->n_worlds, a->world, a->link.x, a->link.y + dy * 12, &t))
       start_fade(a, t);
   }
+  if (!a->fade && final_room_locked(a)) {
+    start_fade(a, a->respawn);
+    show_message(a, "A dark power seals the Room of Rites. Defeat both General Onox and Veran first.");
+  }
   game.x = a->link.x;
   game.y = a->link.y;
   game.dir = (int8_t)a->link.dir;
@@ -436,6 +500,17 @@ static void render(App *a) {
 
 static HudArt *g_art;
 static void draw_icon(SDL_Renderer *ren, Item item, float x, float y, float px) { draw_item_icon(ren, g_art, item, x, y, px); }
+static void draw_pickup(SDL_Renderer *ren, int what, float cx, float cy, float px) {
+  if (what == DROP_CONTAINER) {           // a big heart: the HUD's full heart at twice the size
+    image_draw(ren, &g_art->hud, 15 * 8, 0, 8, 8, cx - 8 * px, cy - 8 * px, 16 * px, 16 * px, false);
+    return;
+  }
+  // an essence: a glowing orb
+  for (int r = 7; r > 0; r -= 2) {
+    Uint8 c = (Uint8)(255 - r * 18);
+    fill_rect(ren, cx - (float)r * px, cy - (float)r * px * 0.8f, (float)(2 * r) * px, (float)(2 * r) * px * 0.8f, 255, c, (Uint8)(c / 2), (Uint8)(120 + (7 - r) * 20));
+  }
+}
 static void draw_icon_rotated(SDL_Renderer *ren, Item item, float cx, float cy, float px, double angle) {
   draw_item_icon_rotated(ren, g_art, item, cx, cy, px, angle);
 }
@@ -459,7 +534,7 @@ int main(int argc, char **argv) {
   int frames = 0, win_w = 1280, win_h = 720, start_world = -1, menu_page = -1;
   float start_x = -1, start_y = -1, zoom = 1;
   bool all_items = false, touch = false, touch_hidden = false;
-  int keys = 0, equip_a = -1, equip_b = -1;
+  int keys = 0, equip_a = -1, equip_b = -1, room_game = -1, room_group = 0, room_id = 0;
   int aspect = ASPECT_FILL;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
@@ -477,6 +552,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--all-items")) all_items = true;
     else if (!strcmp(argv[i], "--touch")) touch = true;
     else if (!strcmp(argv[i], "--touch-hidden")) touch_hidden = true;
+    else if (!strcmp(argv[i], "--room") && i + 1 < argc) sscanf(argv[++i], "%d,%x,%x", &room_game, &room_group, &room_id);   // testing: game,group,room (hex)
     else if (!strcmp(argv[i], "--equip") && i + 1 < argc) sscanf(argv[++i], "%d,%d", &equip_a, &equip_b);   // testing: item numbers on A, B
     else if (!strcmp(argv[i], "--keys") && i + 1 < argc) keys = atoi(argv[++i]);   // testing: small keys in every dungeon
   }
@@ -510,6 +586,7 @@ int main(int argc, char **argv) {
   g_art = &a.art;
   terrain_icon = draw_icon;
   items_icon = draw_icon_rotated;
+  pickup_icon = draw_pickup;
   if (!tiles_load(a.worlds, a.n_worlds)) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
   if (!chests_load(a.worlds, a.n_worlds)) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
 
@@ -521,6 +598,16 @@ int main(int argc, char **argv) {
   for (int g = 0; keys && g < WORLD_COUNT; g++) for (int d = 0; d < 16; d++) game.small_keys[g][d] = (uint8_t)keys;
   if (start_world >= 0) game.area = (uint16_t)(start_world < WORLD_COUNT ? a.overworld[start_world] : start_world - WORLD_COUNT);
   if (start_x >= 0) { game.x = start_x; game.y = start_y; }
+  if (room_game >= 0) {
+    int area;
+    float ox, oy;
+    if (world_find_room(a.worlds, a.n_worlds, room_game, room_group, room_id, &area, &ox, &oy)) {
+      const World *w = &a.worlds[area];
+      game.area = (uint16_t)area;
+      game.x = ox + (float)(w->base.room_w * MT) / 2 + (start_x >= 0 ? start_x : 0);
+      game.y = oy + (float)(w->base.room_h * MT) - 24 + (start_x >= 0 ? start_y : 0);
+    }
+  }
   if (game.area >= a.n_worlds) game.area = (uint16_t)a.overworld[WORLD_HOLODRUM];
   a.link.dir = game.dir;
   enter_area(&a, (WarpTarget){game.area, game.x, game.y});

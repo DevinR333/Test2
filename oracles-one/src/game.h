@@ -70,6 +70,8 @@ typedef struct {
   // story
   bool linked;                    // a linked game (new files start as a normal game)
   uint8_t essences[PAGE_COUNT];   // bit per essence (8 per game)
+  bool onox_beaten, veran_beaten; // each game's last boss (both open the way to Twinrova and Ganon)
+  bool ganon_beaten;
   uint32_t secrets_earned;        // a bit per Secret heard: its taker recognises it (secrets.h)
   uint32_t secrets_told;          // a bit per Secret whose reward Link has had
   // where Link is

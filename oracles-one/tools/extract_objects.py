@@ -428,7 +428,15 @@ def main():
     for gi, game in enumerate(GAMES):
         sp = Sprites(root, game)
         dialogue = Dialogue(root, game)
-        for (group, room), objs in sorted(object_lists(root, game).items()):
+        lists = object_lists(root, game)
+        # the bosses scripts bring in: General Onox where the Din crystal hangs (his throne room), and
+        # Ganon, who rises when Twinrova falls (condition 0: never placed, spawned by the game)
+        if game == "seasons":
+            lists.setdefault((5, 0x91), []).append((KIND_ENEMY, 0x02, 0, 0x48, 0x78, 1, 0, 0xff))
+            lists.setdefault((5, 0x9e), []).append((KIND_ENEMY, 0x04, 0, 0x48, 0x78, 1, 0, 0x00))
+        else:
+            lists.setdefault((5, 0xf5), []).append((KIND_ENEMY, 0x04, 0, 0x48, 0x78, 1, 0, 0x00))
+        for (group, room), objs in sorted(lists.items()):
             for kind, oid, subid, y, x, count, rnd, cond in objs:
                 key = (gi, kind, oid, subid)
                 if key not in sprite_index:

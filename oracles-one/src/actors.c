@@ -1,4 +1,5 @@
 #include "actors.h"
+#include "game.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,7 +22,7 @@ typedef struct { uint8_t game, group, room, kind, id, subid, y, x, count, random
 
 typedef struct {
   const Kind *k;
-  int kind;
+  int kind, boss;
   float x, y, vx, vy;
   int hp, timer, hurt, anim;
   bool alive;
@@ -34,6 +35,8 @@ static int n_kinds, n_places;
 static Actor actors[MAX_ACTORS];
 static int n_actors;
 static Uint32 rng = 12345;
+static int pending_boss;                // a boss beaten by a bomb or seed, reported on the next update
+static float pending_x, pending_y;
 
 static float frand(void) { rng = rng * 1664525u + 1013904223u; return (float)(rng >> 8) / (float)(1u << 24); }
 
@@ -74,6 +77,22 @@ bool actors_load(SDL_Renderer *ren) {
   return true;
 }
 
+// Where an enemy's body is: the middle of its first frame, and half its size (at least the data's
+// collision radius), so big bosses can be hit where they're drawn.
+static void body(const Actor *a, float *cx, float *cy, float *rx, float *ry) {
+  *rx = a->k && a->k->radius_x ? a->k->radius_x : 6;
+  *ry = a->k && a->k->radius_y ? a->k->radius_y : 6;
+  *cx = a->x; *cy = a->y;
+  if (!a->k || !a->k->n_frames) return;
+  const Frame *f = &a->k->frames[0];
+  if (f->w > 20 || f->h > 20) {
+    *cx = a->x + f->ox + f->w / 2.0f;
+    *cy = a->y + f->oy + f->h / 2.0f;
+    *rx = SDL_max(*rx, f->w / 2.0f - 4);
+    *ry = SDL_max(*ry, f->h / 2.0f - 4);
+  }
+}
+
 static const Kind *find_kind(int game, int kind, int id, int subid) {
   for (int i = 0; i < n_kinds; i++)
     if (kinds[i].game == game && kinds[i].kind == kind && kinds[i].id == id && kinds[i].subid == subid) return &kinds[i];
@@ -82,6 +101,41 @@ static const Kind *find_kind(int game, int kind, int id, int subid) {
 
 static bool walkable(const World *w, float x, float y) {
   return !world_solid(w, (int)x - 4, (int)y) && !world_solid(w, (int)x + 3, (int)y) && !world_solid(w, (int)x, (int)y + 4);
+}
+
+// The originals' bosses by enemy id: each dungeon's boss gives its essence and a heart container.
+static int boss_kind(int game, int id) {
+  if (id == 0x01 || id == 0x03) return BOSS_TWINROVA;
+  if (id == 0x04) return BOSS_GANON;
+  if (game == WORLD_HOLODRUM && (id == 0x02 || id == 0x05)) return BOSS_ONOX;
+  if (game == WORLD_LABRYNNA && id == 0x02) return BOSS_VERAN;
+  if (game == WORLD_HOLODRUM && (id == 0x06 || (id >= 0x78 && id <= 0x7d) || id == 0x7f)) return BOSS_DUNGEON;   // Gleeok, Aquamentus..Manhandla, Medusa Head
+  if (game == WORLD_LABRYNNA && (id == 0x07 || (id >= 0x78 && id <= 0x7e))) return BOSS_DUNGEON;   // Ramrock, Pumpkin Head..Plasmarine
+  if (id >= 0x70 && id <= 0x7f) return BOSS_MINI;
+  return BOSS_NONE;
+}
+
+static void setup_enemy(Actor *a, const Kind *k, int game) {
+  a->boss = boss_kind(game, k->id);
+  a->hp = k->health ? (k->health == 0x7f ? 0 : k->health) : 1;
+  // bosses whose health the originals keep in their own code get a fight's worth here
+  if (a->boss && a->hp < 12) a->hp = a->boss == BOSS_MINI ? 16 : 32;
+  if (a->boss >= BOSS_ONOX && a->hp < 48) a->hp = 48;
+}
+
+bool actors_spawn(int game, int id, int subid, float x, float y) {
+  const Kind *k = NULL;
+  for (int i = 0; i < n_kinds; i++)
+    if (kinds[i].game == game && kinds[i].kind == ACTOR_ENEMY && kinds[i].id == id && kinds[i].subid == subid) { k = &kinds[i]; break; }
+  if (!k || n_actors >= MAX_ACTORS) return false;
+  Actor *a = &actors[n_actors++];
+  memset(a, 0, sizeof *a);
+  a->k = k;
+  a->kind = ACTOR_ENEMY;
+  a->x = x; a->y = y;
+  setup_enemy(a, k, game);
+  a->alive = true;
+  return true;
 }
 
 void actors_enter(const World *areas, int n, const World *w) {
@@ -115,8 +169,13 @@ void actors_enter(const World *areas, int n, const World *w) {
           }
         }
         if (!k->n_frames) continue;       // an enemy the sprite data can't draw yet: left out
-        a->hp = k->health ? (k->health == 0x7f ? 0 : k->health) : 1;
-        if (a->kind == ACTOR_ENEMY && !a->hp) continue;   // health $7f: invincible scenery (fireballs, traps)
+        if (a->kind == ACTOR_ENEMY) {
+          setup_enemy(a, k, pl->game);
+          if (!a->hp) continue;                 // health $7f: invincible scenery (fireballs, traps)
+          if ((a->boss == BOSS_DUNGEON && game.essences[pl->game] >> ((w->dungeon[r] & 15) - 1) & 1) ||
+              (a->boss == BOSS_ONOX && game.onox_beaten) || (a->boss == BOSS_VERAN && game.veran_beaten))
+            continue;                           // beaten already
+        } else a->hp = 1;
         a->alive = true;
         a->timer = (int)(frand() * 60);
         n_actors++;
@@ -142,22 +201,37 @@ void actors_drop(float x, float y) {
   memset(a, 0, sizeof *a);
   a->kind = ACTOR_DROP;
   a->x = x; a->y = y;
-  a->hp = frand() < 0.5f ? 1 : 2;    // 1: heart, 2: rupee
+  a->hp = frand() < 0.5f ? DROP_HEART : DROP_RUPEE;
   a->timer = 60 * 8;                  // drops fade after a while, like the originals'
+  a->alive = true;
+}
+
+void actors_place_pickup(int what, float x, float y) {
+  if (n_actors >= MAX_ACTORS) return;
+  Actor *a = &actors[n_actors++];
+  memset(a, 0, sizeof *a);
+  a->kind = ACTOR_DROP;
+  a->x = x; a->y = y;
+  a->hp = what;
+  a->timer = -1;                      // stays until Link takes it
   a->alive = true;
 }
 
 ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int sword_damage) {
   ActorEvents ev = {0};
+  if (pending_boss) { ev.boss = pending_boss; ev.boss_x = pending_x; ev.boss_y = pending_y; pending_boss = 0; }
   for (int i = 0; i < n_actors; i++) {
     Actor *a = &actors[i];
     if (!a->alive) continue;
     a->anim++;
     float dx = link->x - a->x, dy = link->y - a->y;
     if (a->kind == ACTOR_DROP) {
-      if (--a->timer <= 0) a->alive = false;
-      else if (SDL_fabsf(dx) < 8 && SDL_fabsf(dy) < 8) {
-        if (a->hp == 1) ev.hearts += 4; else ev.rupees += 1;
+      if (a->timer > 0 && --a->timer == 0) a->alive = false;
+      else if (SDL_fabsf(dx) < 9 && SDL_fabsf(dy) < 9) {
+        if (a->hp == DROP_HEART) ev.hearts += 4;
+        else if (a->hp == DROP_RUPEE) ev.rupees += 1;
+        else if (a->hp == DROP_CONTAINER) ev.container = true;
+        else if (a->hp == DROP_ESSENCE) ev.essence = true;
         a->alive = false;
       }
       continue;
@@ -169,8 +243,12 @@ ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int
       if (walkable(w, nx, ny)) { a->x = nx; a->y = ny; }
       a->vx *= 0.85f; a->vy *= 0.85f;
     } else {
-      // wander: a new direction now and then, or when the way is blocked
-      if (--a->timer <= 0) {
+      // bosses come after Link; others wander, a new direction now and then or when blocked
+      if (a->boss && SDL_fabsf(dx) < 160 && SDL_fabsf(dy) < 160) {
+        float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f, sp = a->boss == BOSS_MINI ? 0.55f : 0.7f;
+        a->vx = dx / len * sp; a->vy = dy / len * sp;
+        a->timer = 20;
+      } else if (--a->timer <= 0) {
         static const float dirs[5][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}, {0, 0}};
         int d = (int)(frand() * 5) % 5;
         a->vx = dirs[d][0] * 0.5f; a->vy = dirs[d][1] * 0.5f;
@@ -179,17 +257,24 @@ ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int
       float nx = a->x + a->vx, ny = a->y + a->vy;
       if (walkable(w, nx, ny)) { a->x = nx; a->y = ny; } else a->timer = 0;
     }
-    float ry = a->k->radius_y ? a->k->radius_y : 6, rx = a->k->radius_x ? a->k->radius_x : 6;
+    float bx, by, rx, ry;
+    body(a, &bx, &by, &rx, &ry);
+    float bdx = link->x - bx, bdy = link->y - by;
     // the sword
-    if (sword.w > 0 && !a->hurt && a->x + rx > sword.x && a->x - rx < sword.x + sword.w && a->y + ry > sword.y && a->y - ry < sword.y + sword.h) {
+    if (sword.w > 0 && !a->hurt && bx + rx > sword.x && bx - rx < sword.x + sword.w && by + ry > sword.y && by - ry < sword.y + sword.h) {
       a->hp -= sword_damage;
       a->hurt = 16;
       float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f;
       a->vx = -dx / len * 2.5f; a->vy = -dy / len * 2.5f;
-      if (a->hp <= 0) { a->alive = false; drop(a->x, a->y); continue; }
+      if (a->hp <= 0) {
+        a->alive = false;
+        if (a->boss) { ev.boss = a->boss; ev.boss_x = a->x; ev.boss_y = a->y; }
+        else drop(a->x, a->y);
+        continue;
+      }
     }
     // touching Link
-    if (!ev.damage && SDL_fabsf(dx) < rx + 4 && SDL_fabsf(dy) < ry + 5) {
+    if (!ev.damage && SDL_fabsf(bdx) < rx + 4 && SDL_fabsf(bdy) < ry + 5) {
       ev.damage = a->k->damage < 0 ? -a->k->damage : 2;
       float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f;
       ev.push_x = dx / len * 3.0f; ev.push_y = dy / len * 3.0f;
@@ -198,14 +283,21 @@ ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int
   return ev;
 }
 
+void (*pickup_icon)(SDL_Renderer *ren, int what, float cx, float cy, float px);
+
 void actors_draw(SDL_Renderer *ren, const View *v, bool behind_link, float link_y) {
   for (int i = 0; i < n_actors; i++) {
     const Actor *a = &actors[i];
     if (!a->alive || (a->y < link_y) != behind_link) continue;
     if (a->kind == ACTOR_DROP) {
       if (a->timer < 120 && (a->timer / 4) & 1) continue;   // blinking before it goes
+      if ((a->hp == DROP_CONTAINER || a->hp == DROP_ESSENCE) && pickup_icon) {
+        pickup_icon(ren, a->hp, view_sx(v, a->x), view_sy(v, a->y - 4 + SDL_sinf((float)a->anim * 0.08f) * 2), v->scale);
+        continue;
+      }
       float x0 = view_sx(v, a->x - 3), y0 = view_sy(v, a->y - 4), x1 = view_sx(v, a->x + 3), y1 = view_sy(v, a->y + 3);
-      fill_rect(ren, x0, y0, x1 - x0, y1 - y0, a->hp == 1 ? 230 : 40, a->hp == 1 ? 40 : 200, a->hp == 1 ? 40 : 90, 255);
+      bool heart = a->hp == DROP_HEART;
+      fill_rect(ren, x0, y0, x1 - x0, y1 - y0, heart ? 230 : 40, heart ? 40 : 200, heart ? 40 : 90, 255);
       continue;
     }
     // the animation's frames in turn (each lasts its own count of frames)
@@ -245,13 +337,20 @@ int actors_hit_area(float x, float y, float r, int damage) {
   for (int i = 0; i < n_actors; i++) {
     Actor *a = &actors[i];
     if (!a->alive || a->kind != ACTOR_ENEMY || a->hurt) continue;
-    float dx = a->x - x, dy = a->y - y;
-    if (dx * dx + dy * dy > r * r) continue;
+    float bx, by, rx, ry;
+    body(a, &bx, &by, &rx, &ry);
+    float dx = bx - x, dy = by - y;
+    float rr = r + SDL_max(0.0f, SDL_max(rx, ry) - 6);
+    if (dx * dx + dy * dy > rr * rr) continue;
     a->hp -= damage;
     a->hurt = 16;
     float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f;
     a->vx = dx / len * 2.5f; a->vy = dy / len * 2.5f;
-    if (a->hp <= 0) { a->alive = false; drop(a->x, a->y); }
+    if (a->hp <= 0) {
+      a->alive = false;
+      if (a->boss) { pending_boss = a->boss; pending_x = a->x; pending_y = a->y; }
+      else drop(a->x, a->y);
+    }
     hits++;
   }
   return hits;
@@ -261,8 +360,11 @@ int actors_enemy_at(float x, float y, float r) {
   for (int i = 0; i < n_actors; i++) {
     const Actor *a = &actors[i];
     if (!a->alive || a->kind != ACTOR_ENEMY) continue;
-    float dx = a->x - x, dy = a->y - y;
-    if (dx * dx + dy * dy <= r * r) return i;
+    float bx, by, rx, ry;
+    body(a, &bx, &by, &rx, &ry);
+    float dx = bx - x, dy = by - y;
+    float rr = r + SDL_max(0.0f, SDL_max(rx, ry) - 6);
+    if (dx * dx + dy * dy <= rr * rr) return i;
   }
   return -1;
 }

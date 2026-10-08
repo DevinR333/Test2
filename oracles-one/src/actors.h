@@ -9,6 +9,10 @@
 // object_code/ replaces it as it's ported.
 
 enum { ACTOR_INTERACTION, ACTOR_ENEMY, ACTOR_PART, ACTOR_DROP };
+// What kind of boss an enemy is (0: not one).
+enum { BOSS_NONE, BOSS_MINI, BOSS_DUNGEON, BOSS_ONOX, BOSS_VERAN, BOSS_TWINROVA, BOSS_GANON };
+// Drops: what the pickup is.
+enum { DROP_HEART = 1, DROP_RUPEE, DROP_CONTAINER, DROP_ESSENCE };
 
 bool actors_load(SDL_Renderer *ren);
 // Spawns everything placed in an area (called on entering it).
@@ -18,13 +22,22 @@ typedef struct {
   int damage;        // quarter hearts Link lost this frame (0: none)
   float push_x, push_y;
   int rupees, hearts;  // pickups collected this frame
+  int boss;            // BOSS_* beaten this frame
+  float boss_x, boss_y;
+  bool container, essence;  // a heart container / essence picked up
 } ActorEvents;
+// Puts a pickup down (heart container, essence) that stays until taken.
+void actors_place_pickup(int what, float x, float y);
+// Brings in an enemy kind from objects.bin (Ganon when Twinrova falls).
+bool actors_spawn(int game, int id, int subid, float x, float y);
 
 // Moves enemies and checks contact with Link; sword is the swing's hit box (w 0: not swinging).
 ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int sword_damage);
 // Whether a character stands in the way at this pixel (Link walks around them).
 bool actors_block(float px, float py);
 void actors_draw(SDL_Renderer *ren, const View *v, bool behind_link, float link_y);
+// Draws a heart container or essence pickup centred at (cx, cy) (set by main, from the HUD art).
+extern void (*pickup_icon)(SDL_Renderer *ren, int what, float cx, float cy, float px);
 // The character Link faces, close enough to talk to: what they say and the secret they tell or take.
 typedef struct { const char *text; int tell, take; } ActorTalk;
 bool actors_talk(const Link *l, ActorTalk *out);
