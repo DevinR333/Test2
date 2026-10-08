@@ -29,7 +29,8 @@ typedef struct { uint8_t game, group, room, kind, id, subid, y, x, count, random
 
 typedef struct {
   const Kind *k;
-  int kind, boss, room, behave, state, st;
+  int kind, boss, room, behave, state, st, maxhp;
+  float ang;
   float z, vz;
   float hx, hy;                 // where it was placed (traps slide back there)
   bool hidden, invincible;
@@ -172,6 +173,7 @@ static void setup_enemy(Actor *a, const Kind *k, int game) {
   // bosses whose health the originals keep in their own code get a fight's worth here
   if (a->boss && a->hp < 12) a->hp = a->boss == BOSS_MINI ? 16 : 32;
   if (a->boss >= BOSS_ONOX && a->hp < 48) a->hp = 48;
+  a->maxhp = a->hp;
 }
 
 bool actors_spawn(int game, int id, int subid, float x, float y) {
@@ -185,6 +187,7 @@ bool actors_spawn(int game, int id, int subid, float x, float y) {
   a->kind = ACTOR_ENEMY;
   a->room = -1;
   a->x = x; a->y = y;
+  a->hx = x; a->hy = y;
   setup_enemy(a, k, game);
   a->alive = true;
   return true;
@@ -380,10 +383,95 @@ static void wander(Actor *a, const World *w, float speed) {
   if (walkable(w, nx, ny)) { a->x = nx; a->y = ny; } else a->timer = 0;
 }
 
+// ---- bosses: each fights in one of the originals' ways ------------------------------------------
+enum { FIGHT_SPREAD, FIGHT_CHARGE, FIGHT_ORBIT, FIGHT_TELEPORT };
+
+static int boss_fight_kind(int game, int id) {
+  if (game == WORLD_HOLODRUM)
+    switch (id) {
+    case 0x79: case 0x02: case 0x05: return FIGHT_CHARGE;     // Dodongo, General Onox, Dragon Onox
+    case 0x7a: case 0x01: case 0x03: return FIGHT_ORBIT;      // Mothula, Twinrova
+    case 0x7b: case 0x7c: case 0x7f: case 0x04: return FIGHT_TELEPORT;   // Gohma, Digdogger, Medusa Head, Ganon
+    default: return FIGHT_SPREAD;                              // Aquamentus, Manhandla, Gleeok
+    }
+  switch (id) {
+  case 0x79: case 0x07: return FIGHT_CHARGE;                  // Head Thwomp, Ramrock
+  case 0x7b: case 0x7c: case 0x7e: case 0x01: case 0x03: return FIGHT_ORBIT;   // Eyesoar, Smog, Plasmarine, Twinrova
+  case 0x7a: case 0x02: case 0x04: return FIGHT_TELEPORT;     // Shadow Hag, Veran, Ganon
+  default: return FIGHT_SPREAD;                                // Pumpkin Head, Octogon
+  }
+}
+
+static void boss_fight(Actor *a, const World *w, const Link *link, float dx, float dy) {
+  (void)link;
+  bool angry = a->hp * 2 < a->maxhp;                            // past half health: faster, more
+  float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f;
+  int id = a->k->id, game = a->k->game;
+  switch (boss_fight_kind(game, id)) {
+  case FIGHT_SPREAD: {
+    wander(a, w, angry ? 0.6f : 0.4f);
+    if (++a->st < (angry ? 55 : 85)) break;
+    a->st = 0;
+    bool four = (game == WORLD_HOLODRUM && id == 0x7d) || (game == WORLD_LABRYNNA && id == 0x7d);   // Manhandla, Octogon
+    float base = SDL_atan2f(dy, dx);
+    int n = four ? 4 : 3;
+    for (int i = 0; i < n; i++) {
+      float ang = four ? base + (float)i * SDL_PI_F / 2 : base + ((float)i - 1) * 0.35f;
+      shoot(a->x, a->y, SDL_cosf(ang) * 1.5f, SDL_sinf(ang) * 1.5f, SHOT_FIRE);
+    }
+    sfx("SND_BEAM");
+    break;
+  }
+  case FIGHT_CHARGE:
+    if (a->state > 0) {                                          // rushing
+      float nx = a->x + a->vx, ny = a->y + a->vy;
+      if (--a->state > 0 && walkable(w, nx, ny)) { a->x = nx; a->y = ny; }
+      else { a->state = 0; a->st = 0; sfx("SND_STRONG_POUND"); }
+      break;
+    }
+    if (++a->st < (angry ? 35 : 60)) { a->x += (a->st & 2) ? 0.5f : -0.5f; break; }   // shaking, winding up
+    a->st = 0;
+    a->state = 60;
+    a->vx = dx / len * (angry ? 3.0f : 2.3f);
+    a->vy = dy / len * (angry ? 3.0f : 2.3f);
+    break;
+  case FIGHT_ORBIT: {
+    a->ang += angry ? 0.03f : 0.02f;
+    float r = 44 + SDL_sinf(a->ang * 0.7f) * 12;
+    a->x = a->hx + SDL_cosf(a->ang) * r;
+    a->y = a->hy + SDL_sinf(a->ang) * r * 0.7f;
+    if (++a->st >= (angry ? 30 : 50)) {
+      a->st = 0;
+      shoot(a->x, a->y, dx / len * 1.4f, dy / len * 1.4f, SHOT_FIRE);
+    }
+    break;
+  }
+  default:                                                       // FIGHT_TELEPORT
+    if (a->hidden) {
+      if (--a->state > 0) break;
+      for (int tries = 0; tries < 16; tries++) {
+        float nx = a->hx + (frand() - 0.5f) * 128, ny = a->hy + (frand() - 0.5f) * 96;
+        if (walkable(w, nx, ny)) { a->x = nx; a->y = ny; break; }
+      }
+      a->hidden = false;
+      a->state = angry ? 100 : 150;
+      sfx("SND_POOF");
+      break;
+    }
+    if (++a->st >= (angry ? 25 : 40)) {
+      a->st = 0;
+      shoot(a->x, a->y, dx / len * 1.8f, dy / len * 1.8f, SHOT_FIRE);
+    }
+    if (--a->state <= 0) { a->hidden = true; a->state = 40; sfx("SND_POOF"); }
+    break;
+  }
+}
+
 static void behave(Actor *a, const World *w, const Link *link, float dx, float dy) {
   int kind = a->boss ? B_BOSS : a->behave;
   switch (kind) {
   case B_BOSS: {
+    if (a->boss != BOSS_MINI) { boss_fight(a, w, link, dx, dy); break; }
     float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f, sp = a->boss == BOSS_MINI ? 0.55f : 0.7f;
     if (len < 160) {
       a->vx = dx / len * sp; a->vy = dy / len * sp;
