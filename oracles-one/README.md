@@ -49,7 +49,8 @@ inventory work. Most of the game itself isn't in yet:
 | Done | Not yet |
 | --- | --- |
 | Every place in both games from the disassembly: Holodrum (each area in its season), Subrosia, Labrynna present and past, every house, shop and cave, and all dungeons, each dungeon floor one seamless map (423 areas) | Side-view (2D) rooms play top-down for now |
-| All 1,098 of the originals' warps: doors, stairs, cave mouths, leaving a house by its doorway (tested: every one leads somewhere) | Dungeon shutters, key doors and switches |
+| All 1,098 of the originals' warps: doors, stairs, cave mouths, leaving a house by its doorway (tested: every one leads somewhere) | Switches, pushable blocks, bombable walls |
+| All 241 chests with their original contents and pickup text; small keys, boss keys, maps and compasses per dungeon; key blocks and key doors that open with them | Shutters and the chests that appear after a fight or puzzle: both are open/placed from the start until enemies and puzzles are in |
 | Link walking, the originals' tile collision, sliding around corners | Ledges, holes, water, stairs, bushes and rocks |
 | The two town houses' doors, in both directions | Sprites for NPCs, enemies and Seasons' Maku Tree |
 | Shared hearts, rupees and items; extra hearts become rupees (tested) | Enemies, NPCs, scripts, text, chests, shops |
@@ -132,7 +133,7 @@ its first or second page), `--touch`, `--all-items`.
 - `src/world.c`: areas, drawing, the originals' collision rules (`checkGivenCollision_allowHoles`)
   and their warps (warp tiles, and the top/bottom screen-edge warps of `findScreenEdgeWarpSource`).
 - `src/link.c`: walking and collision. `src/items.c`: using items. `src/game.c`: the shared save
-  and its rules.
+  and its rules. `src/treasure.c`: treasures by the originals' numbers, chests, keys and locked doors.
 - `src/hud.c`: the HUD and the Start menu with both games' item pages. `src/input.c`: keyboard, gamepad, touch, pinch.
 - `src/main.c`: the loop, camera, zoom, aspect ratios, the town houses and screenshot mode.
 

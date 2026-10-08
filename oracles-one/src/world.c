@@ -41,7 +41,7 @@ int world_load_all(World **out) {
   Reader r = {d, d + size, false};
   const Uint8 *magic = take(&r, 4);
   unsigned version = u16(&r), count = u16(&r);
-  if (r.bad || memcmp(magic, "OARE", 4) != 0 || version != 1) { SDL_Log("areas.bin: wrong format"); SDL_free(d); return 0; }
+  if (r.bad || memcmp(magic, "OARE", 4) != 0 || version != 3) { SDL_Log("areas.bin: wrong format"); SDL_free(d); return 0; }
   World *areas = calloc(count, sizeof *areas);
   for (unsigned i = 0; i < count && !r.bad; i++) {
     World *w = &areas[i];
@@ -63,6 +63,15 @@ int world_load_all(World **out) {
     for (int k = 0; k < rooms; k++) {
       const Uint8 *nm = take(&r, 32);
       if (nm) { memcpy(w->room_name[k], nm, 31); w->room_name[k][31] = 0; }
+    }
+    w->floor_cell = malloc((size_t)rooms * 2); w->chest_cell = malloc((size_t)rooms * 2);
+    w->floor_coll = malloc((size_t)rooms); w->chest_coll = malloc((size_t)rooms); w->dungeon = malloc((size_t)rooms);
+    w->closed_chest_cell = malloc((size_t)rooms * 2); w->closed_chest_coll = malloc((size_t)rooms);
+    for (int k = 0; k < rooms; k++) {
+      w->floor_cell[k] = (uint16_t)u16(&r); w->floor_coll[k] = (uint8_t)u8(&r);
+      w->chest_cell[k] = (uint16_t)u16(&r); w->chest_coll[k] = (uint8_t)u8(&r);
+      w->closed_chest_cell[k] = (uint16_t)u16(&r); w->closed_chest_coll[k] = (uint8_t)u8(&r);
+      w->dungeon[k] = (uint8_t)u8(&r);
     }
     w->base.w = w->rooms_w * w->base.room_w;
     w->base.h = w->rooms_h * w->base.room_h;
@@ -95,6 +104,8 @@ void world_free(World *w) {
   free(w->base.cells); free(w->base.coll);
   for (int s = 0; s < 4; s++) { free(w->seasons[s].cells); free(w->seasons[s].coll); }
   free(w->room_season); free(w->room_ids); free(w->coll_mode); free(w->room_name); free(w->mt);
+  free(w->floor_cell); free(w->chest_cell); free(w->floor_coll); free(w->chest_coll); free(w->dungeon);
+  free(w->closed_chest_cell); free(w->closed_chest_coll);
   memset(w, 0, sizeof *w);
 }
 
@@ -215,6 +226,22 @@ bool warps_load(void) {
   return true;
 }
 
+uint8_t world_metatile(const World *w, float px, float py) {
+  if (px < 0 || py < 0 || px >= (float)world_px_w(w) || py >= (float)world_px_h(w)) return 0;
+  return w->mt[((int)py / MT) * w->base.w + (int)px / MT];
+}
+
+void world_set_tile(World *w, int tx, int ty, uint16_t cell, uint8_t coll, uint8_t mt) {
+  if (tx < 0 || ty < 0 || tx >= w->base.w || ty >= w->base.h) return;
+  int i = ty * w->base.w + tx;
+  w->base.cells[i] = cell;
+  w->base.coll[i] = coll;
+  w->mt[i] = mt;
+  for (int s = 0; s < 4; s++)
+    if (w->seasons[s].cells) { w->seasons[s].cells[i] = cell; w->seasons[s].coll[i] = coll; }
+}
+
+bool world_find_room(const World *areas, int n, int game, int group, int room, int *area, float *ox, float *oy);
 // Where a room of a game sits: its area and the top-left world pixel of that screen.
 static bool find_room(const World *areas, int n, int game, int group, int room, int *area, float *ox, float *oy) {
   // the overworld first (rooms of one group can also appear as single-room areas elsewhere)
@@ -289,6 +316,10 @@ bool warp_from_edge(const World *areas, int n, const World *w, float px, float p
     if (s->mask_or_yx & bit) return resolve(areas, n, s, out);
   }
   return false;
+}
+
+bool world_find_room(const World *areas, int n, int game, int group, int room, int *area, float *ox, float *oy) {
+  return find_room(areas, n, game, group, room, area, ox, oy);
 }
 
 int warps_resolvable(const World *areas, int n, int *total) {

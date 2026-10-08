@@ -79,7 +79,7 @@ static void button_badge(SDL_Renderer *ren, const HudArt *art, const char *label
   draw_text(ren, label, cx + r - 5 * px, cy + r - 6 * px, px, 255, 230, 120);
 }
 
-void hud_draw(SDL_Renderer *ren, const HudArt *art, int win_w, int win_h, bool touch_ui) {
+void hud_draw(SDL_Renderer *ren, const HudArt *art, int win_w, int win_h, bool touch_ui, int keys) {
   float px = hud_scale(win_w, win_h);
   float m = 4 * px;
   draw_hearts(ren, art, m, m, px);
@@ -90,6 +90,12 @@ void hud_draw(SDL_Renderer *ren, const HudArt *art, int win_w, int win_h, bool t
   if (touch_ui) { rx = m; ry = m + ((game.max_hearts + 7) / 8) * 8 * px + 2 * px; }
   hud_tile(ren, &art->hud, RUPEE_TILE, DIGIT_ROW, rx, ry, px);
   draw_number(ren, art, game.rupees, 3, rx + 8 * px, ry, px);
+  if (keys >= 0) {
+    // small keys, to the left of the rupees (above them when the touch buttons are up)
+    float kx = touch_ui ? rx : rx - 6 * 8 * px, ky = touch_ui ? ry + 10 * px : ry;
+    draw_text(ren, "KEY", kx, ky + px, px, 255, 255, 255);
+    draw_number(ren, art, SDL_min(keys, 9), 1, kx + text_width("KEY", px) + 2 * px, ky, px);
+  }
 }
 
 // ---- pause menu ----------------------------------------------------------------------------

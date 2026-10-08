@@ -52,7 +52,7 @@ int main(void) {
   CHECK(secret_redeem(SECRET_FAIRY) && game.max_hearts == 4);
   CHECK(!secret_redeem(SECRET_FAIRY) && game.max_hearts == 4);
   secret_hear(SECRET_KING_ZORA);
-  CHECK(secret_redeem(SECRET_KING_ZORA) && game.item_level[ITEM_SWORD] == 2);
+  CHECK(secret_redeem(SECRET_KING_ZORA) && game.item_level[ITEM_SWORD] == 1);
   secret_hear(SECRET_MAMAMU);
   CHECK(secret_redeem(SECRET_MAMAMU) && (game.rings_owned >> 0x21 & 1));
   secret_hear(SECRET_PIRATE);

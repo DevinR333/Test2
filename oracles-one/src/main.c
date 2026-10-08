@@ -12,6 +12,7 @@
 #include "input.h"
 #include "items.h"
 #include "link.h"
+#include "treasure.h"
 #include "world.h"
 
 #define TICK_NS (SDL_NS_PER_SECOND / 60)
@@ -75,7 +76,28 @@ typedef struct {
   char banner[32];
   int banner_frames;              // counts down while the place name shows
   char area[32];                  // the area Link is in, to notice when he enters another
+  char message[200];              // a text box (chest contents, locked doors); play waits for A or B
+  int message_frames;
 } App;
+
+// Shows a text box. The originals' texts already break their lines; anything longer than a line of
+// the box (16 characters, like theirs) is wrapped at spaces.
+static void show_message(App *a, const char *text) {
+  size_t o = 0;
+  int col = 0;
+  for (const char *p = text; *p && o + 1 < sizeof a->message; p++) {
+    if (*p == '\n') { a->message[o++] = '\n'; col = 0; continue; }
+    if (*p == ' ') {
+      int word = 0;
+      while (p[1 + word] && p[1 + word] != ' ' && p[1 + word] != '\n') word++;
+      if (col + 1 + word > 16) { a->message[o++] = '\n'; col = 0; continue; }
+    }
+    a->message[o++] = *p;
+    col++;
+  }
+  a->message[o] = 0;
+  a->message_frames = 1;
+}
 
 #define BANNER_FRAMES 150
 #define BANNER_FADE 25
@@ -194,6 +216,18 @@ static void update(App *a) {
     menu_update(&a->menu, in->pressed);
     return;
   }
+  if (a->message[0]) {
+    // the text box stays at least a moment, then A or B closes it
+    if (++a->message_frames > 15 && (in->pressed & (BTN_A | BTN_B))) a->message[0] = 0;
+    return;
+  }
+  // the tile just in front of Link, for chests and locked doors
+  static const int fx[4] = {0, 9, 0, -9}, fy[4] = {-6, 4, 14, 4};
+  float front_x = a->link.x + fx[a->link.dir], front_y = a->link.y + fy[a->link.dir];
+  if (in->pressed & BTN_A) {
+    const char *got = chest_open_at(a->worlds, a->n_worlds, a->world, front_x, front_y);
+    if (got) { show_message(a, got); in->pressed &= ~(Uint32)BTN_A; }
+  }
 
   if (in->pressed & BTN_A) items_use((Item)game.equip_a, &a->link, a->world);
   if (in->pressed & BTN_B) items_use((Item)game.equip_b, &a->link, a->world);
@@ -202,6 +236,10 @@ static void update(App *a) {
   int dy = !!(in->held & BTN_DOWN) - !!(in->held & BTN_UP);
   if (items.sword_frames) dx = dy = 0;
   link_update(&a->link, a->world, dx, dy);
+  if (a->link.pushing == 20) {
+    const char *msg = keydoor_push(a->worlds, a->n_worlds, a->world, front_x, front_y, a->link.dir);
+    if (msg) show_message(a, msg);
+  }
   if (at_door(a)) {
     WorldId other = a->world->id == WORLD_HOLODRUM ? WORLD_LABRYNNA : WORLD_HOLODRUM;
     a->link.dir = DIR_DOWN;
@@ -243,7 +281,12 @@ static void render(App *a) {
   items_draw(a->ren, &a->link, &v, px);
   SDL_SetRenderClipRect(a->ren, NULL);
   if (a->menu.open) menu_draw(a->ren, &a->menu, &a->art, w, h, a->in.touch_hidden);
-  hud_draw(a->ren, &a->art, w, h, a->in.touch_ui && !a->in.touch_hidden && !a->menu.open);
+  int keys = -1;
+  if (a->world->kind == AREA_DUNGEON) {
+    int r = world_room_index(a->world, a->link.x, a->link.y);
+    if (r >= 0) keys = game.small_keys[a->world->id][a->world->dungeon[r] & 15];
+  }
+  hud_draw(a->ren, &a->art, w, h, a->in.touch_ui && !a->in.touch_hidden && !a->menu.open, keys);
   if (a->banner_frames && !a->menu.open) {
     int t = a->banner_frames, since = BANNER_FRAMES - t;
     float alpha = since < BANNER_FADE ? (float)since / BANNER_FADE : t < BANNER_FADE ? (float)t / BANNER_FADE : 1.0f;
@@ -251,6 +294,22 @@ static void render(App *a) {
     draw_text_alpha(a->ren, a->banner, (float)(w - text_width(a->banner, bp)) / 2, (float)h * 0.22f, bp, 255, 240, 200, (Uint8)(alpha * 255));
   }
   input_draw_touch(a->ren, &a->in, w, h);
+  if (a->message[0]) {
+    // a text box along the bottom in the games' font, like theirs
+    float tp = SDL_floorf(SDL_max(1.0f, px * 0.5f));
+    float bw = SDL_min((float)w - 8 * tp, 18 * 8 * tp), bh = 4 * 16 * tp + 8 * tp;
+    float bx = ((float)w - bw) / 2, by = (float)h - bh - 6 * tp;
+    fill_rect(a->ren, bx, by, bw, bh, 8, 8, 24, 235);
+    char line[64];
+    const char *p = a->message;
+    for (int row = 0; *p && row < 4; row++) {
+      int n = 0;
+      while (*p && *p != '\n' && n < 63) line[n++] = *p++;
+      line[n] = 0;
+      if (*p == '\n') p++;
+      draw_game_text(a->ren, &a->art, line, bx + 4 * tp, by + 4 * tp + row * 16 * tp, tp);
+    }
+  }
   if (a->fade) {
     float t = 1.0f - SDL_fabsf((float)a->fade - FADE_FRAMES / 2.0f) / (FADE_FRAMES / 2.0f);
     fill_rect(a->ren, 0, 0, (float)w, (float)h, 255, 255, 255, (Uint8)(t * 255));
@@ -276,6 +335,7 @@ int main(int argc, char **argv) {
   int frames = 0, win_w = 1280, win_h = 720, start_world = -1, menu_page = -1;
   float start_x = -1, start_y = -1, zoom = 1;
   bool all_items = false, touch = false, touch_hidden = false;
+  int keys = 0;
   int aspect = ASPECT_FILL;
   for (int i = 1; i < argc; i++) {
     if (!strcmp(argv[i], "--shot") && i + 1 < argc) shot = argv[++i];
@@ -293,6 +353,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--all-items")) all_items = true;
     else if (!strcmp(argv[i], "--touch")) touch = true;
     else if (!strcmp(argv[i], "--touch-hidden")) touch_hidden = true;
+    else if (!strcmp(argv[i], "--keys") && i + 1 < argc) keys = atoi(argv[++i]);   // testing: small keys in every dungeon
   }
   SDL_SetHint(SDL_HINT_ORIENTATIONS, "LandscapeLeft LandscapeRight Portrait");
   SDL_SetHint(SDL_HINT_ANDROID_TRAP_BACK_BUTTON, "1");   // back opens the menu instead of quitting
@@ -320,9 +381,12 @@ int main(int argc, char **argv) {
     return 1;
   }
   for (int i = 0; i < WORLD_COUNT; i++) build_house(&a.worlds[a.overworld[i]]);
+  if (!chests_load(a.worlds, a.n_worlds)) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
 
   if (shot || !game_load()) game_new();
   if (all_items) items_give_all();
+  chests_restore(a.worlds, a.n_worlds);
+  for (int g = 0; keys && g < WORLD_COUNT; g++) for (int d = 0; d < 16; d++) game.small_keys[g][d] = (uint8_t)keys;
   if (start_world >= 0) game.area = (uint16_t)(start_world < WORLD_COUNT ? a.overworld[start_world] : start_world - WORLD_COUNT);
   if (start_x >= 0) { game.x = start_x; game.y = start_y; }
   if (game.area >= a.n_worlds) game.area = (uint16_t)a.overworld[WORLD_HOLODRUM];

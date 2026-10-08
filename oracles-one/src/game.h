@@ -57,6 +57,14 @@ typedef struct {
   uint8_t ring_box_size;
   uint8_t ring_box[5];            // ring ids, 0xff empty
   uint8_t ring_worn;              // 0xff none
+  // treasures by the originals' numbers, per game (keys, maps, quest items...)
+  uint8_t treasures[WORLD_COUNT][32];
+  uint8_t small_keys[WORLD_COUNT][16];       // per dungeon
+  uint16_t boss_keys[WORLD_COUNT], dungeon_maps[WORLD_COUNT], compasses[WORLD_COUNT];
+  // the world as Link changed it: chests opened (by chests.bin index), doors and blocks unlocked
+  uint8_t chests_opened[64];
+  uint16_t n_unlocked;
+  uint16_t unlocked_area[256], unlocked_tile[256];
   // story
   bool linked;                    // a linked game (new files start as a normal game)
   uint8_t essences[PAGE_COUNT];   // bit per essence (8 per game)

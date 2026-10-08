@@ -459,6 +459,24 @@ class Rooms:
         data, size = self.layout(game, ts, room)
         return None if data is None else size[:2]
 
+    def special_cells(self, game, group, room, season="auto"):
+        """(floor cell, floor collision, opened-chest cell, opened-chest collision, closed-chest cell,
+        closed-chest collision, dungeon index): what keyblocks/key doors ($a0, TILEINDEX_STANDARD_FLOOR)
+        and chests ($f0) turn into here, and a chest ($f1) for chests that appear during play."""
+        ts = self.tileset(game, group, room, season)
+        key = (game, ts)
+        if key not in self.ts_cache:
+            self.ts_cache[key] = self.games[game].metatiles(ts)
+        tiles, coll = self.ts_cache[key]
+        out = []
+        for mt in (0xa0, 0xf0, 0xf1):
+            img = tiles[mt]
+            if img not in self.atlas_index:
+                self.atlas_index[img] = len(self.atlas)
+                self.atlas.append(img)
+            out += [self.atlas_index[img], coll[mt]]
+        return tuple(out) + (ts[0] & 0x0f,)
+
     def render(self, game, group, room, season="auto"):
         """(w, h, cells, collisions, metatile ids, collision mode) or None when there's no layout."""
         ts = self.tileset(game, group, room, season)
@@ -491,11 +509,14 @@ class Area:
         self.room_ids = [0xffff] * (rooms_w * rooms_h)
         self.coll_mode = [0] * (rooms_w * rooms_h)
         self.room_names = [""] * (rooms_w * rooms_h)
+        self.specials = [(VOID, 0xff, VOID, 0xff, VOID, 0xff, 0xf)] * (rooms_w * rooms_h)
         W, H = rooms_w * room_w, rooms_h * room_h
         self.cells, self.colls, self.mts = [VOID] * (W * H), [0xff] * (W * H), [0] * (W * H)
 
-    def put(self, rx, ry, room, rendered):
+    def put(self, rx, ry, room, rendered, specials=None):
         w, h, cells, colls, mts, mode = rendered
+        if specials:
+            self.specials[ry * self.rooms_w + rx] = specials
         W = self.rooms_w * self.room_w
         self.room_ids[ry * self.rooms_w + rx] = room
         self.coll_mode[ry * self.rooms_w + rx] = mode
@@ -512,6 +533,7 @@ class Area:
         out += self.name.encode()[:31].ljust(32, b"\0")
         out += struct.pack(f"<{n}H", *self.room_ids) + bytes(self.coll_mode)
         out += b"".join(nm.encode()[:31].ljust(32, b"\0") for nm in self.room_names)
+        out += b"".join(struct.pack("<HBHBHBB", *sp) for sp in self.specials)
         out += struct.pack(f"<{W * H}H", *self.cells) + bytes(self.colls) + bytes(self.mts)
         return out
 
@@ -526,7 +548,7 @@ def overworld(rooms, game, group, name, gw, gh, names=None, season="auto"):
         rr = rooms.render(game, group, room, season)
         if rr is None or len(set(rr[4])) <= 2:
             continue                            # unused filler screen (the "N"/"X" rooms)
-        a.put(r % gw, r // gw, room, rr)
+        a.put(r % gw, r // gw, room, rr, rooms.special_cells(game, group, room, season))
         if names:
             a.room_names[r] = names[r]
     return a
@@ -568,7 +590,7 @@ def dungeon_floors(root, rooms, game):
             for x, y, r in cells:
                 rr = rooms.render(game, group, r)
                 if (rr[0], rr[1]) == (w, h):
-                    a.put(x - x0, y - y0, r, rr)
+                    a.put(x - x0, y - y0, r, rr, rooms.special_cells(game, group, r))
                     used.add((group, r))
             areas.append(a)
         d += 1
@@ -636,6 +658,82 @@ def warp_tiles(root, game):
     return [lists.get(n, []) for n in order]
 
 
+def treasure_names(root):
+    """TREASURE_* name -> index (constants/common/treasure.s)."""
+    out = {}
+    for line in lines_of(os.path.join(root, "constants/common/treasure.s")):
+        m = re.match(r"(TREASURE_\w+)\s+db", line)
+        if m:
+            out[m.group(1)] = len(out)
+    return out
+
+
+def treasure_objects(root, game):
+    """TREASURE_OBJECT_* name -> (treasure index, parameter, pickup text TX_00xx or $ff)."""
+    tnames = treasure_names(root)
+    out, cur = {}, None
+    for line in lines_of(os.path.join(root, f"data/{game}/treasureObjectData.s")):
+        m = re.match(r"m_BeginTreasureSubids\s+(\w+)", line)
+        if m:
+            cur = tnames.get(m.group(1))
+            continue
+        m = re.match(r"(?:/\*\s*\$(\w+)\s*\*/\s*)?m_TreasureSubid\s+(.*)", line)
+        if m:
+            args = [a.strip() for a in m.group(2).split(",")]
+            index = int(m.group(1), 16) if m.group(1) else cur
+            out[args[4]] = (index, num(args[1]), num(args[2]))
+    return out
+
+
+def text_strings(root, game, high):
+    """TX_{high}xx -> the message, control codes dropped, lines joined by newlines."""
+    out, cur, lines = {}, None, None
+    with open(os.path.join(root, f"text/{game}/text.yaml")) as f:
+        for raw in f:
+            m = re.match(r"\s*- name: TX_([0-9a-f]{2})([0-9a-f]{2})$", raw)
+            if m:
+                if cur is not None:
+                    out[cur] = "\n".join(lines).strip()
+                cur = int(m.group(2), 16) if int(m.group(1), 16) == high else None
+                lines = None
+                continue
+            if cur is None:
+                continue
+            if raw.strip().startswith("text:"):
+                lines = []
+                continue
+            if lines is not None and raw.startswith("      "):
+                text = re.sub(r"\\col\([^)]*\)", "", raw.strip())
+                text = re.sub(r"\\(sym|item)\([^)]*\)", "", text)
+                text = re.sub(r"\\[a-z]+(\([^)]*\))?", "", text)
+                lines.append(text)
+    if cur is not None and lines:
+        out[cur] = "\n".join(lines).strip()
+    return out
+
+
+def chests(root, rooms, game):
+    """(group, room, YX, treasure, parameter, opened, text) for every chest (chestData.s)."""
+    objs = treasure_objects(root, game)
+    texts = text_strings(root, game, 0)
+    out, groups = [], []
+    for line in lines_of(os.path.join(root, f"data/{game}/chestData.s")):
+        m = re.match(r"chestGroup(\d)Data:", line)
+        if m:
+            groups.append(int(m.group(1)))
+            continue
+        m = re.match(r"m_ChestData\s+(\$?\w+),\s*(\$?\w+),\s*(\w+)", line)
+        if m:
+            yx, room, obj = num(m.group(1)), num(m.group(2)), m.group(3)
+            t, param, tx = objs.get(obj, (0, 0, 0xff))
+            for g in groups:
+                out.append((g, room, yx, t, param, texts.get(tx, "") if tx != 0xff else ""))
+            continue
+        if line.startswith(".db") and "$ff" in line:
+            groups = []
+    return out
+
+
 def main():
     if len(sys.argv) < 3:
         print(__doc__)
@@ -669,11 +767,11 @@ def main():
             if rr is None:
                 continue
             a = Area(game, AREA_ROOM, g, "", 1, 1, rr[0], rr[1])
-            a.put(0, 0, room, rr)
+            a.put(0, 0, room, rr, rooms.special_cells(game, g, room))
             areas.append(a)
             placed.add((gi, g, room))
     with open(os.path.join(out, "areas.bin"), "wb") as f:
-        f.write(b"OARE" + struct.pack("<HH", 1, len(areas)))
+        f.write(b"OARE" + struct.pack("<HH", 3, len(areas)))
         for a in areas:
             f.write(a.pack())
     # Holodrum in each season, for the Rod of Seasons: same layout as the HOLODRUM area
@@ -695,6 +793,12 @@ def main():
             for mode in range(8):
                 lst = (t[mode] if mode < len(t) else [])[:15]
                 f.write(bytes(lst + [0] * (16 - len(lst))))
+    with open(os.path.join(out, "chests.bin"), "wb") as f:
+        all_chests = [(gi,) + c for gi, game in enumerate(GAMES) for c in chests(root, rooms, game)]
+        f.write(b"OCHS" + struct.pack("<HH", 1, len(all_chests)))
+        for gi, g, room, yx, t, param, text in all_chests:
+            tb = text.encode("ascii", "replace")[:159]
+            f.write(struct.pack("<BBBBBB", gi, g, room, yx, t, param) + tb.ljust(160, b"\0"))
     rows = (len(rooms.atlas) + ATLAS_COLS - 1) // ATLAS_COLS
     sheet = Image.new("RGBA", (ATLAS_COLS * 16, rows * 16))
     for i, img in enumerate(rooms.atlas):
@@ -712,7 +816,7 @@ def main():
             im.save(os.path.join(out, f"area{i:03d}_{a.game}_{a.name.replace(' ', '_')}.png"))
     kinds = [sum(1 for a in areas if a.kind == k) for k in range(3)]
     print(f"{len(areas)} areas ({kinds[0]} overworlds, {kinds[2]} dungeon floors, {kinds[1]} rooms), "
-          f"{len(all_sources)} warps, atlas {len(rooms.atlas)} metatiles ({ATLAS_COLS * 16}x{rows * 16})")
+          f"{len(all_sources)} warps, {len(all_chests)} chests, atlas {len(rooms.atlas)} metatiles ({ATLAS_COLS * 16}x{rows * 16})")
 
 
 if __name__ == "__main__":

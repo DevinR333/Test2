@@ -32,6 +32,9 @@ typedef struct {
   Map base;                      // Holodrum: every area in its default season
   Map seasons[4];                // Holodrum only: the whole map in each season (Rod of Seasons)
   int8_t *room_season;           // Holodrum only: per screen, SEASON_DEFAULT or a season set with the rod
+  // per screen: what key blocks and doors ($a0) and chests ($f0) turn into, and the dungeon number
+  uint16_t *floor_cell, *chest_cell, *closed_chest_cell;
+  uint8_t *floor_coll, *chest_coll, *closed_chest_coll, *dungeon;
 } World;
 
 // Loads every area of both games; returns how many (0 on failure).
@@ -52,6 +55,12 @@ int world_room_index(const World *w, float px, float py);
 const char *world_area_name(const World *w, float px, float py);
 
 void world_draw(SDL_Renderer *ren, const World *w, const Image *atlas, const View *v);
+// The original metatile under a world pixel (0 outside).
+uint8_t world_metatile(const World *w, float px, float py);
+// Changes one metatile (in every season of Holodrum too).
+void world_set_tile(World *w, int tx, int ty, uint16_t cell, uint8_t coll, uint8_t mt);
+// Where a room of a game is: its area and the top-left pixel of that screen.
+bool world_find_room(const World *areas, int n, int game, int group, int room, int *area, float *ox, float *oy);
 
 // ---- warps (data/{game}/warpSources.s, warpDestinations.s) -----------------------------------
 typedef struct {

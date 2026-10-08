@@ -17,7 +17,8 @@ float hud_scale(int win_w, int win_h);
 void draw_item_icon(SDL_Renderer *ren, const HudArt *art, Item item, float x, float y, float px);
 // Floating HUD in the style of The Minish Cap: hearts top left, B and A top right, rupees bottom
 // right; no status bar. With on-screen buttons the rupees move under the hearts, out of A's way.
-void hud_draw(SDL_Renderer *ren, const HudArt *art, int win_w, int win_h, bool touch_ui);
+// keys: the dungeon's small keys, shown next to the rupees inside a dungeon (-1 elsewhere)
+void hud_draw(SDL_Renderer *ren, const HudArt *art, int win_w, int win_h, bool touch_ui, int keys);
 
 typedef struct {
   bool open;
