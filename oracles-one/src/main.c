@@ -21,6 +21,7 @@
 #include "treasure.h"
 #include "secrets.h"
 #include "terrain.h"
+#include "roomflags.h"
 #include "world.h"
 
 #define TICK_NS (SDL_NS_PER_SECOND / 60)
@@ -79,6 +80,7 @@ typedef struct {
   float cam_x, cam_y;             // camera centre, eases after Link
   int fade;                       // >0: door transition in progress (counts down)
   WarpTarget fade_to;
+  int enter_walk, enter_dir;      // arriving from off the screen: frames left to walk in, and which way
   bool door_armed;                // false right after arriving, until Link leaves the doorway
   bool warp_armed;                // false while Link still stands on the warp tile he arrived on
   char banner[32];
@@ -194,6 +196,33 @@ static void toggle_touch(App *a) {
   settings_save(a);
 }
 
+// A place to put Link that isn't a warp of the originals.
+static WarpTarget place(int area, float x, float y) { return (WarpTarget){area, x, y, .transition = -1}; }
+
+// How Link arrives (object_code/common/specialObjects/link.s, LINK_STATE_WARPING): walking in from
+// the edge, falling from above the screen, or standing, turned by the tile he lands on
+// (tile_properties/facingDirAfterWarp.s: a cave opening faces him up, stairs left or right).
+static void arrive(App *a, WarpTarget t) {
+  if (t.transition < 0) return;                // not a warp: our own doors, a save, a respawn
+  a->enter_walk = t.walk_frames;
+  a->enter_dir = t.walk_dir;
+  if (t.walk_frames) { a->link.dir = t.walk_dir; return; }
+  if (t.transition == TRANSITION_DEST_FALL) { items.z = 72; items.vz = 0; return; }
+  if (t.transition != TRANSITION_DEST_BASIC && t.transition != TRANSITION_DEST_SET_RESPAWN &&
+      t.transition != TRANSITION_DEST_DONT_SET_RESPAWN && t.transition != TRANSITION_DEST_X_SHIFTED) return;
+  int r = world_room_index(a->world, t.x, t.y);
+  int mode = r >= 0 ? a->world->coll_mode[r] & 7 : 0;
+  // the table's lists: indoors (Seasons 3, Ages 1) knows the cave opening and the stairs, dungeons
+  // and side-view rooms only the stairs
+  int indoors = a->world->id == WORLD_LABRYNNA ? 1 : 3;
+  uint8_t mt = world_metatile(a->world, t.x, t.y);
+  int dir = DIR_DOWN;
+  if (mode == indoors && mt == 0x36) dir = DIR_UP;
+  else if (mode >= indoors && mode <= indoors + 2 && mt == 0x44) dir = DIR_LEFT;
+  else if (mode >= indoors && mode <= indoors + 2 && mt == 0x45) dir = DIR_RIGHT;
+  a->link.dir = dir;
+}
+
 static void enter_area(App *a, WarpTarget t) {
   a->world = &a->worlds[t.area];
   game.world = (uint8_t)a->world->id;
@@ -205,7 +234,12 @@ static void enter_area(App *a, WarpTarget t) {
   a->cam_x = a->link.x;
   a->cam_y = a->link.y;
   a->area[0] = 0;
-  a->respawn = t;
+  a->respawn = t;                // he comes back where he stands after walking in, as he is
+  a->respawn.y += t.walk_frames * (t.walk_dir == DIR_DOWN ? 1.0f : -1.0f);
+  a->respawn.walk_frames = 0;
+  a->respawn.transition = -1;
+  roomflags_apply(a->world);
+  arrive(a, t);
   actors_enter(a->worlds, a->n_worlds, a->world);
   terrain_enter(a->worlds, a->n_worlds, a->world, &a->link);
   room_events_enter(a->worlds, a->world);
@@ -408,11 +442,11 @@ static void item_request(App *a) {
       items.toast_frames = 90;
       return;
     }
-    start_fade(a, (WarpTarget){to, a->link.x, a->link.y});
+    start_fade(a, place(to, a->link.x, a->link.y));
   } else if (r == REQ_GALE) {
     // the originals' list of seed trees of this game (treeWarps.s), to pick where to fly
     if (gale_trees(a, NULL) > 0) { a->gale_open = true; a->gale_sel = 0; }
-    else start_fade(a, (WarpTarget){a->overworld[a->world->id], door_x(a->world->id), door_y(a->world->id) + 24});
+    else start_fade(a, place(a->overworld[a->world->id], door_x(a->world->id), door_y(a->world->id) + 24));
   } else if (r == REQ_MAGNET) {
     terrain_magnet(a->world, &a->link, items.magnet_polarity);
   } else if (r == REQ_FLUTE) {
@@ -457,7 +491,9 @@ static void gale_update(App *a, Uint32 pressed) {
     float ox, oy;
     if (world_find_room(a->worlds, a->n_worlds, t->game, t->group, t->room, &area, &ox, &oy)) {
       sfx("SND_GALE_SEED");
-      start_fade(a, (WarpTarget){area, ox + (float)((t->yx & 15) * MT + 8), oy + (float)((t->yx >> 4) * MT + 8)});
+      WarpTarget to = place(area, ox + (float)((t->yx & 15) * MT + 8), oy + (float)((t->yx >> 4) * MT + 8));
+      to.transition = TRANSITION_DEST_FALL;      // Link drifts down from the sky
+      start_fade(a, to);
     }
     a->gale_open = false;
   }
@@ -528,7 +564,7 @@ static void new_game(App *a) {
   game_new();
   chests_restore(a->worlds, a->n_worlds);
   a->link.dir = game.dir;
-  enter_area(a, (WarpTarget){game.area < a->n_worlds ? game.area : (uint16_t)a->overworld[WORLD_HOLODRUM], game.x, game.y});
+  enter_area(a, place(game.area < a->n_worlds ? game.area : a->overworld[WORLD_HOLODRUM], game.x, game.y));
   game_save();
 }
 
@@ -593,6 +629,15 @@ static void update(App *a) {
   Input *in = &a->in;
   if (a->fade) {
     if (--a->fade == FADE_FRAMES / 2) enter_area(a, a->fade_to);
+    return;
+  }
+  if (a->enter_walk > 0) {
+    // walking in from off the screen at walking speed, through anything (warpTransition3 @eachFrame)
+    a->enter_walk--;
+    a->link.y += a->enter_dir == DIR_DOWN ? 1.0f : -1.0f;
+    a->link.dir = a->enter_dir;
+    a->link.moving = true;
+    link_pose(a);
     return;
   }
   if (in->pressed & BTN_ASPECT) { a->aspect = (a->aspect + 1) % ASPECT_COUNT; set_banner(a, aspect_names[a->aspect]); }
@@ -697,6 +742,7 @@ static void update(App *a) {
   static int kills_seen;
   while (kills_seen < actors_kills) { kills_seen++; gasha_kill(); }
   room_events_update(a->worlds, a->n_worlds, a->world, a->link.x, a->link.y);
+  roomflags_visit(a->world, a->link.x, a->link.y);
   link_pose(a);
   if (a->riding) companion_update(game.companion, &a->link);
   if (a->link.pushing == 20) {
@@ -706,7 +752,7 @@ static void update(App *a) {
   if (at_door(a)) {
     WorldId other = a->world->id == WORLD_HOLODRUM ? WORLD_LABRYNNA : WORLD_HOLODRUM;
     a->link.dir = DIR_DOWN;
-    start_fade(a, (WarpTarget){a->overworld[other], door_x(other), door_y(other) + 8});
+    start_fade(a, place(a->overworld[other], door_x(other), door_y(other) + 8));
   } else {
     // the originals' warps: doors, stairs and cave mouths are warp tiles; houses and caves are left
     // by walking off the edge of their screen
@@ -819,6 +865,57 @@ static void draw_icon_rotated(SDL_Renderer *ren, Item item, float cx, float cy, 
   draw_item_icon_rotated(ren, g_art, item, cx, cy, px, angle);
 }
 
+// ---- --smoke: arrive at every warp destination of both games and play a moment there -----------
+static int smoke_test(App *a) {
+  static WarpTarget t[2048];
+  int n = warps_targets(a->worlds, a->n_worlds, t, 2048), gated = 0, stuck = 0, hazard = 0, deaths = 0, areas_seen = 0;
+  static bool seen[1024];
+  a->title = false;
+  for (int i = 0; i < n; i++) {
+    game.health = (int16_t)(game.max_hearts * 4);
+    enter_area(a, t[i]);
+    a->fade = 0;
+    if (t[i].area < 1024 && !seen[t[i].area]) { seen[t[i].area] = true; areas_seen++; }
+    for (int f = 0; f < 45; f++) {
+      memset(&a->in.pressed, 0, sizeof a->in.pressed);
+      a->in.held = 0;
+      update(a);
+      a->message[0] = 0;
+      if (a->fade) break;                      // walked straight onto another warp: fine
+    }
+    if (!a->fade && !link_can_move(a->world, a->link.x, a->link.y)) {
+      // opened from the other side first in the originals (a bombed wall, a door, stairs that
+      // appeared): with the room's flags set he walks off
+      int rr = world_room_index(a->world, a->link.x, a->link.y);
+      if (rr >= 0 && a->world->room_ids[rr] != 0xffff) {
+        uint8_t *f = room_flags(a->world->id, a->world->group, a->world->room_ids[rr]), was = *f;
+        *f = 0xff;
+        roomflags_apply(a->world);
+        bool freed = link_can_move(a->world, a->link.x, a->link.y);
+        *f = was;
+        if (freed) { gated++; continue; }
+      }
+      int r = world_room_index(a->world, a->link.x, a->link.y);
+      if (stuck < 400) SDL_Log("stuck on arrival: area %d (%s) room %03x at %.0f,%.0f tile %x,%x mt %02x tr %d p %x", t[i].area, a->world->name,
+                              r >= 0 ? a->world->room_ids[r] : -1, a->link.x, a->link.y,
+                              ((int)a->link.x / MT) % a->world->base.room_w, ((int)a->link.y / MT) % a->world->base.room_h,
+                              world_metatile(a->world, a->link.x, a->link.y), t[i].transition, t[i].param);
+      int X = (int)a->link.x, Y = (int)a->link.y;
+      if (stuck < 400) SDL_Log("  coll here %02x up %02x down %02x left %02x right %02x", world_collision(a->world, X, Y),
+                              world_collision(a->world, X, Y - 16), world_collision(a->world, X, Y + 16),
+                              world_collision(a->world, X - 16, Y), world_collision(a->world, X + 16, Y));
+      stuck++;
+    }
+    if (terrain_falling()) {
+      if (hazard < 100) SDL_Log("falls on arrival: area %d (%s) at %.0f,%.0f tr %d p %x", t[i].area, a->world->name, a->link.x, a->link.y, t[i].transition, t[i].param);
+      hazard++;
+    }
+    if (game.health <= 0) deaths++;
+  }
+  SDL_Log("smoke: %d warp destinations, %d areas, %d behind room flags, %d stuck in a wall, %d falling, %d deaths", n, areas_seen, gated, stuck, hazard, deaths);
+  return stuck || hazard ? 2 : 0;
+}
+
 // ---- headless checks: --shot FILE renders after --frames N with buttons --hold held --------
 static Uint32 parse_buttons(const char *s) {
   Uint32 b = 0;
@@ -837,6 +934,7 @@ int main(int argc, char **argv) {
   const char *shot = NULL, *hold = NULL;
   int frames = 0, win_w = 1280, win_h = 720, start_world = -1, menu_page = -1;
   float start_x = -1, start_y = -1, zoom = 1;
+  bool smoke = false;
   bool all_items = false, touch = false, touch_hidden = false;
   bool pos_set = false;
   int keys = 0, equip_a = -1, equip_b = -1, room_game = -1, room_group = 0, room_id = 0;
@@ -855,6 +953,7 @@ int main(int argc, char **argv) {
     else if (!strcmp(argv[i], "--aspect") && i + 1 < argc) { i++; aspect = !strcmp(argv[i], "4:3") ? ASPECT_4_3 : !strcmp(argv[i], "16:9") ? ASPECT_16_9 : ASPECT_FILL; }
     else if (!strcmp(argv[i], "--menu") && i + 1 < argc) menu_page = atoi(argv[++i]);
     else if (!strcmp(argv[i], "--all-items")) all_items = true;
+    else if (!strcmp(argv[i], "--smoke")) smoke = true;   // checks: arrive at every warp's destination
     else if (!strcmp(argv[i], "--touch")) touch = true;
     else if (!strcmp(argv[i], "--touch-hidden")) touch_hidden = true;
     else if (!strcmp(argv[i], "--room") && i + 1 < argc) sscanf(argv[++i], "%d,%x,%x", &room_game, &room_group, &room_id);   // testing: game,group,room (hex)
@@ -901,8 +1000,9 @@ int main(int argc, char **argv) {
   terrain_icon = draw_icon;
   items_icon = draw_icon_rotated;
   pickup_icon = draw_pickup;
-  if (!tiles_load(a.worlds, a.n_worlds)) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
-  if (!chests_load(a.worlds, a.n_worlds)) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
+  if (!tiles_load(a.worlds, a.n_worlds)) { SDL_Log("game data out of date (line %d)", __LINE__); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
+  if (!roomflags_load()) { SDL_Log("game data out of date (line %d)", __LINE__); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
+  if (!chests_load(a.worlds, a.n_worlds)) { SDL_Log("game data out of date (line %d)", __LINE__); SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
 
   a.music_vol = a.sfx_vol = 8;
   settings_load(&a);
@@ -933,9 +1033,11 @@ int main(int argc, char **argv) {
   }
   if (game.area >= a.n_worlds) game.area = (uint16_t)a.overworld[WORLD_HOLODRUM];
   a.link.dir = game.dir;
-  enter_area(&a, (WarpTarget){game.area, game.x, game.y});
+  enter_area(&a, place(game.area, game.x, game.y));
   a.door_armed = a.warp_armed = true;
   if (menu_page >= 0) { menu_open(&a.menu, a.world->id); a.menu.at = a.menu.slide = menu_page; }
+
+  if (smoke) return smoke_test(&a);
 
   Uint64 last = SDL_GetTicksNS(), acc = 0, autosave = 0;
   int frame = 0;

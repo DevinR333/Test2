@@ -86,6 +86,8 @@ typedef struct {
   uint16_t area;                  // the area (overworld, dungeon floor, room) in areas.bin
   float x, y;
   int8_t dir;
+  // the originals' room flags (roomflags.h): per game, its four flag arrays of 256 rooms
+  uint8_t room_flags[WORLD_COUNT][4][256];
 } GameState;
 
 extern GameState game;

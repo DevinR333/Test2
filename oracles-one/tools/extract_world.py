@@ -873,6 +873,49 @@ def tile_properties(root, game):
     return out, modes
 
 
+def room_flag_tables(root, game):
+    """standardTileSubstitutions.s: per room flag bit (0-3, 7), per table index (Seasons: group,
+    Ages: collision mode), the (new tile, old tile) pairs; breakableTileRoomFlags.s: per collision
+    mode, (tile, flag byte) for tiles whose breaking sets room flags."""
+    d = os.path.join(root, f"data/{game}/tile_properties")
+    order, rows = prop_table(os.path.join(d, "standardTileSubstitutions.s"), {})
+    n = len(order) // 5
+    subst = []
+    for b in range(5):
+        per = []
+        for label in order[b * n:(b + 1) * n]:
+            pairs = []
+            for r in rows.get(label, []):
+                if not r or r[0] == 0:
+                    break
+                pairs.append((r[0] & 0xff, r[1] & 0xff))
+            per.append(pairs)
+        subst.append(per)
+    order, rows = prop_table(os.path.join(d, "breakableTileRoomFlags.s"), {})
+    breaks = []
+    for label in order[:6]:
+        pairs = []
+        for r in rows.get(label, []):
+            if not r or r[0] == 0:
+                break
+            pairs.append((r[0] & 0xff, r[1] & 0xff))
+        breaks.append(pairs)
+    # singleTileChanges.s: per group, (room, flag mask, YX, new tile); Ages' masks $f0/$f1/$f2 mean
+    # unlinked only, linked only, finished game only
+    singles = [[] for _ in range(8)]
+    group = None
+    for line in lines_of(os.path.join(root, f"data/{game}/singleTileChanges.s")):
+        m = re.match(r"singleTileChangeGroup(\d)Data:", line)
+        if m:
+            group = int(m.group(1))
+            continue
+        if group is not None and line.startswith(".db"):
+            v = [num(t) for t in line[3:].replace(",", " ").split()]
+            if len(v) >= 4 and (v[0] or v[1]):
+                singles[group].append(tuple(x & 0xff for x in v[:4]))
+    return subst, breaks, singles
+
+
 def signs(root, game):
     """(group, room, YX, text) for every sign (signText.s)."""
     texts = text_strings(root, game, 0x2e)
@@ -990,6 +1033,21 @@ def main():
             tb = text.encode("ascii", "replace")[:159]
             f.write(struct.pack("<BBBBBB", gi, g, room, yx, t, param) + tb.ljust(160, b"\0"))
     write_tiles(root, rooms, season_ts, os.path.join(out, "tiles.bin"))
+    # roomflags.bin (version 2): per game, u8 table count n, then for each flag bit 0,1,2,3,7 and each of the
+    # n tables: u8 pair count, (new tile, old tile) pairs; then per collision mode (6): u8 count,
+    # (tile, flag byte) for the tiles whose breaking sets room flags
+    with open(os.path.join(out, "roomflags.bin"), "wb") as f:
+        f.write(b"ORFL" + struct.pack("<H", 2))
+        for game in GAMES:
+            subst, breaks, singles = room_flag_tables(root, game)
+            f.write(bytes([len(subst[0])]))
+            for per in subst:
+                for pairs in per:
+                    f.write(bytes([len(pairs)]) + bytes(v for pr in pairs for v in pr))
+            for pairs in breaks:
+                f.write(bytes([len(pairs)]) + bytes(v for pr in pairs for v in pr))
+            for g in range(8):                   # then per group: u8 count, (room, mask, YX, tile)
+                f.write(bytes([len(singles[g])]) + bytes(v for c in singles[g] for v in c))
     # Gale Seed trees (treeWarps.s): u16 count, then (game, group, room, YX) each
     trees = []
     for gi, game in enumerate(GAMES):

@@ -32,6 +32,8 @@ extern bool (*link_blocker)(float x, float y);
 // dx, dy: -1, 0 or 1 from the d-pad
 void link_update(Link *l, const World *w, int dx, int dy);
 // Whether Link's body would hit a wall standing at x, y.
+// Whether any side of Link is against a wall there; link_can_move: whether he can take a step some way.
+bool link_can_move(const World *w, float x, float y);
 bool link_blocked_at(const World *w, float x, float y);
 // Moves Link without turning him (knockback); walls still stop him.
 void link_push(Link *l, const World *w, float dx, float dy);

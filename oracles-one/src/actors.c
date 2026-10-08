@@ -20,6 +20,7 @@ typedef struct {
   char *text;                    // what the character says
   uint8_t vis_type;              // when shown: 0 always, 1 Horon stages (mask), 2 a Sunken City stage, 3 from an Ages progress
   uint16_t vis;
+  bool solid;                    // its code pushes Link away (objectPushLinkAwayOnCollision and kin)
   uint8_t prog_fn, prog_off, n_ptexts;   // Ages: what they say at each progress (getGameProgress_1/_2)
   char *ptexts[8];
   int n_gifts;
@@ -61,7 +62,7 @@ bool actors_load(SDL_Renderer *ren) {
   if (!image_load(ren, "sprites.rgba", &sheet)) return false;
   size_t size;
   Uint8 *d = asset_load("objects.bin", &size);
-  if (!d || size < 10 || memcmp(d, "OOBJ", 4) != 0 || (d[4] | d[5] << 8) != 4) { SDL_free(d); return false; }
+  if (!d || size < 10 || memcmp(d, "OOBJ", 4) != 0 || (d[4] | d[5] << 8) != 5) { SDL_free(d); return false; }
   n_kinds = d[6] | d[7] << 8;
   n_places = d[8] | d[9] << 8;
   kinds = calloc((size_t)n_kinds, sizeof *kinds);
@@ -81,11 +82,12 @@ bool actors_load(SDL_Renderer *ren) {
     k->text = calloc((size_t)tl + 1, 1);
     memcpy(k->text, p, (size_t)tl);
     p += tl;
-    if (p + 6 > end) break;
+    if (p + 7 > end) break;
     k->vis_type = p[0];
     k->vis = (uint16_t)(p[1] | p[2] << 8);
-    k->prog_fn = p[3]; k->prog_off = p[4]; k->n_ptexts = p[5];
-    p += 6;
+    k->solid = p[3] != 0;
+    k->prog_fn = p[4]; k->prog_off = p[5]; k->n_ptexts = p[6];
+    p += 7;
     for (int t = 0; t < k->n_ptexts && t < 8; t++) {
       if (p + 2 > end) break;
       int l2 = p[0] | p[1] << 8;
@@ -308,7 +310,7 @@ void actors_enter(const World *areas, int n, const World *w) {
 bool actors_block(float px, float py) {
   for (int i = 0; i < n_actors; i++) {
     const Actor *a = &actors[i];
-    if (!a->alive || a->kind != ACTOR_INTERACTION) continue;
+    if (!a->alive || a->kind != ACTOR_INTERACTION || !a->k || !a->k->solid) continue;
     if (SDL_fabsf(px - a->x) < 7 && py > a->y - 6 && py < a->y + 7) return true;
   }
   return false;

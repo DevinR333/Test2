@@ -4,12 +4,12 @@
 Writes into OUT_DIR:
   sprites.rgba  the animation frames of every placed interaction, enemy and part, packed in rows
   objects.bin   (little endian)
-    "OOBJ", u16 version 4, u16 sprite count, u16 object count
+    "OOBJ", u16 version 5, u16 sprite count, u16 object count
     sprites: u8 game, u8 kind (0 interaction, 1 enemy, 2 part), u8 id, u8 subid,
              u8 radius y, u8 radius x, s8 damage (quarter hearts, negative), u8 health,
              u8 frame count (<= 4), u8 secret told, u8 secret taken ($ff none), u16 text length,
              the text (what the character says first), u8 when shown (0 always, 1 Horon stage
-             mask, 2 Sunken City stage, 3 from Ages progress), u16 its mask / stage / progress,
+             mask, 2 Sunken City stage, 3 from Ages progress), u16 its mask / stage / progress, u8 solid (Link bumps into it),
              u8 Ages progress function (0 none), u8 table offset, u8 text count, (u16 length,
              text) per progress, u8 gift count, (u8 treasure, u8 parameter, u16 length, text)
              per gift, then per frame: u16 x, u16 y (in
@@ -532,6 +532,68 @@ def gifts(root, game, dialogue):
     return out
 
 
+PUSHERS = {"objectPushLinkAwayOnCollision", "objectPreventLinkFromPassing", "interactionPushLinkAwayAndUpdateDrawPriority"}
+
+
+def solid_interactions(root, game):
+    """Interaction ids whose code keeps Link out of them: it calls one of the push routines of
+    code/bank0.s, directly or through a helper. Portals, triggers, debris and the like don't, so Link
+    walks through them as in the originals."""
+    bodies, order, where = {}, [], {}
+    files = []
+    for base in [os.path.join(root, "object_code", sub) for sub in ("common", game)] + [os.path.join(root, "code")]:
+        for dp, dirs, fs in os.walk(base):
+            dirs[:] = [d for d in dirs if d not in GAMES or d == game]
+            files += [os.path.join(dp, f) for f in sorted(fs) if f.endswith(".s")]
+    for path in files:
+        rel = os.path.relpath(path, root)
+        cur = None
+        for line in game_lines(root, rel, game):
+            code = line.split(";")[0]
+            m = re.match(r"^([A-Za-z_]\w*):", code)
+            if m:
+                cur = m.group(1)
+                bodies[cur] = []
+                order.append(cur)
+                where[cur] = rel
+                code = code[m.end():]
+            if cur and code.strip():
+                bodies[cur].append(code)
+    # code runs on into the next label unless it ends in an unconditional jump or return
+    def ends(body):
+        if not body:
+            return False
+        last = body[-1].strip().split(None, 1)
+        return last[0] in ("ret", "reti", "jp", "jr") and (len(last) == 1 or "," not in last[1]) and \
+            not (last[0] == "ret" and len(last) > 1)
+    calls = {}
+    for i, lab in enumerate(order):
+        j, refs = i, set()
+        while j < len(order):
+            body = bodies[order[j]]
+            for c in body:
+                refs.update(re.findall(r"\b(?:call|jp|jr|callab|jpab)\b[^;]*?([A-Za-z_]\w*)\s*$", c))
+            if ends(body) or j + 1 >= len(order) or where[order[j + 1]] != where[lab]:
+                break
+            j += 1
+        calls[lab] = refs
+    solid = set(PUSHERS)
+    changed = True
+    while changed:
+        changed = False
+        for lab, refs in calls.items():
+            if lab not in solid and refs & solid:
+                solid.add(lab)
+                changed = True
+    ids = set()
+    # print(sorted(l for l in solid if l.startswith("interactionCode")))
+    for lab in solid:
+        m = re.match(r"interactionCode([0-9a-f]{2})$", lab)
+        if m:
+            ids.add(int(m.group(1), 16))
+    return ids
+
+
 def object_lists(root, game):
     """(group, room) -> [(kind, id, subid, y, x, count, random, condition)] as at the start of a game."""
     files = [os.path.join(root, f"objects/{game}", f) for f in sorted(os.listdir(os.path.join(root, f"objects/{game}"))) if f.endswith(".s")]
@@ -744,7 +806,7 @@ def game_lines(root, rel, game):
         line = re.sub(r"/\*.*?\*/", "", raw.split(";", 1)[0]).strip()
         if not line:
             continue
-        w = line.split()[0]
+        w = line.split()[0].lower()
         if w == ".ifdef":
             stack.append(line.split()[1] == ("ROM_SEASONS" if game == "seasons" else "ROM_AGES"))
         elif w == ".ifndef":
@@ -754,7 +816,8 @@ def game_lines(root, rel, game):
         elif w == ".else":
             stack[-1] = not stack[-1]
         elif w == ".endif":
-            stack.pop()
+            if stack:
+                stack.pop()
         elif all(stack):
             yield line
 
@@ -899,6 +962,8 @@ def main():
         progress = ages_progress(root, dialogue) if game == "ages" else {}
         gives = gifts(root, game, dialogue)
         lists = object_lists(root, game)
+        solid_ids = solid_interactions(root, game)
+        print(game, "interactions Link can't walk through:", len(solid_ids))
         # the bosses scripts bring in: General Onox where the Din crystal hangs (his throne room), and
         # Ganon, who rises when Twinrova falls (condition 0: never placed, spawned by the game)
         if game == "seasons":
@@ -916,11 +981,11 @@ def main():
                                      secret_of(SECRET_TAKERS, gi, oid, subid), conds.get((oid, subid)),
                                      progress.get((oid, subid)), gives.get(oid, []))
                     sprite_index[key] = len(sprites)
-                    sprites.append((key, frames or [], stats))
+                    sprites.append((key, frames or [], stats, kind == KIND_INTERACTION and oid in solid_ids))
                 objects.append((gi, group, room, kind, oid, subid, y, x, count, rnd, cond))
     # pack frames into rows of a 1024-wide sheet, each distinct picture once
     placed, x, y, row_h, seen = [], 0, 0, 0, {}
-    for key, frames, stats in sprites:
+    for key, frames, stats, _ in sprites:
         pf = []
         for im, ox, oy, dur in frames:
             k = (im.size, im.tobytes())
@@ -940,8 +1005,8 @@ def main():
     with open(os.path.join(out, "sprites.rgba"), "wb") as f:
         f.write(sheet.size[0].to_bytes(4, "little") + sheet.size[1].to_bytes(4, "little") + sheet.tobytes())
     with open(os.path.join(out, "objects.bin"), "wb") as f:
-        f.write(b"OOBJ" + struct.pack("<HHH", 4, len(sprites), len(objects)))
-        for (key, frames, stats), pf in zip(sprites, placed):
+        f.write(b"OOBJ" + struct.pack("<HHH", 5, len(sprites), len(objects)))
+        for (key, frames, stats, solid), pf in zip(sprites, placed):
             ry, rx, dmg, hp = stats if stats else (0, 0, 0, 0)
             f.write(struct.pack("<BBBBBBbBB", *key, ry & 0xff, rx & 0xff, dmg - 256 if dmg >= 128 else dmg, hp & 0xff, len(pf)))
             text, tell, take, cond, prog, gv = talk.get(key, ("", 0xff, 0xff, None, None, []))
@@ -957,6 +1022,7 @@ def main():
                 f.write(struct.pack("<BH", 3, prog[1]))
             else:
                 f.write(struct.pack("<BH", 0, 0))
+            f.write(bytes([1 if solid else 0]))            # Link bumps into it
             # what they say at each Ages progress (function, table offset, texts)
             if prog:
                 fnum, least, off, texts = prog

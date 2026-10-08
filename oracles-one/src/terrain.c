@@ -1,4 +1,5 @@
 #include "terrain.h"
+#include "roomflags.h"
 #include "actors.h"
 #include "treasure.h"
 #include "audio.h"
@@ -146,7 +147,10 @@ static void break_tile(World *areas, World *w, int tx, int ty, const BreakMode *
   int room;
   uint8_t old = world_mt_at(w, tx, ty, &room);
   if (m->result) {
-    if (m->flags & 0x80) tile_change_for_good(areas, w, tx, ty, m->result);   // bombed walls and the like
+    if (m->flags & 0x80) {                    // bombed walls and the like: the room remembers
+      tile_change_for_good(areas, w, tx, ty, m->result);
+      roomflags_tile_broken(w, tx, ty, old);
+    }
     else {
       if (T.n_temp < MAX_TEMP) T.temp[T.n_temp++] = (TempChange){(int)(w - areas), tx, ty, old};
       world_put(w, tx, ty, m->result);

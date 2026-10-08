@@ -1,4 +1,5 @@
 #include "treasure.h"
+#include "roomflags.h"
 #include "actors.h"
 #include "audio.h"
 #include <stdio.h>
@@ -226,6 +227,7 @@ const char *keydoor_push(World *areas, int n, World *w, float px, float py, int 
   }
   unlock_tile(w, tx, ty);
   remember_unlocked((int)(w - areas), ty * w->base.w + tx, 0xa0);
+  if (!block) roomflags_key_door(w, tx, ty, mt & 3);   // the door's side: $70/$74 up, then right, down, left
   // a key door is two tiles, one each side of the room edge: open the other half too
   static const int ox[4] = {0, 1, 0, -1}, oy[4] = {-1, 0, 1, 0};
   int tx2 = tx + ox[dir], ty2 = ty + oy[dir];

@@ -5,37 +5,40 @@
 #define WALK_SPEED 1.0f          // pixels per frame, the originals' walking speed
 #define NUDGE_RANGE 6            // how far off a gap Link may be and still slide into it
 
-// Link touches walls with the lower part of his body: a box below his middle.
-#define BOX_L (-4)
-#define BOX_R 3
-#define BOX_T (-1)
-#define BOX_B 6
+// Link touches walls at eight points around his feet (object_code/common/specialObjects/link.s,
+// calculateAdjacentWallsBitset): two above at y-3, two below at y+7 (x-3 and x+2), two each side at
+// x-5 and x+4 (y and y+5). A step is refused when the points on that side are in a wall now, which is
+// the same as asking whether the step's new position has them at one pixel less.
 
 bool (*link_blocker)(float x, float y);
 float link_speed = 1.0f;
 
-static bool box_blocked(const World *w, float x, float y) {
+static bool solid_at(const World *w, float x, float y) { return world_solid(w, (int)SDL_floorf(x), (int)SDL_floorf(y)); }
+
+// Whether Link may step to (x, y) going (dx, dy) (one axis).
+static bool step_blocked(const World *w, float x, float y, float dx, float dy) {
   if (link_blocker && link_blocker(x, y + 2)) return true;
-  int l = (int)SDL_floorf(x) + BOX_L, r = (int)SDL_floorf(x) + BOX_R;
-  int t = (int)SDL_floorf(y) + BOX_T, b = (int)SDL_floorf(y) + BOX_B;
-  for (int px = l; px <= r; px += 4) {
-    if (world_solid(w, px, t) || world_solid(w, px, b)) return true;
-  }
-  for (int py = t; py <= b; py += 3) {
-    if (world_solid(w, l, py) || world_solid(w, r, py)) return true;
-  }
-  return world_solid(w, r, t) || world_solid(w, r, b);
+  if (dy < 0) return solid_at(w, x - 3, y - 2) || solid_at(w, x + 2, y - 2);
+  if (dy > 0) return solid_at(w, x - 3, y + 6) || solid_at(w, x + 2, y + 6);
+  if (dx < 0) return solid_at(w, x - 4, y) || solid_at(w, x - 4, y + 5);
+  if (dx > 0) return solid_at(w, x + 3, y) || solid_at(w, x + 3, y + 5);
+  return false;
+}
+
+// Whether Link standing at (x, y) has a wall at any of his points.
+static bool box_blocked(const World *w, float x, float y) {
+  return step_blocked(w, x, y, 0, -1) || step_blocked(w, x, y, 0, 1) || step_blocked(w, x, y, -1, 0) || step_blocked(w, x, y, 1, 0);
 }
 
 // Moves along one axis; when blocked, slides around a corner the way the originals do when only the
 // edge of Link's body catches a wall.
 static bool move_axis(Link *l, const World *w, float dx, float dy) {
-  if (!box_blocked(w, l->x + dx, l->y + dy)) { l->x += dx; l->y += dy; return true; }
+  if (!step_blocked(w, l->x + dx, l->y + dy, dx, dy)) { l->x += dx; l->y += dy; return true; }
   if (dx != 0 && dy != 0) return false;
   for (int off = 1; off <= NUDGE_RANGE; off++) {
     for (int sgn = -1; sgn <= 1; sgn += 2) {
       float ox = dx == 0 ? (float)(off * sgn) : 0, oy = dy == 0 ? (float)(off * sgn) : 0;
-      if (!box_blocked(w, l->x + ox, l->y + oy) && !box_blocked(w, l->x + ox + dx, l->y + oy + dy)) {
+      if (!step_blocked(w, l->x + ox, l->y + oy, ox, oy) && !step_blocked(w, l->x + ox + dx, l->y + oy + dy, dx, dy)) {
         l->x += ox != 0 ? (float)sgn * WALK_SPEED : 0;
         l->y += oy != 0 ? (float)sgn * WALK_SPEED : 0;
         return true;
@@ -43,6 +46,18 @@ static bool move_axis(Link *l, const World *w, float dx, float dy) {
     }
   }
   return false;
+}
+
+bool link_blocked_at(const World *w, float x, float y) { return box_blocked(w, x, y); }
+
+bool link_can_move(const World *w, float x, float y) {
+  return !step_blocked(w, x, y - 1, 0, -1) || !step_blocked(w, x, y + 1, 0, 1) ||
+         !step_blocked(w, x - 1, y, -1, 0) || !step_blocked(w, x + 1, y, 1, 0);
+}
+
+void link_push(Link *l, const World *w, float dx, float dy) {
+  if (dx && !step_blocked(w, l->x + dx, l->y, dx, 0)) l->x += dx;
+  if (dy && !step_blocked(w, l->x, l->y + dy, 0, dy)) l->y += dy;
 }
 
 void link_update(Link *l, const World *w, int dx, int dy) {
@@ -60,12 +75,6 @@ void link_update(Link *l, const World *w, int dx, int dy) {
   l->walk_frames++;
 }
 
-bool link_blocked_at(const World *w, float x, float y) { return box_blocked(w, x, y); }
-
-void link_push(Link *l, const World *w, float dx, float dy) {
-  if (!box_blocked(w, l->x + dx, l->y)) l->x += dx;
-  if (!box_blocked(w, l->x, l->y + dy)) l->y += dy;
-}
 
 // ---- Link's animations (link_anims.bin from data/seasons/specialObjectAnimationData.s) ----------
 // An animation is a list of (duration, gfx frame, parameter); a gfx frame at $54 or above has Link's

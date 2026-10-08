@@ -1,9 +1,10 @@
+#include <stddef.h>
 #include "game.h"
 #include <SDL3/SDL.h>
 #include <stdio.h>
 #include <string.h>
 
-#define SAVE_VERSION 11
+#define SAVE_VERSION 12
 
 GameState game;
 
@@ -68,8 +69,17 @@ bool game_load(void) {
   size_t size;
   void *d = SDL_LoadFile(path(), &size);
   if (!d) return false;
-  bool ok = size == sizeof game && ((GameState *)d)->version == SAVE_VERSION;
+  long version = size >= sizeof game.version ? (long)((GameState *)d)->version : -1;
+  bool ok = size == sizeof game && version == SAVE_VERSION;
   if (ok) memcpy(&game, d, sizeof game);
+  // version 11 saves are this save without the room flags at its end: keep them, flags clear
+  else if (version == 11 && size >= offsetof(GameState, room_flags) && size < sizeof game) {
+    memset(&game, 0, sizeof game);
+    memcpy(&game, d, size);
+    memset(game.room_flags, 0, sizeof game.room_flags);
+    game.version = SAVE_VERSION;
+    ok = true;
+  }
   SDL_free(d);
   return ok;
 }

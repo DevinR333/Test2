@@ -101,7 +101,12 @@ bool world_find_room(const World *areas, int n, int game, int group, int room, i
 typedef struct {
   int area;                      // where Link arrives
   float x, y;
+  int transition, param;         // the destination's TRANSITION_DEST_* and its parameter (constants/common/transitions.s)
+  int walk_frames, walk_dir;     // TRANSITION_DEST_ENTERSCREEN: Link walks in this many frames (0 none)
 } WarpTarget;
+
+enum { TRANSITION_DEST_BASIC = 0, TRANSITION_DEST_SET_RESPAWN = 1, TRANSITION_DEST_ENTERSCREEN = 3,
+       TRANSITION_DEST_DONT_SET_RESPAWN = 4, TRANSITION_DEST_FALL = 5, TRANSITION_DEST_X_SHIFTED = 14 };
 
 bool warps_load(void);
 // Whether the metatile under this pixel starts a warp (warpTiles.s for the screen's collision mode).
@@ -112,3 +117,5 @@ bool warp_from_tile(const World *areas, int n, const World *w, float px, float p
 bool warp_from_edge(const World *areas, int n, const World *w, float px, float py, WarpTarget *out);
 // For tests: how many warp sources lead to a room that exists; *total gets the number of sources.
 int warps_resolvable(const World *areas, int n, int *total);
+// Where every warp leads (for checks): fills out, returns how many.
+int warps_targets(const World *areas, int n, WarpTarget *out, int max);

@@ -287,9 +287,28 @@ static bool resolve(const World *areas, int n, const WarpSource *s, WarpTarget *
     if (d->game != s->game || d->group != s->dest_group || d->index != s->dest_index) continue;
     float ox, oy;
     if (!find_room(areas, n, d->game, d->group, d->room, &out->area, &ox, &oy)) return false;
-    int yx = d->yx == 0xff ? 0x44 : d->yx;    // $ff: the game places Link itself; the middle will do
+    out->transition = d->param_transition & 15;
+    out->param = d->param_transition >> 4;
+    out->walk_frames = 0;
+    out->walk_dir = 2;
+    bool large = areas[out->area].base.room_w > 10;
+    if (out->transition == TRANSITION_DEST_ENTERSCREEN) {
+      // object_code/common/specialObjects/link.s warpTransition3 @destInit: position $ff is the
+      // middle of the bottom (parameter bit 2: top) edge and $fx column x of it, from where Link
+      // walks in for $1c frames, ignoring walls; any other position is a tile he just stands on.
+      bool down = out->param & 4;
+      if (d->yx >= 0xf0) {
+        out->walk_dir = down ? 2 : 0;
+        out->walk_frames = 0x1c;
+        out->y = oy + (float)(down ? -16 : large ? 0xb0 : 0x80);
+        out->x = ox + (float)(d->yx == 0xff ? (large ? 0x78 : 0x50) : ((d->yx & 15) << 4) + (large ? 8 : 0));
+        return true;
+      }
+    }
+    int yx = d->yx == 0xff ? 0x44 : d->yx;      // $ff elsewhere: the game places Link itself; the middle will do
     out->x = ox + (float)((yx & 15) * MT + MT / 2);
     out->y = oy + (float)((yx >> 4) * MT + MT / 2);
+    if (out->transition == TRANSITION_DEST_X_SHIFTED) out->x -= 8;   // between two tiles (wide doors)
     return true;
   }
   return false;
@@ -341,6 +360,15 @@ bool warp_from_edge(const World *areas, int n, const World *w, float px, float p
 
 bool world_find_room(const World *areas, int n, int game, int group, int room, int *area, float *ox, float *oy) {
   return find_room(areas, n, game, group, room, area, ox, oy);
+}
+
+int warps_targets(const World *areas, int n, WarpTarget *out, int max) {
+  int k = 0;
+  for (int i = 0; i < n_sources && k < max; i++) {
+    WarpTarget t;
+    if (resolve(areas, n, &sources[i], &t)) out[k++] = t;
+  }
+  return k;
 }
 
 int warps_resolvable(const World *areas, int n, int *total) {
