@@ -43,21 +43,16 @@ or emulates the hardware.
 
 ## Status
 
-This is an early build. The overworlds, movement, collision, doors, shared state, HUD and
-inventory work. Most of the game itself isn't in yet:
-
-| Done | Not yet |
+| In the game | Still simplified |
 | --- | --- |
-| Every place in both games from the disassembly: Holodrum (each area in its season), Subrosia, Labrynna present and past, every house, shop and cave, and all dungeons, each dungeon floor one seamless map (423 areas) | Side-view (2D) rooms play top-down for now |
-| All 1,098 of the originals' warps: doors, stairs, cave mouths, leaving a house by its doorway (tested: every one leads somewhere) | Switches, pushable blocks, bombable walls |
-| All 241 chests with their original contents and pickup text; small keys, boss keys, maps and compasses per dungeon; key blocks and key doors that open with them | Shutters and the chests that appear after a fight or puzzle: both are open/placed from the start until enemies and puzzles are in |
-| Link walking, the originals' tile collision, sliding around corners | Ledges, holes, water, stairs, bushes and rocks |
-| The two town houses' doors, in both directions | Sprites for NPCs, enemies and Seasons' Maku Tree |
-| Shared hearts, rupees and items; extra hearts become rupees (tested) | Enemies, NPCs, scripts, text, chests, shops |
-| Both games' original item pages, A/B equip, floating HUD | The other subscreens (rings, essences, map), final boss |
-| The 20 secrets, their rewards and how they're recognised (tested) | The NPCs who tell and take them |
-| Roc's Feather and Cape jumps, Rod of Seasons, Magnetic Gloves polarity | Every other item's effect (sword, boomerang, bombs, seeds, Switch Hook, Cane, Shovel, Bracelet, Harp...). Each is one piece of code for both worlds, written as the objects it acts on go in |
-| Keyboard, gamepad, touch and pinch zoom, any aspect ratio | Sound and music |
+| Every place in both games (423 areas: Holodrum in its seasons, Subrosia, Labrynna present and past, every house, cave and dungeon floor), all 1,098 warps, all 241 chests | Side-view (2D) rooms play top-down |
+| Every character and enemy the originals place, with their own sprites (4,315 objects); characters say their original lines | Enemies share one behaviour (wander, chase if a boss) instead of each one's own attack pattern |
+| Sword, shield, bombs, bombchus, boomerang, seed satchel / slingshot / seed shooter with all five seeds, Roc's Feather and Cape, Rod of Seasons, Harp of Ages (present and past), Switch Hook, shovel, bracelet and gloves, Fool's Ore, flippers / mermaid suit | Cane of Somaria, Magnetic Gloves' pull and the Flute's companions only show their name |
+| Cutting grass and bushes, lifting and throwing, ledges, holes, water and swimming, lava, conveyors and currents, push blocks, bombable walls, digging, burning, signs | Shutters stand open and puzzle chests are placed from the start (the originals' room events aren't scripted) |
+| Bosses in every dungeon give a heart container and their essence; Onox and Veran end their games; Twinrova and Ganon wait in the Room of Rites until both are beaten | Cutscenes and story events |
+| The 20 linked secrets: the linked NPCs tell them, their takers reward them, no typing | Link uses his walking frames for every pose |
+| Both games' music in every room and their sound effects, from their own sound data | |
+| Shared hearts, rupees, items, rings, seeds and bombs; extra hearts become rupees | |
 
 `--all-items` gives every item of both games, for testing.
 
@@ -132,6 +127,10 @@ its first or second page), `--touch`, `--all-items`.
   pages, the inventory cursor and the font, in the games' palettes.
 - `src/world.c`: areas, drawing, the originals' collision rules (`checkGivenCollision_allowHoles`)
   and their warps (warp tiles, and the top/bottom screen-edge warps of `findScreenEdgeWarpSource`).
+- `tools/extract_objects.py`: every placed character, enemy and part with its sprites, stats, first
+  line of dialogue and linked secret. `tools/extract_audio.py`: both games' music and effects.
+- `src/actors.c`: characters, enemies and bosses. `src/terrain.c`: what Link does with the ground.
+  `src/tiles.c`: the tile property tables. `src/audio.c`: the sound engine and synth.
 - `src/link.c`: walking and collision. `src/items.c`: using items. `src/game.c`: the shared save
   and its rules. `src/treasure.c`: treasures by the originals' numbers, chests, keys and locked doors.
 - `src/hud.c`: the HUD and the Start menu with both games' item pages. `src/input.c`: keyboard, gamepad, touch, pinch.
