@@ -49,5 +49,7 @@ int actors_hit_area(float x, float y, float r, int damage);
 int actors_enemy_at(float x, float y, float r);
 void actors_get_pos(int i, float *x, float *y);
 void actors_set_pos(int i, float x, float y);
+// Enemies still up in one screen of the area (shutters and chests wait for them).
+int actors_room_enemies(int room);
 // For tests: how many enemies are still up.
 int actors_enemies_alive(void);

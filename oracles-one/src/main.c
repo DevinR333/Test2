@@ -191,6 +191,7 @@ static void enter_area(App *a, WarpTarget t) {
   a->respawn = t;
   actors_enter(a->worlds, a->n_worlds, a->world);
   terrain_enter(a->worlds, a->n_worlds, a->world, &a->link);
+  room_events_enter(a->worlds, a->world);
   check_area(a);
 }
 
@@ -415,6 +416,7 @@ static void update(App *a) {
     if (game.health <= 0) { game.health = (int16_t)SDL_min(12, game.max_hearts * 4); start_fade(a, a->respawn); }
   }
   combat(a);
+  room_events_update(a->worlds, a->n_worlds, a->world, a->link.x, a->link.y);
   if (a->link.pushing == 20) {
     const char *msg = keydoor_push(a->worlds, a->n_worlds, a->world, front_x, front_y, a->link.dir);
     if (msg) show_message(a, msg);

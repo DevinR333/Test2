@@ -1,4 +1,6 @@
 #include "treasure.h"
+#include "actors.h"
+#include "audio.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -78,6 +80,8 @@ void treasure_give(WorldId g, int dungeon, int t, int param) {
 typedef struct {
   int area, tx, ty;            // where the chest is (-1: in a room the game data doesn't place)
   uint8_t game, group, room, yx, treasure, param;
+  bool event, shown;           // a chest the originals make appear (room cleared, puzzle solved)
+  uint8_t under;               // the tile there before it appears
   char text[160];
 } Chest;
 
@@ -122,27 +126,39 @@ static void unlock_tile(World *w, int tx, int ty) {
   if (r >= 0 && w->floor_cell[r] != CELL_VOID) world_set_tile(w, tx, ty, w->floor_cell[r], w->floor_coll[r], 0xa0);
 }
 
+typedef struct { int area, tx, ty, room; uint8_t mt; bool closed; } Shutter;
+static Shutter *shutters;
+static int n_shutters;
+
 void chests_restore(World *areas, int n) {
-  // shutters ($78-$7b) open when a room's enemies are beaten or its switches pressed; until those are
-  // in, they stand open (doorController.s turns them into $a0). Key and boss doors stay locked.
-  for (int a = 0; a < n; a++) {
-    World *w = &areas[a];
-    if (w->kind == AREA_OVERWORLD) continue;
-    for (int ty = 0; ty < w->base.h; ty++)
-      for (int tx = 0; tx < w->base.w; tx++) {
-        uint8_t mt = w->mt[ty * w->base.w + tx];
-        if (mt >= 0x78 && mt <= 0x7b) unlock_tile(w, tx, ty);
+  // shutters ($78-$7b): open, until Link walks into a room whose enemies are still up; they close
+  // behind him and open again when the last one falls (doorController.s). Key doors stay locked.
+  if (!shutters) {
+    for (int pass = 0; pass < 2; pass++) {
+      n_shutters = 0;
+      for (int a = 0; a < n; a++) {
+        World *w = &areas[a];
+        if (w->kind == AREA_OVERWORLD) continue;
+        for (int ty = 0; ty < w->base.h; ty++)
+          for (int tx = 0; tx < w->base.w; tx++) {
+            uint8_t mt = w->mt[ty * w->base.w + tx];
+            if (mt < 0x78 || mt > 0x7b) continue;
+            if (pass) shutters[n_shutters] = (Shutter){a, tx, ty, room_of(w, tx, ty), mt, false};
+            n_shutters++;
+          }
       }
+      if (!pass) shutters = calloc((size_t)n_shutters + 1, sizeof *shutters);
+    }
   }
+  for (int i = 0; i < n_shutters; i++) { unlock_tile(&areas[shutters[i].area], shutters[i].tx, shutters[i].ty); shutters[i].closed = false; }
   for (int i = 0; i < n_chests; i++) {
     if (chests[i].area < 0) continue;
     World *w = &areas[chests[i].area];
     if (game.chests_opened[i >> 3] >> (i & 7) & 1) { open_chest_tile(w, chests[i].tx, chests[i].ty); continue; }
-    // chests the originals make appear (puzzle solved, room cleared) stand there from the start
-    // until those puzzles are in, so nothing a dungeon needs is out of reach
-    int r = room_of(w, chests[i].tx, chests[i].ty);
-    if (r >= 0 && w->closed_chest_cell[r] != CELL_VOID && world_metatile(w, (float)(chests[i].tx * MT), (float)(chests[i].ty * MT)) != 0xf1)
-      world_set_tile(w, chests[i].tx, chests[i].ty, w->closed_chest_cell[r], w->closed_chest_coll[r], 0xf1);
+    // chests the originals make appear show up once their room's enemies are beaten (at once in a
+    // room without any), so nothing a dungeon needs is out of reach
+    uint8_t mt = world_metatile(w, (float)(chests[i].tx * MT), (float)(chests[i].ty * MT));
+    if (mt != 0xf1 && !chests[i].event) { chests[i].event = true; chests[i].under = mt; }
   }
   for (int i = 0; i < game.n_unlocked; i++)
     if (game.unlocked_area[i] < n) {
@@ -209,4 +225,47 @@ const char *keydoor_push(World *areas, int n, World *w, float px, float py, int 
   }
   (void)n;
   return NULL;
+}
+
+void room_events_update(World *areas, int n, World *w, float lx, float ly) {
+  (void)n;
+  int area = (int)(w - areas), r = world_room_index(w, lx, ly);
+  float rx = lx - (float)((r % (w->rooms_w ? w->rooms_w : 1)) * w->base.room_w * MT);
+  float ry = ly - (float)((r / (w->rooms_w ? w->rooms_w : 1)) * w->base.room_h * MT);
+  // well inside the screen: past the doorway he came in by
+  bool inside = r >= 0 && rx > 20 && ry > 20 && rx < (float)(w->base.room_w * MT - 20) && ry < (float)(w->base.room_h * MT - 20);
+  int alive = r >= 0 ? actors_room_enemies(r) : 0;
+  bool changed = false, opened = false;
+  for (int i = 0; i < n_shutters; i++) {
+    Shutter *s = &shutters[i];
+    if (s->area != area) continue;
+    bool close = s->room == r && inside && alive > 0;
+    if (close == s->closed) continue;
+    s->closed = close;
+    if (close) world_put(w, s->tx, s->ty, s->mt);
+    else { unlock_tile(w, s->tx, s->ty); opened = true; }
+    changed = true;
+  }
+  for (int i = 0; i < n_chests; i++) {
+    Chest *c = &chests[i];
+    if (c->area != area || !c->event || c->shown || (game.chests_opened[i >> 3] >> (i & 7) & 1)) continue;
+    int cr = room_of(w, c->tx, c->ty);
+    if (cr < 0 || actors_room_enemies(cr) > 0) continue;
+    if (w->closed_chest_cell[cr] == CELL_VOID) continue;
+    world_set_tile(w, c->tx, c->ty, w->closed_chest_cell[cr], w->closed_chest_coll[cr], 0xf1);
+    c->shown = true;
+    if (cr == r) sfx("SND_SOLVEPUZZLE");
+  }
+  if (changed) sfx(opened ? "SND_SOLVEPUZZLE" : "SND_DOORCLOSE");
+}
+
+void room_events_enter(World *areas, World *w) {
+  int area = (int)(w - areas);
+  for (int i = 0; i < n_chests; i++) {
+    Chest *c = &chests[i];
+    if (c->area != area || !c->event || !c->shown || (game.chests_opened[i >> 3] >> (i & 7) & 1)) continue;
+    // not taken: it goes back to hiding until the room is beaten again
+    world_put(w, c->tx, c->ty, c->under);
+    c->shown = false;
+  }
 }

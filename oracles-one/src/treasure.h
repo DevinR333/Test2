@@ -29,6 +29,11 @@ void chests_restore(World *areas, int n);
 // Changes a tile for good (a bombed wall, an opened door): remembered in the save.
 void tile_change_for_good(World *areas, World *w, int tx, int ty, uint8_t mt);
 
+// Shutters close behind Link in a room whose enemies are up and open when they're beaten; chests
+// that the originals make appear show up then. Called every frame; _enter when arriving in an area.
+void room_events_update(World *areas, int n, World *w, float lx, float ly);
+void room_events_enter(World *areas, World *w);
+
 // Link pressed A facing (px, py): opens a chest there. Returns the pickup text, or NULL.
 const char *chest_open_at(World *areas, int n, World *w, float px, float py);
 // Link has pushed against (px, py) for a while: unlocks a key block or key door there with a key

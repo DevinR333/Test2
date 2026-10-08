@@ -23,7 +23,7 @@ typedef struct { uint8_t game, group, room, kind, id, subid, y, x, count, random
 
 typedef struct {
   const Kind *k;
-  int kind, boss;
+  int kind, boss, room;
   float x, y, vx, vy;
   int hp, timer, hurt, anim;
   bool alive;
@@ -133,6 +133,7 @@ bool actors_spawn(int game, int id, int subid, float x, float y) {
   memset(a, 0, sizeof *a);
   a->k = k;
   a->kind = ACTOR_ENEMY;
+  a->room = -1;
   a->x = x; a->y = y;
   setup_enemy(a, k, game);
   a->alive = true;
@@ -160,6 +161,7 @@ void actors_enter(const World *areas, int n, const World *w) {
         memset(a, 0, sizeof *a);
         a->k = k;
         a->kind = pl->kind;
+        a->room = r;
         a->x = ox + pl->x;
         a->y = oy + pl->y;
         if (pl->random) {
@@ -373,6 +375,12 @@ int actors_enemy_at(float x, float y, float r) {
 }
 void actors_get_pos(int i, float *x, float *y) { *x = actors[i].x; *y = actors[i].y; }
 void actors_set_pos(int i, float x, float y) { actors[i].x = x; actors[i].y = y; }
+
+int actors_room_enemies(int room) {
+  int n = 0;
+  for (int i = 0; i < n_actors; i++) n += actors[i].alive && actors[i].kind == ACTOR_ENEMY && actors[i].room == room;
+  return n;
+}
 
 int actors_enemies_alive(void) {
   int n = 0;
