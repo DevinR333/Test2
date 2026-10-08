@@ -89,6 +89,8 @@ typedef struct {
   bool gale_open;                 // the Gale Seed's list of trees to fly to
   int gale_sel;
   bool riding;                    // on the Flute's companion
+  float side_vy;                  // side-view rooms: falling or jumping speed
+  bool side_ground;
 } App;
 
 // Shows a text box. The originals' texts already break their lines; anything longer than a line of
@@ -425,6 +427,12 @@ static void gale_draw(App *a, int w, int h) {
   }
 }
 
+// A side-view room (the sidescrolling collision mode: 5 in Seasons, 3 in Ages).
+static bool side_view(const World *w, float x, float y) {
+  int r = world_room_index(w, x, y);
+  return r >= 0 && w->coll_mode[r] == (w->id == WORLD_HOLODRUM ? 5 : 3);
+}
+
 // Which of the originals' animations Link plays this frame.
 static void link_pose(App *a) {
   Link *l = &a->link;
@@ -498,7 +506,28 @@ static void update(App *a) {
   int dy = !!(in->held & BTN_DOWN) - !!(in->held & BTN_UP);
   if (items.sword_frames || busy) dx = dy = 0;
   if (a->hurt_frames > 30) dx = dy = 0;      // knocked back
+  bool side = side_view(a->world, a->link.x, a->link.y);
+  terrain_sideview = side;
+  bool ladder = false;
+  if (side) {
+    // the originals' side-view rooms: gravity, ladders to climb, and Roc's Feather to jump
+    ladder = (tile_props_at(a->world, a->link.x, a->link.y + 2)->type & 0x10) || (dy > 0 && (tile_props_at(a->world, a->link.x, a->link.y + 9)->type & 0x10));
+    if (items.vz > 0 && a->side_ground) a->side_vy = -3.6f;
+    items.z = items.vz = 0;
+    if (!ladder) dy = 0;
+  }
   if (!busy) link_update(&a->link, a->world, dx, dy);
+  if (side && !busy) {
+    if (!dx && !ladder && (a->link.dir == DIR_UP || a->link.dir == DIR_DOWN)) a->link.dir = DIR_RIGHT;
+    if (ladder) { a->side_vy = 0; a->side_ground = true; }
+    else {
+      a->side_vy = SDL_min(a->side_vy + 0.22f, 3.5f);
+      float before = a->link.y;
+      link_push(&a->link, a->world, 0, a->side_vy);
+      if (a->link.y == before) { a->side_ground = a->side_vy > 0; a->side_vy = 0; }
+      else a->side_ground = false;
+    }
+  }
   if (items.sword_frames) terrain_sword(a->worlds, a->n_worlds, a->world, sword_box(&a->link), game.item_level[ITEM_SWORD]);
   TerrainEvents te = terrain_update(a->worlds, a->n_worlds, a->world, &a->link, dx, dy);
   if (te.damage) {

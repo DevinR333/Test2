@@ -60,6 +60,7 @@ static const int front_x[4] = {0, 9, 0, -9}, front_y[4] = {-6, 4, 14, 4};
 
 bool terrain_drowning(void) { return T.fall_t > 0 && T.fall_water; }
 float terrain_airborne;
+bool terrain_sideview;
 int terrain_companion = -1;
 
 bool terrain_busy(void) { return T.jump_t > 0 || T.fall_t > 0 || T.magnet_t > 0; }
@@ -427,6 +428,11 @@ TerrainEvents terrain_update(World *areas, int n, World *w, Link *l, int dx, int
   bool hops = terrain_companion == 0 || terrain_companion == 2;     // Ricky jumps them, Moosh flies
   if (terrain_airborne > 0) {
     // nothing below matters until he lands
+  } else if (terrain_sideview) {
+    // side-view rooms: ladders and water are this game's other tile types; a pit drops him back
+    if (under->type & 1) { T.fall_t = 30; T.fall_damage = 2; T.fall_water = false; sfx("SND_LINK_FALL"); }
+    else if (on_safe_ground(w, l)) { T.safe_x = l->x; T.safe_y = l->y; }
+    return ev;
   } else if ((under->type == TT_HOLE && !hops) || under->type == TT_LAVA) {
     T.fall_t = 30;
     T.fall_damage = under->type == TT_LAVA ? 4 : 2;

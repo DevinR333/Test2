@@ -32,6 +32,7 @@ extern void (*terrain_icon)(SDL_Renderer *ren, Item item, float x, float y, floa
 // he rides (-1 none, 0 Ricky, 1 Dimitri, 2 Moosh).
 extern float terrain_airborne;
 extern int terrain_companion;
+extern bool terrain_sideview;      // a side-view room: only holes matter underfoot
 // The Cane of Somaria's block: whether it stands at this pixel (Link can't walk through it).
 bool terrain_block(float x, float y);
 // The Magnetic Gloves: pulls Link to (north) or pushes him off (south) a magnet in front of him.

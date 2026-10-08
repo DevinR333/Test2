@@ -45,12 +45,14 @@ or emulates the hardware.
 
 | In the game | Still simplified |
 | --- | --- |
-| Every place in both games (423 areas: Holodrum in its seasons, Subrosia, Labrynna present and past, every house, cave and dungeon floor), all 1,098 warps, all 241 chests | Side-view (2D) rooms play top-down |
-| Every character and enemy the originals place, with their own sprites (4,315 objects); characters say their original lines | Enemies share one behaviour (wander, chase if a boss) instead of each one's own attack pattern |
-| Sword, shield, bombs, bombchus, boomerang, seed satchel / slingshot / seed shooter with all five seeds, Roc's Feather and Cape, Rod of Seasons, Harp of Ages (present and past), Switch Hook, shovel, bracelet and gloves, Fool's Ore, flippers / mermaid suit | Cane of Somaria, Magnetic Gloves' pull and the Flute's companions only show their name |
-| Cutting grass and bushes, lifting and throwing, ledges, holes, water and swimming, lava, conveyors and currents, push blocks, bombable walls, digging, burning, signs | Shutters stand open and puzzle chests are placed from the start (the originals' room events aren't scripted) |
-| Bosses in every dungeon give a heart container and their essence; Onox and Veran end their games; Twinrova and Ganon wait in the Room of Rites until both are beaten | Cutscenes and story events |
-| The 20 linked secrets: the linked NPCs tell them, their takers reward them, no typing | Link uses his walking frames for every pose |
+| Every place in both games (423 areas: Holodrum in its seasons, Subrosia, Labrynna present and past, every house, cave and dungeon floor), all 1,098 warps, all 241 chests | Cutscenes and story events (who says what changes as the story moves on) |
+| Every character and enemy the originals place, with their own sprites (4,315 objects); characters say their original lines | Enemies act by family (shooters, fliers, hoppers, chargers, burrowers) rather than each one's exact code |
+| Every item of both games, in both worlds: sword, shield, bombs, bombchus, boomerang, satchel / slingshot / shooter with all five seeds (Gale Seeds fly to the originals' trees), Roc's Feather and Cape, Rod of Seasons, Harp of Ages (present and past), Switch Hook, Cane of Somaria, Magnetic Gloves, shovel, bracelet and gloves, Fool's Ore, flippers / mermaid suit, the Flute's Ricky, Dimitri and Moosh | Companions are abilities (Ricky and Moosh cross holes, Dimitri swims) without their own sprites |
+| Cutting, lifting and throwing, ledges, holes, water, lava, conveyors, push blocks, bombable walls, digging, burning, signs; side-view rooms with gravity, ladders and jumps | |
+| Shutters close behind Link until a room's enemies are beaten; chests the originals make appear show up then | |
+| Bosses give a heart container and their essence; Onox and Veran end their games; Twinrova and Ganon wait in the Room of Rites until both are beaten | |
+| The 20 linked secrets: the linked NPCs tell them, their takers reward them, no typing | |
+| Link's own animations from the originals (walking, sword, lifting, swimming, jumping, falling, drowning) | |
 | Both games' music in every room and their sound effects, from their own sound data | |
 | Shared hearts, rupees, items, rings, seeds and bombs; extra hearts become rupees | |
 
