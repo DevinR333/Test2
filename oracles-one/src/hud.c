@@ -164,6 +164,7 @@ void menu_update(Menu *m, Uint32 pressed) {
     uint8_t *other = (pressed & BTN_A) ? &game.equip_b : &game.equip_a;
     // pressing it again on a seed item picks the next kind of seed, like the originals' seed menu
     if (*mine == item && (item == ITEM_SEED_SATCHEL || item == ITEM_SLINGSHOT || item == ITEM_SEED_SHOOTER)) items_next_seed();
+    if (*mine == item && item == ITEM_STRANGE_FLUTE) items_next_companion();
     if (*other == item) *other = *mine;   // swap, like the originals
     *mine = (uint8_t)item;
     sfx("SND_SELECTITEM");

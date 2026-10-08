@@ -86,6 +86,9 @@ typedef struct {
   char message[800];              // a text box (chest contents, locked doors); play waits for A or B
   int message_frames;
   int message_line;               // the first line shown (long texts go on a box at a time)
+  bool gale_open;                 // the Gale Seed's list of trees to fly to
+  int gale_sel;
+  bool riding;                    // on the Flute's companion
 } App;
 
 // Shows a text box. The originals' texts already break their lines; anything longer than a line of
@@ -327,6 +330,8 @@ static const char *talk(App *a) {
   return t.text[0] ? t.text : NULL;
 }
 
+static int gale_trees(const App *a, int *out);
+
 // What items ask for that moves Link elsewhere: the Harp of Ages between Labrynna's present and
 // past (where he stands, if there's ground there), Gale Seeds back to the main town.
 static void item_request(App *a) {
@@ -347,8 +352,75 @@ static void item_request(App *a) {
     }
     start_fade(a, (WarpTarget){to, a->link.x, a->link.y});
   } else if (r == REQ_GALE) {
-    WorldId id = a->world->id;
-    start_fade(a, (WarpTarget){a->overworld[id], door_x(id), door_y(id) + 24});
+    // the originals' list of seed trees of this game (treeWarps.s), to pick where to fly
+    if (gale_trees(a, NULL) > 0) { a->gale_open = true; a->gale_sel = 0; }
+    else start_fade(a, (WarpTarget){a->overworld[a->world->id], door_x(a->world->id), door_y(a->world->id) + 24});
+  } else if (r == REQ_MAGNET) {
+    terrain_magnet(a->world, &a->link, items.magnet_polarity);
+  } else if (r == REQ_FLUTE) {
+    static const char *calls[3] = {"SND_FLUTE_RICKY", "SND_FLUTE_DIMITRI", "SND_FLUTE_MOOSH"};
+    a->riding = !a->riding;
+    sfx(calls[game.companion % 3]);
+    snprintf(items.toast, sizeof items.toast, "%s %s", a->riding ? "RIDING" : "BYE,", companion_name(game.companion));
+    items.toast_frames = 90;
+  }
+}
+
+// ---- Gale Seeds: trees.bin lists each game's seed trees --------------------------------------
+typedef struct { uint8_t game, group, room, yx; } Tree;
+static Tree trees[32];
+static int n_trees;
+
+static void trees_load(void) {
+  size_t size;
+  Uint8 *d = asset_load("trees.bin", &size);
+  if (!d) return;
+  n_trees = SDL_min((int)(d[0] | d[1] << 8), 32);
+  for (int i = 0; i < n_trees && (size_t)(2 + i * 4 + 4) <= size; i++) memcpy(&trees[i], d + 2 + i * 4, 4);
+  SDL_free(d);
+}
+
+// The trees Link can fly to from here (this game's); fills out[] with their indices.
+static int gale_trees(const App *a, int *out) {
+  int n = 0;
+  for (int i = 0; i < n_trees; i++)
+    if (trees[i].game == a->world->id) { if (out) out[n] = i; n++; }
+  return n;
+}
+
+static void gale_update(App *a, Uint32 pressed) {
+  int list[32], n = gale_trees(a, list);
+  if (!n || (pressed & BTN_B)) { a->gale_open = false; return; }
+  if (pressed & (BTN_DOWN | BTN_RIGHT)) { a->gale_sel = (a->gale_sel + 1) % n; sfx("SND_MENU_MOVE"); }
+  if (pressed & (BTN_UP | BTN_LEFT)) { a->gale_sel = (a->gale_sel + n - 1) % n; sfx("SND_MENU_MOVE"); }
+  if (pressed & BTN_A) {
+    const Tree *t = &trees[list[a->gale_sel]];
+    int area;
+    float ox, oy;
+    if (world_find_room(a->worlds, a->n_worlds, t->game, t->group, t->room, &area, &ox, &oy)) {
+      sfx("SND_GALE_SEED");
+      start_fade(a, (WarpTarget){area, ox + (float)((t->yx & 15) * MT + 8), oy + (float)((t->yx >> 4) * MT + 8)});
+    }
+    a->gale_open = false;
+  }
+}
+
+static void gale_draw(App *a, int w, int h) {
+  int list[32], n = gale_trees(a, list);
+  float px = SDL_floorf(SDL_max(1.0f, hud_scale(w, h) * 0.5f));
+  float bw = 20 * 8 * px, bh = (float)(n + 1) * 16 * px + 8 * px, bx = ((float)w - bw) / 2, by = ((float)h - bh) / 2;
+  fill_rect(a->ren, bx, by, bw, bh, 8, 8, 24, 235);
+  draw_game_text(a->ren, &a->art, "Fly to which tree?", bx + 4 * px, by + 4 * px, px);
+  for (int i = 0; i < n; i++) {
+    const Tree *t = &trees[list[i]];
+    int area;
+    float ox, oy;
+    const char *name = "";
+    if (world_find_room(a->worlds, a->n_worlds, t->game, t->group, t->room, &area, &ox, &oy))
+      name = world_area_name(&a->worlds[area], ox + 8, oy + 8);
+    char line[40];
+    snprintf(line, sizeof line, "%c%s%s", i == a->gale_sel ? '>' : ' ', name, t->group ? " (past)" : "");
+    draw_game_text(a->ren, &a->art, line, bx + 4 * px, by + 4 * px + (float)(i + 1) * 16 * px, px);
   }
 }
 
@@ -374,6 +446,7 @@ static void update(App *a) {
     menu_update(&a->menu, in->pressed);
     return;
   }
+  if (a->gale_open) { gale_update(a, in->pressed); return; }
   if (a->message[0]) {
     // the text box stays at least a moment, then A or B closes it
     if (++a->message_frames > 15 && (in->pressed & (BTN_A | BTN_B))) {
@@ -402,6 +475,9 @@ static void update(App *a) {
     if (!terrain_use(item, a->worlds, a->n_worlds, a->world, &a->link) && game.item_level[item]) items_use(item, &a->link, a->world);
   }
   items_update(a->worlds, a->world, &a->link);
+  if (a->riding && game.companion == 0) link_speed *= 1.4f;      // Ricky bounds along
+  terrain_airborne = items.z;
+  terrain_companion = a->riding ? game.companion : -1;
   item_request(a);
   int dx = !!(in->held & BTN_RIGHT) - !!(in->held & BTN_LEFT);
   int dy = !!(in->held & BTN_DOWN) - !!(in->held & BTN_UP);
@@ -484,6 +560,7 @@ static void render(App *a) {
     float bp = px * 1.5f;
     draw_text_alpha(a->ren, a->banner, (float)(w - text_width(a->banner, bp)) / 2, (float)h * 0.22f, bp, 255, 240, 200, (Uint8)(alpha * 255));
   }
+  if (a->gale_open) gale_draw(a, w, h);
   input_draw_touch(a->ren, &a->in, w, h);
   if (a->message[0]) {
     // a text box along the bottom in the games' font, like theirs
@@ -508,6 +585,7 @@ static void render(App *a) {
   }
 }
 
+static bool block_at(float x, float y) { return actors_block(x, y) || terrain_block(x, y); }
 static HudArt *g_art;
 static void draw_icon(SDL_Renderer *ren, Item item, float x, float y, float px) { draw_item_icon(ren, g_art, item, x, y, px); }
 static void draw_pickup(SDL_Renderer *ren, int what, float cx, float cy, float px) {
@@ -593,7 +671,8 @@ int main(int argc, char **argv) {
     return 1;
   }
   for (int i = 0; i < WORLD_COUNT; i++) build_house(&a.worlds[a.overworld[i]]);
-  link_blocker = actors_block;
+  link_blocker = block_at;
+  trees_load();
   g_art = &a.art;
   terrain_icon = draw_icon;
   items_icon = draw_icon_rotated;
@@ -604,6 +683,7 @@ int main(int argc, char **argv) {
   if (shot || !game_load()) game_new();
   if (all_items) items_give_all();
   if (equip_a >= 0) game.equip_a = (uint8_t)equip_a;
+  if (getenv("ORACLES_SEED")) game.seed_selected = (uint8_t)atoi(getenv("ORACLES_SEED"));   // testing
   if (equip_b >= 0) game.equip_b = (uint8_t)equip_b;
   chests_restore(a.worlds, a.n_worlds);
   for (int g = 0; keys && g < WORLD_COUNT; g++) for (int d = 0; d < 16; d++) game.small_keys[g][d] = (uint8_t)keys;

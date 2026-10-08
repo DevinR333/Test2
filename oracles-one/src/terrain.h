@@ -27,6 +27,15 @@ int terrain_falling(void);
 // Draws an item's icon (set by main: the bomb Link puts down).
 extern void (*terrain_icon)(SDL_Renderer *ren, Item item, float x, float y, float px);
 
+// Set by the game loop each frame: Link's height (jumping clears holes and water) and the companion
+// he rides (-1 none, 0 Ricky, 1 Dimitri, 2 Moosh).
+extern float terrain_airborne;
+extern int terrain_companion;
+// The Cane of Somaria's block: whether it stands at this pixel (Link can't walk through it).
+bool terrain_block(float x, float y);
+// The Magnetic Gloves: pulls Link to (north) or pushes him off (south) a magnet in front of him.
+void terrain_magnet(World *w, Link *l, int polarity);
+
 // The sword's swing cuts what it touches.
 void terrain_sword(World *areas, int n, World *w, SDL_FRect box, int level);
 // Items that act on tiles; returns true when it did something (so the item's own effect is skipped).

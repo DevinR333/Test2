@@ -990,6 +990,19 @@ def main():
             tb = text.encode("ascii", "replace")[:159]
             f.write(struct.pack("<BBBBBB", gi, g, room, yx, t, param) + tb.ljust(160, b"\0"))
     write_tiles(root, rooms, season_ts, os.path.join(out, "tiles.bin"))
+    # Gale Seed trees (treeWarps.s): u16 count, then (game, group, room, YX) each
+    trees = []
+    for gi, game in enumerate(GAMES):
+        group = 0
+        for line in lines_of(os.path.join(root, f"data/{game}/treeWarps.s")):
+            if line.startswith("pastTreeWarps"):
+                group = 1
+            if line.startswith(".db"):
+                v = [num(t) for t in line[3:].split()]
+                if v[0]:
+                    trees.append((gi, group, v[0], v[1]))
+    with open(os.path.join(out, "trees.bin"), "wb") as f:
+        f.write(struct.pack("<H", len(trees)) + b"".join(bytes(t) for t in trees))
     rows = (len(rooms.atlas) + ATLAS_COLS - 1) // ATLAS_COLS
     sheet = Image.new("RGBA", (ATLAS_COLS * 16, rows * 16))
     for i, img in enumerate(rooms.atlas):

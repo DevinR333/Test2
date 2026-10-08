@@ -39,6 +39,13 @@ static struct {
   // bombs and their blasts
   struct { bool live; float x, y; int fuse, blast; } bombs[MAX_BOMBS];
   Bit bits[MAX_BITS];
+  // the Cane of Somaria's block (tile position) and its slide
+  bool cane;
+  int cane_tx, cane_ty, cane_slide;
+  float cane_dx, cane_dy;
+  // a magnet pulling or pushing Link
+  int magnet_t;
+  float magnet_vx, magnet_vy;
   Uint32 rng;
 } T = {.rng = 99};
 
@@ -50,7 +57,44 @@ static const int dir_x[4] = {0, 1, 0, -1}, dir_y[4] = {-1, 0, 1, 0};
 // the point in front of Link that his hands, sword or shoulder touch (as for chests)
 static const int front_x[4] = {0, 9, 0, -9}, front_y[4] = {-6, 4, 14, 4};
 
-bool terrain_busy(void) { return T.jump_t > 0 || T.fall_t > 0; }
+float terrain_airborne;
+int terrain_companion = -1;
+
+bool terrain_busy(void) { return T.jump_t > 0 || T.fall_t > 0 || T.magnet_t > 0; }
+
+bool terrain_block(float x, float y) {
+  if (!T.cane) return false;
+  float bx = (float)(T.cane_tx * MT) + (T.cane_slide ? T.cane_dx * (float)(16 - T.cane_slide) : 0);
+  float by = (float)(T.cane_ty * MT) + (T.cane_slide ? T.cane_dy * (float)(16 - T.cane_slide) : 0);
+  return x >= bx && x < bx + MT && y >= by && y < by + MT;
+}
+
+// The magnet tile of a room (magnetTiles.s: Seasons only, by group).
+static int magnet_tile(const World *w) {
+  if (w->id != WORLD_HOLODRUM) return -1;
+  static const int by_group[8] = {-1, 0xe3, -1, 0x3f, 0x3f, 0x3f, 0x3f, 0x3f};
+  return by_group[w->group & 7];
+}
+
+void terrain_magnet(World *w, Link *l, int polarity) {
+  int m = magnet_tile(w);
+  if (m < 0) return;
+  for (int d = 1; d <= 6; d++) {
+    int tx = (int)(l->x + (float)(dir_x[l->dir] * d * MT)) / MT, ty = (int)(l->y + 4 + (float)(dir_y[l->dir] * d * MT)) / MT;
+    int room;
+    if (world_mt_at(w, tx, ty, &room) != m) continue;
+    float dist = (float)(d * MT) - 12;
+    if (polarity == 0) {                     // north: across to the magnet
+      T.magnet_t = (int)(dist / 2.0f);
+      T.magnet_vx = (float)dir_x[l->dir] * 2.0f; T.magnet_vy = (float)dir_y[l->dir] * 2.0f;
+    } else if (d <= 2) {                     // south: thrown back off it
+      T.magnet_t = 16;
+      T.magnet_vx = -(float)dir_x[l->dir] * 2.0f; T.magnet_vy = -(float)dir_y[l->dir] * 2.0f;
+    }
+    sfx("SND_MAGNET_GLOVES");
+    return;
+  }
+}
 bool terrain_swimming(void) { return T.swimming; }
 bool terrain_carrying(void) { return T.carrying; }
 float terrain_z(void) {
@@ -75,6 +119,8 @@ void terrain_enter(World *areas, int n, World *w, const Link *l) {
   T.safe_x = l->x;
   T.safe_y = l->y;
   T.swimming = false;
+  T.cane = false;
+  T.magnet_t = 0;
 }
 
 static void debris(uint16_t cell, float x, float y) {
@@ -195,6 +241,18 @@ bool terrain_use(Item item, World *areas, int n, World *w, Link *l) {
         game.bombchus--;
         break;
       }
+    return true;
+  case ITEM_CANE_OF_SOMARIA:
+    if (T.cane) {                            // the old block breaks apart
+      debris(CELL_VOID, (float)(T.cane_tx * MT + 8), (float)(T.cane_ty * MT + 8));
+      actors_hit_area((float)(T.cane_tx * MT + 8), (float)(T.cane_ty * MT + 8), 16, 2);
+      T.cane = false;
+    }
+    if (world_collision(w, tx * MT + 4, ty * MT + 4) == 0 && world_collision(w, tx * MT + 12, ty * MT + 12) == 0) {
+      T.cane = true;
+      T.cane_tx = tx; T.cane_ty = ty; T.cane_slide = 0;
+      sfx("SND_MAGIC_POWDER");
+    }
     return true;
   case ITEM_SHOVEL: {
     const BreakMode *m = breaks(w, tx, ty, BREAK_SHOVEL);
@@ -345,16 +403,35 @@ TerrainEvents terrain_update(World *areas, int n, World *w, Link *l, int dx, int
     }
   }
   if (l->pushing == 20) push_block(w, l);
-  // holes, water, lava under Link's feet
+  // the cane's block slides when pushed, like the originals' blocks
+  if (T.cane && T.cane_slide && --T.cane_slide == 0) { T.cane_tx += (int)T.cane_dx; T.cane_ty += (int)T.cane_dy; }
+  if (T.cane && !T.cane_slide && l->pushing == 12) {
+    int fx = (int)(l->x + front_x[l->dir]) / MT, fy = (int)(l->y + front_y[l->dir]) / MT;
+    int nx = fx + dir_x[l->dir], ny = fy + dir_y[l->dir];
+    if (fx == T.cane_tx && fy == T.cane_ty && world_collision(w, nx * MT + 8, ny * MT + 8) == 0) {
+      T.cane_slide = 16;
+      T.cane_dx = (float)dir_x[l->dir]; T.cane_dy = (float)dir_y[l->dir];
+      sfx("SND_MOVEBLOCK");
+    }
+  }
+  if (T.magnet_t) {
+    T.magnet_t--;
+    link_push(l, w, T.magnet_vx, T.magnet_vy);
+    return ev;
+  }
+  // holes, water, lava under Link's feet (not while he's in the air)
   const TileProps *under = tile_props_at(w, l->x, l->y + 3);
   T.swimming = false;
-  if (under->type == TT_HOLE || under->type == TT_LAVA) {
+  bool hops = terrain_companion == 0 || terrain_companion == 2;     // Ricky jumps them, Moosh flies
+  if (terrain_airborne > 0) {
+    // nothing below matters until he lands
+  } else if ((under->type == TT_HOLE && !hops) || under->type == TT_LAVA) {
     T.fall_t = 30;
     T.fall_damage = under->type == TT_LAVA ? 4 : 2;
     T.carrying = false;
     sfx("SND_LINK_FALL");
   } else if (under->type == TT_WATER || under->type == TT_SEAWATER) {
-    if (game.item_level[ITEM_MERMAID_SUIT]) T.swimming = true;     // flippers or the mermaid suit
+    if (game.item_level[ITEM_MERMAID_SUIT] || terrain_companion == 1) T.swimming = true;   // flippers, mermaid suit, Dimitri
     else { T.fall_t = 30; T.fall_damage = 2; T.carrying = false; sfx("SND_SPLASH"); }
   } else if (on_safe_ground(w, l)) {
     T.safe_x = l->x; T.safe_y = l->y;
@@ -377,6 +454,17 @@ static void draw_cell(SDL_Renderer *ren, const Image *atlas, const View *v, uint
 void terrain_draw(SDL_Renderer *ren, const Image *atlas, const View *v, const Link *l, bool above) {
   int cols = atlas->w / MT;
   if (!above) {
+    if (T.cane) {
+      // the Cane's block: a golden block with a dark rim
+      float bx = (float)(T.cane_tx * MT) + (T.cane_slide ? T.cane_dx * (float)(16 - T.cane_slide) : 0);
+      float by = (float)(T.cane_ty * MT) + (T.cane_slide ? T.cane_dy * (float)(16 - T.cane_slide) : 0);
+      float x0 = view_sx(v, bx + 1), y0 = view_sy(v, by + 1), x1 = view_sx(v, bx + 15), y1 = view_sy(v, by + 15);
+      fill_rect(ren, x0, y0, x1 - x0, y1 - y0, 90, 50, 20, 255);
+      x0 = view_sx(v, bx + 2); y0 = view_sy(v, by + 2); x1 = view_sx(v, bx + 14); y1 = view_sy(v, by + 13);
+      fill_rect(ren, x0, y0, x1 - x0, y1 - y0, 240, 190, 60, 255);
+      x0 = view_sx(v, bx + 6); y0 = view_sy(v, by + 5); x1 = view_sx(v, bx + 10); y1 = view_sy(v, by + 10);
+      fill_rect(ren, x0, y0, x1 - x0, y1 - y0, 200, 80, 40, 255);
+    }
     if (T.push_t) {
       float t = 1.0f - (float)T.push_t / 16.0f;
       draw_cell(ren, atlas, v, T.push_cell, T.px0 + T.pdx * 16 * t, T.py0 + T.pdy * 16 * t);

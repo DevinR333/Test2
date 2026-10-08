@@ -25,6 +25,16 @@ const char *seed_name(int seed) {
   return seed >= 0 && seed < SEED_KINDS ? names[seed] : "";
 }
 
+const char *companion_name(int c) {
+  static const char *names[3] = {"RICKY", "DIMITRI", "MOOSH"};
+  return c >= 0 && c < 3 ? names[c] : "";
+}
+
+void items_next_companion(void) {
+  game.companion = (uint8_t)((game.companion + 1) % 3);
+  toast(companion_name(game.companion));
+}
+
 void items_next_seed(void) {
   for (int i = 1; i <= SEED_KINDS; i++) {
     int s = (game.seed_selected + i) % SEED_KINDS;
@@ -139,6 +149,7 @@ void items_use(Item item, Link *link, World *world) {
   case ITEM_MAGNETIC_GLOVES:
     items.magnet_polarity ^= 1;
     toast(items.magnet_polarity ? "S POLARITY" : "N POLARITY");
+    items.request = REQ_MAGNET;
     break;
   case ITEM_HARP_OF_AGES: items.request = REQ_TIME_TRAVEL; break;
   case ITEM_BOOMERANG:
@@ -155,7 +166,7 @@ void items_use(Item item, Link *link, World *world) {
     break;
   case ITEM_SHIELD:
     break;                                  // held up while the button is down; nothing to toast
-  case ITEM_STRANGE_FLUTE: toast("NO COMPANION ANSWERS"); break;
+  case ITEM_STRANGE_FLUTE: items.request = REQ_FLUTE; break;
   default: {
     char s[48];
     snprintf(s, sizeof s, "%s", item_info[item].name);

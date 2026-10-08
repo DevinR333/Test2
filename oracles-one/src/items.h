@@ -9,7 +9,7 @@
 enum { SEED_EMBER, SEED_SCENT, SEED_PEGASUS, SEED_GALE, SEED_MYSTERY, SEED_KINDS };
 
 // What an item asks of the game loop (things items.c can't do itself).
-typedef enum { REQ_NONE, REQ_TIME_TRAVEL, REQ_GALE } ItemRequest;
+typedef enum { REQ_NONE, REQ_TIME_TRAVEL, REQ_GALE, REQ_MAGNET, REQ_FLUTE } ItemRequest;
 
 typedef struct {
   float x, y, vx, vy;
@@ -45,4 +45,7 @@ void items_give_all(void);
 extern void (*items_icon)(SDL_Renderer *ren, Item item, float cx, float cy, float px, double angle);
 // Seed satchel and shooters: which seed they use (A/B on the item in the menu cycles it).
 void items_next_seed(void);
+// The Flute: pressing it again in the menu picks the next companion.
+void items_next_companion(void);
+const char *companion_name(int c);
 const char *seed_name(int seed);
