@@ -257,6 +257,18 @@ int actors_hit_area(float x, float y, float r, int damage) {
   return hits;
 }
 
+int actors_enemy_at(float x, float y, float r) {
+  for (int i = 0; i < n_actors; i++) {
+    const Actor *a = &actors[i];
+    if (!a->alive || a->kind != ACTOR_ENEMY) continue;
+    float dx = a->x - x, dy = a->y - y;
+    if (dx * dx + dy * dy <= r * r) return i;
+  }
+  return -1;
+}
+void actors_get_pos(int i, float *x, float *y) { *x = actors[i].x; *y = actors[i].y; }
+void actors_set_pos(int i, float x, float y) { actors[i].x = x; actors[i].y = y; }
+
 int actors_enemies_alive(void) {
   int n = 0;
   for (int i = 0; i < n_actors; i++) n += actors[i].alive && actors[i].kind == ACTOR_ENEMY;

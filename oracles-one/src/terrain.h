@@ -31,6 +31,8 @@ extern void (*terrain_icon)(SDL_Renderer *ren, Item item, float x, float y, floa
 void terrain_sword(World *areas, int n, World *w, SDL_FRect box, int level);
 // Items that act on tiles; returns true when it did something (so the item's own effect is skipped).
 bool terrain_use(Item item, World *areas, int n, World *w, Link *l);
+// Something flying or dropped hits the tile at (x, y): breaks it if `source` breaks it there.
+bool terrain_hit_tile(World *areas, World *w, float x, float y, int source);
 // A pressed in front of a sign: its text, or NULL.
 const char *terrain_read(World *w, const Link *l);
 // Per frame, after Link moved: ledges, hazards, pushing, things in flight, bombs.

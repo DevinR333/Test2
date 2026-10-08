@@ -12,6 +12,8 @@ typedef struct {
   int pushing;         // frames spent walking into a wall
 } Link;
 
+// Walking speed multiplier (Pegasus Seeds).
+extern float link_speed;
 // Something besides walls that Link can't walk through (characters); NULL: nothing.
 extern bool (*link_blocker)(float x, float y);
 

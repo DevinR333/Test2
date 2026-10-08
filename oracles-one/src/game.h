@@ -49,6 +49,7 @@ typedef struct {
   // ammunition and collectables, one count whichever world they were found in
   uint8_t seeds[5];               // ember, scent, pegasus, gale, mystery
   uint8_t bombs, bomb_max, bombchus;
+  uint8_t seed_selected;          // the seed the satchel and shooters use (SEED_*)
   bool biggoron_sword;
   uint8_t gasha_seeds;
   uint16_t ore_chunks;

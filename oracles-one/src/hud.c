@@ -1,5 +1,6 @@
 #include "hud.h"
 #include "input.h"
+#include "items.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -51,6 +52,21 @@ void draw_item_icon(SDL_Renderer *ren, const HudArt *art, Item item, float x, fl
   } else {
     icon_column(ren, art, sheet, icon, pal, x + 4 * px, y, px);
   }
+}
+
+void draw_item_icon_rotated(SDL_Renderer *ren, const HudArt *art, Item item, float cx, float cy, float px, double angle) {
+  if (item <= ITEM_NONE || item >= ITEM_COUNT) return;
+  const ItemInfo *it = &item_info[item];
+  int sheet = it->page == PAGE_AGES ? 1 : 0, icon, pal;
+  icon_for(item, game.item_level[item], &icon, &pal);
+  if (icon < 0x80) return;
+  int col = icon - 0x80, sh = col / 16;
+  if (sh > 2) return;
+  int row = (sheet * 8 + (pal & 7)) * 3 + sh;
+  float w = it->icon2 ? 16 : 8;
+  SDL_FRect src = {(float)((col % 16) * 8), (float)(row * 16), w, 16};
+  SDL_FRect dst = {cx - w / 2 * px, cy - 8 * px, w * px, 16 * px};
+  SDL_RenderTextureRotated(ren, art->items.tex, &src, &dst, angle, NULL, SDL_FLIP_NONE);
 }
 
 static void draw_hearts(SDL_Renderer *ren, const HudArt *art, float x, float y, float px) {
@@ -144,6 +160,8 @@ void menu_update(Menu *m, Uint32 pressed) {
   if (item && (pressed & (BTN_A | BTN_B))) {
     uint8_t *mine = (pressed & BTN_A) ? &game.equip_a : &game.equip_b;
     uint8_t *other = (pressed & BTN_A) ? &game.equip_b : &game.equip_a;
+    // pressing it again on a seed item picks the next kind of seed, like the originals' seed menu
+    if (*mine == item && (item == ITEM_SEED_SATCHEL || item == ITEM_SLINGSHOT || item == ITEM_SEED_SHOOTER)) items_next_seed();
     if (*other == item) *other = *mine;   // swap, like the originals
     *mine = (uint8_t)item;
   }

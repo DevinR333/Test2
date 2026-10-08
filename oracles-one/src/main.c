@@ -259,6 +259,31 @@ static const char *talk(App *a) {
   return t.text[0] ? t.text : NULL;
 }
 
+// What items ask for that moves Link elsewhere: the Harp of Ages between Labrynna's present and
+// past (where he stands, if there's ground there), Gale Seeds back to the main town.
+static void item_request(App *a) {
+  ItemRequest r = items.request;
+  items.request = REQ_NONE;
+  if (r == REQ_TIME_TRAVEL) {
+    const World *w = a->world;
+    if (w->kind != AREA_OVERWORLD || w->id != WORLD_LABRYNNA) {
+      snprintf(items.toast, sizeof items.toast, "THE TUNE ECHOES");
+      items.toast_frames = 90;
+      return;
+    }
+    int to = world_overworld(a->worlds, a->n_worlds, WORLD_LABRYNNA, w->group ? 0 : 1);
+    if (to < 0 || link_blocked_at(&a->worlds[to], a->link.x, a->link.y)) {
+      snprintf(items.toast, sizeof items.toast, "THE TUNE FADES");
+      items.toast_frames = 90;
+      return;
+    }
+    start_fade(a, (WarpTarget){to, a->link.x, a->link.y});
+  } else if (r == REQ_GALE) {
+    WorldId id = a->world->id;
+    start_fade(a, (WarpTarget){a->overworld[id], door_x(id), door_y(id) + 24});
+  }
+}
+
 static void update(App *a) {
   Input *in = &a->in;
   if (a->fade) {
@@ -307,7 +332,8 @@ static void update(App *a) {
     Item item = (Item)(b ? game.equip_b : game.equip_a);
     if (!terrain_use(item, a->worlds, a->n_worlds, a->world, &a->link) && game.item_level[item]) items_use(item, &a->link, a->world);
   }
-  items_update();
+  items_update(a->worlds, a->world, &a->link);
+  item_request(a);
   int dx = !!(in->held & BTN_RIGHT) - !!(in->held & BTN_LEFT);
   int dy = !!(in->held & BTN_DOWN) - !!(in->held & BTN_UP);
   if (items.sword_frames || busy) dx = dy = 0;
@@ -410,6 +436,9 @@ static void render(App *a) {
 
 static HudArt *g_art;
 static void draw_icon(SDL_Renderer *ren, Item item, float x, float y, float px) { draw_item_icon(ren, g_art, item, x, y, px); }
+static void draw_icon_rotated(SDL_Renderer *ren, Item item, float cx, float cy, float px, double angle) {
+  draw_item_icon_rotated(ren, g_art, item, cx, cy, px, angle);
+}
 
 // ---- headless checks: --shot FILE renders after --frames N with buttons --hold held --------
 static Uint32 parse_buttons(const char *s) {
@@ -480,6 +509,7 @@ int main(int argc, char **argv) {
   link_blocker = actors_block;
   g_art = &a.art;
   terrain_icon = draw_icon;
+  items_icon = draw_icon_rotated;
   if (!tiles_load(a.worlds, a.n_worlds)) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
   if (!chests_load(a.worlds, a.n_worlds)) { SDL_ShowSimpleMessageBox(SDL_MESSAGEBOX_ERROR, "Oracles One", "Game data is out of date. Run tools/build_assets.sh again.", a.win); return 1; }
 

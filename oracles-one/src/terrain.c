@@ -178,25 +178,37 @@ bool terrain_use(Item item, World *areas, int n, World *w, Link *l) {
         break;
       }
     return true;
+  case ITEM_BOMBCHUS:
+    if (!game.bombchus) return true;
+    for (int i = 0; i < MAX_BOMBS; i++)
+      if (!T.bombs[i].live) {
+        // a bombchu runs ahead along the ground before it goes off
+        T.bombs[i].live = true;
+        T.bombs[i].x = l->x + (float)dir_x[l->dir] * 40;
+        T.bombs[i].y = l->y + 4 + (float)dir_y[l->dir] * 40;
+        T.bombs[i].fuse = 50;
+        T.bombs[i].blast = 0;
+        game.bombchus--;
+        break;
+      }
+    return true;
   case ITEM_SHOVEL: {
     const BreakMode *m = breaks(w, tx, ty, BREAK_SHOVEL);
     if (m) break_tile(areas, w, tx, ty, m);
     return true;
   }
-  case ITEM_SEED_SATCHEL:
-  case ITEM_SLINGSHOT:
-  case ITEM_SEED_SHOOTER: {
-    // ember seeds burn trees and bushes in front (satchel drops them, the shooters fire them)
-    if (!game.seeds[0]) return false;
-    const BreakMode *m = breaks(w, tx, ty, BREAK_EMBER);
-    if (!m) return false;
-    game.seeds[0]--;
-    break_tile(areas, w, tx, ty, m);
-    return true;
-  }
   default:
     return false;
   }
+}
+
+bool terrain_hit_tile(World *areas, World *w, float x, float y, int source) {
+  if (x < 0 || y < 0) return false;
+  int tx = (int)x / MT, ty = (int)y / MT;
+  const BreakMode *m = breaks(w, tx, ty, source);
+  if (!m) return false;
+  break_tile(areas, w, tx, ty, m);
+  return true;
 }
 
 const char *terrain_read(World *w, const Link *l) {

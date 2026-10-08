@@ -10,6 +10,7 @@
 #define BOX_B 6
 
 bool (*link_blocker)(float x, float y);
+float link_speed = 1.0f;
 
 static bool box_blocked(const World *w, float x, float y) {
   if (link_blocker && link_blocker(x, y + 2)) return true;
@@ -49,7 +50,7 @@ void link_update(Link *l, const World *w, int dx, int dy) {
   int want_h = dx > 0 ? DIR_RIGHT : DIR_LEFT, want_v = dy > 0 ? DIR_DOWN : DIR_UP;
   if (dx && dy) { if (l->dir != want_h && l->dir != want_v) l->dir = want_v; }
   else l->dir = dx ? want_h : want_v;
-  float s = (dx && dy) ? WALK_SPEED * 0.75f : WALK_SPEED;
+  float s = ((dx && dy) ? WALK_SPEED * 0.75f : WALK_SPEED) * link_speed;
   bool moved = false;
   if (dx) moved |= move_axis(l, w, dx * s, 0);
   if (dy) moved |= move_axis(l, w, 0, dy * s);

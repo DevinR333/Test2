@@ -15,6 +15,8 @@ void draw_game_text(SDL_Renderer *ren, const HudArt *art, const char *s, float x
 // Pixels of the window per HUD pixel: the HUD keeps one size whatever the world zoom.
 float hud_scale(int win_w, int win_h);
 void draw_item_icon(SDL_Renderer *ren, const HudArt *art, Item item, float x, float y, float px);
+// An item's icon centred on (cx, cy), turned by angle degrees (the sword in Link's hand).
+void draw_item_icon_rotated(SDL_Renderer *ren, const HudArt *art, Item item, float cx, float cy, float px, double angle);
 // Floating HUD in the style of The Minish Cap: hearts top left, B and A top right, rupees bottom
 // right; no status bar. With on-screen buttons the rupees move under the hearts, out of A's way.
 // keys: the dungeon's small keys, shown next to the rupees inside a dungeon (-1 elsewhere)

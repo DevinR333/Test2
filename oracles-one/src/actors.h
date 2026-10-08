@@ -32,5 +32,9 @@ bool actors_talk(const Link *l, ActorTalk *out);
 void actors_drop(float x, float y);
 // Hits every enemy within r of (x, y) (bombs, thrown pots); returns how many.
 int actors_hit_area(float x, float y, float r, int damage);
+// The enemy within r of (x, y), or -1; and moving it (the Switch Hook swaps places).
+int actors_enemy_at(float x, float y, float r);
+void actors_get_pos(int i, float *x, float *y);
+void actors_set_pos(int i, float x, float y);
 // For tests: how many enemies are still up.
 int actors_enemies_alive(void);
