@@ -25,6 +25,7 @@ typedef struct {
   int boss;            // BOSS_* beaten this frame
   float boss_x, boss_y;
   bool container, essence;  // a heart container / essence picked up
+  int seeds, seed_kind;     // seeds knocked off a seed tree
 } ActorEvents;
 // Puts a pickup down (heart container, essence) that stays until taken.
 void actors_place_pickup(int what, float x, float y);

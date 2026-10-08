@@ -289,6 +289,7 @@ static void combat(App *a) {
   ActorEvents ev = actors_update(a->world, &a->link, sword_box(&a->link), sword_damage[lvl]);
   boss_events(a, &ev);
   if (ev.hearts) game.health = (int16_t)SDL_min(game.health + ev.hearts, game.max_hearts * 4);
+  if (ev.seeds && game.item_level[ITEM_SEED_SATCHEL]) game.seeds[ev.seed_kind] = (uint8_t)SDL_min(game.seeds[ev.seed_kind] + ev.seeds, 20 + 30 * (game.item_level[ITEM_SEED_SATCHEL] - 1));
   if (ev.rupees) game.rupees = (uint16_t)SDL_min(game.rupees + ev.rupees, 999);
   if (a->hurt_frames) {
     a->hurt_frames--;

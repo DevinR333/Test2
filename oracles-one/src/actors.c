@@ -23,7 +23,9 @@ typedef struct { uint8_t game, group, room, kind, id, subid, y, x, count, random
 
 typedef struct {
   const Kind *k;
-  int kind, boss, room;
+  int kind, boss, room, behave, state, st;
+  float z, vz;
+  bool hidden, invincible;
   float x, y, vx, vy;
   int hp, timer, hurt, anim;
   bool alive;
@@ -36,6 +38,11 @@ static int n_kinds, n_places;
 static Actor actors[MAX_ACTORS];
 static int n_actors;
 static Uint32 rng = 12345;
+enum { SHOT_ROCK, SHOT_ARROW, SHOT_FIRE };
+#define MAX_SHOTS 24
+typedef struct { bool live; float x, y, vx, vy; int t, kind; } EShot;
+static EShot eshots[MAX_SHOTS];
+enum { B_WALK, B_SHOOT, B_TURRET, B_FLY, B_HOP, B_CHARGE, B_BURROW, B_HARMLESS, B_SEEDTREE, B_BOSS };
 static int pending_boss;                // a boss beaten by a bomb or seed, reported on the next update
 static float pending_x, pending_y;
 
@@ -116,9 +123,16 @@ static int boss_kind(int game, int id) {
   return BOSS_NONE;
 }
 
+static int behaviour_of(int id);
+
 static void setup_enemy(Actor *a, const Kind *k, int game) {
   a->boss = boss_kind(game, k->id);
+  a->behave = behaviour_of(k->id);
   a->hp = k->health ? (k->health == 0x7f ? 0 : k->health) : 1;
+  // traps, turrets and seed trees the sword can't beat
+  if (!a->hp && (a->behave == B_CHARGE || a->behave == B_TURRET || a->behave == B_SEEDTREE)) { a->hp = 999; a->invincible = true; }
+  if (a->behave == B_SEEDTREE) a->hp = 999;
+  if (a->behave == B_BURROW) { a->hidden = true; a->timer = 30; }
   // bosses whose health the originals keep in their own code get a fight's worth here
   if (a->boss && a->hp < 12) a->hp = a->boss == BOSS_MINI ? 16 : 32;
   if (a->boss >= BOSS_ONOX && a->hp < 48) a->hp = 48;
@@ -143,6 +157,7 @@ bool actors_spawn(int game, int id, int subid, float x, float y) {
 void actors_enter(const World *areas, int n, const World *w) {
   (void)areas; (void)n;
   n_actors = 0;
+  memset(eshots, 0, sizeof eshots);
   for (int r = 0; r < w->rooms_w * w->rooms_h; r++) {
     int room = w->room_ids[r];
     if (room == 0xffff) continue;
@@ -220,6 +235,155 @@ void actors_place_pickup(int what, float x, float y) {
   a->alive = true;
 }
 
+// ---- what each kind of enemy does --------------------------------------------------------------
+// Families of the originals' enemies by their ids (constants/*/enemies.s), each moving and attacking
+// in its own way; bosses come after Link and throw fire.
+
+static int behaviour_of(int id) {
+  switch (id) {
+  case 0x09: case 0x0a: case 0x0c: case 0x0d: case 0x20: case 0x21: case 0x22: case 0x40: case 0x3d: case 0x48: case 0x4a:
+    return B_SHOOT;
+  case 0x08: case 0x16: case 0x25: case 0x27: case 0x50: case 0x5c: return B_TURRET;
+  case 0x13: case 0x15: case 0x17: case 0x19: case 0x32: case 0x39: case 0x3e: case 0x41: case 0x4c: case 0x53: return B_FLY;
+  case 0x23: case 0x30: case 0x31: case 0x34: case 0x3a: case 0x43: case 0x47: return B_HOP;
+  case 0x0e: case 0x0f: case 0x10: case 0x14: case 0x1b: case 0x2a: case 0x2e: case 0x45: return B_CHARGE;
+  case 0x0b: case 0x1a: return B_BURROW;
+  case 0x33: case 0x36: case 0x37: case 0x3b: return B_HARMLESS;
+  case 0x5a: return B_SEEDTREE;
+  default: return B_WALK;
+  }
+}
+
+
+static void shoot(float x, float y, float vx, float vy, int kind) {
+  for (int i = 0; i < MAX_SHOTS; i++)
+    if (!eshots[i].live) { eshots[i] = (EShot){true, x, y, vx, vy, 120, kind}; return; }
+}
+
+// Link lined up with the enemy along a row or column, close enough to see: the way to him (or -1).
+static int aligned(float dx, float dy, float range) {
+  if (SDL_fabsf(dx) < 8 && SDL_fabsf(dy) < range) return dy < 0 ? DIR_UP : DIR_DOWN;
+  if (SDL_fabsf(dy) < 8 && SDL_fabsf(dx) < range) return dx < 0 ? DIR_LEFT : DIR_RIGHT;
+  return -1;
+}
+
+static const float step_x[4] = {0, 1, 0, -1}, step_y[4] = {-1, 0, 1, 0};
+
+static void wander(Actor *a, const World *w, float speed) {
+  if (--a->timer <= 0) {
+    int d = (int)(frand() * 5) % 5;
+    a->vx = d < 4 ? step_x[d] * speed : 0;
+    a->vy = d < 4 ? step_y[d] * speed : 0;
+    a->timer = 30 + (int)(frand() * 60);
+  }
+  float nx = a->x + a->vx, ny = a->y + a->vy;
+  if (walkable(w, nx, ny)) { a->x = nx; a->y = ny; } else a->timer = 0;
+}
+
+static void behave(Actor *a, const World *w, const Link *link, float dx, float dy) {
+  int kind = a->boss ? B_BOSS : a->behave;
+  switch (kind) {
+  case B_BOSS: {
+    float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f, sp = a->boss == BOSS_MINI ? 0.55f : 0.7f;
+    if (len < 160) {
+      a->vx = dx / len * sp; a->vy = dy / len * sp;
+      float nx = a->x + a->vx, ny = a->y + a->vy;
+      if (walkable(w, nx, ny)) { a->x = nx; a->y = ny; }
+      if (a->boss != BOSS_MINI && ++a->st >= 110) {   // a fireball now and then
+        a->st = (int)(frand() * 30);
+        shoot(a->x, a->y, dx / len * 1.6f, dy / len * 1.6f, SHOT_FIRE);
+      }
+    } else wander(a, w, 0.4f);
+    break;
+  }
+  case B_SHOOT:
+  case B_TURRET: {
+    if (a->state > 0) { a->state--; break; }           // standing to shoot
+    int d = aligned(dx, dy, 120);
+    if (d >= 0 && ++a->st >= 70) {
+      a->st = (int)(frand() * 40);
+      a->state = 20;
+      int id = a->k->id;
+      int sk = id == 0x09 || id == 0x08 ? SHOT_ROCK : id == 0x16 || id == 0x25 || id == 0x50 || id == 0x5c || id == 0x40 ? SHOT_FIRE : SHOT_ARROW;
+      shoot(a->x + step_x[d] * 6, a->y + step_y[d] * 6, step_x[d] * 2.0f, step_y[d] * 2.0f, sk);
+      break;
+    }
+    if (kind == B_SHOOT) wander(a, w, 0.5f);
+    break;
+  }
+  case B_FLY: {
+    // flutters about, over walls and holes, drifting toward Link
+    if (--a->timer <= 0) {
+      float ang = frand() * 6.283f;
+      float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f;
+      a->vx = SDL_cosf(ang) * 0.6f + dx / len * 0.35f;
+      a->vy = SDL_sinf(ang) * 0.6f + dy / len * 0.35f;
+      a->timer = 20 + (int)(frand() * 30);
+    }
+    float nx = a->x + a->vx, ny = a->y + a->vy;
+    if (nx > 8 && ny > 8 && nx < (float)world_px_w(w) - 8 && ny < (float)world_px_h(w) - 8) { a->x = nx; a->y = ny; }
+    else a->timer = 0;
+    break;
+  }
+  case B_HOP: {
+    if (a->z > 0 || a->vz > 0) {
+      a->z += a->vz; a->vz -= 0.18f;
+      float nx = a->x + a->vx, ny = a->y + a->vy;
+      if (walkable(w, nx, ny)) { a->x = nx; a->y = ny; }
+      if (a->z <= 0) { a->z = 0; a->vz = 0; a->timer = 20 + (int)(frand() * 40); }
+    } else if (--a->timer <= 0) {
+      float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f;
+      bool toward = len < 100 && frand() < 0.7f;
+      float ang = frand() * 6.283f;
+      a->vx = toward ? dx / len * 1.1f : SDL_cosf(ang) * 1.1f;
+      a->vy = toward ? dy / len * 1.1f : SDL_sinf(ang) * 1.1f;
+      a->vz = 2.2f;
+    }
+    break;
+  }
+  case B_CHARGE: {
+    if (a->state > 0) {                      // dashing
+      float nx = a->x + a->vx, ny = a->y + a->vy;
+      if (walkable(w, nx, ny) && --a->state > 0) { a->x = nx; a->y = ny; }
+      else { a->state = 0; a->timer = 40; }
+      break;
+    }
+    int d = aligned(dx, dy, 100);
+    if (d >= 0 && a->timer <= 0) {
+      a->vx = step_x[d] * 2.2f; a->vy = step_y[d] * 2.2f;
+      a->state = 70;
+      break;
+    }
+    if (a->invincible) { if (a->timer > 0) a->timer--; break; }   // traps wait where they are
+    wander(a, w, 0.4f);
+    break;
+  }
+  case B_BURROW: {
+    // under the sand until Link comes near, then up beside him for a while
+    if (a->hidden) {
+      if (SDL_fabsf(dx) < 64 && SDL_fabsf(dy) < 64 && --a->timer <= 0) {
+        float nx = link->x + (frand() - 0.5f) * 48, ny = link->y + (frand() - 0.5f) * 48;
+        if (walkable(w, nx, ny)) { a->x = nx; a->y = ny; a->hidden = false; a->state = 240; }
+      }
+      break;
+    }
+    if (--a->state <= 0) { a->hidden = true; a->timer = 60; break; }
+    float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f;
+    float nx = a->x + dx / len * 0.45f, ny = a->y + dy / len * 0.45f;
+    if (walkable(w, nx, ny)) { a->x = nx; a->y = ny; }
+    break;
+  }
+  case B_SEEDTREE:
+    break;
+  case B_HARMLESS:
+    wander(a, w, 0.35f);
+    break;
+  default:
+    wander(a, w, 0.5f);
+    break;
+  }
+}
+
 ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int sword_damage) {
   ActorEvents ev = {0};
   if (pending_boss) { ev.boss = pending_boss; ev.boss_x = pending_x; ev.boss_y = pending_y; pending_boss = 0; }
@@ -240,31 +404,29 @@ ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int
       continue;
     }
     if (a->kind != ACTOR_ENEMY || SDL_fabsf(dx) > ACTIVE_RANGE || SDL_fabsf(dy) > ACTIVE_RANGE) continue;
-    if (a->hurt) {
+    if (a->hurt && a->behave != B_SEEDTREE) {
       a->hurt--;
       float nx = a->x + a->vx, ny = a->y + a->vy;
       if (walkable(w, nx, ny)) { a->x = nx; a->y = ny; }
       a->vx *= 0.85f; a->vy *= 0.85f;
     } else {
-      // bosses come after Link; others wander, a new direction now and then or when blocked
-      if (a->boss && SDL_fabsf(dx) < 160 && SDL_fabsf(dy) < 160) {
-        float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f, sp = a->boss == BOSS_MINI ? 0.55f : 0.7f;
-        a->vx = dx / len * sp; a->vy = dy / len * sp;
-        a->timer = 20;
-      } else if (--a->timer <= 0) {
-        static const float dirs[5][2] = {{0, -1}, {1, 0}, {0, 1}, {-1, 0}, {0, 0}};
-        int d = (int)(frand() * 5) % 5;
-        a->vx = dirs[d][0] * 0.5f; a->vy = dirs[d][1] * 0.5f;
-        a->timer = 30 + (int)(frand() * 60);
-      }
-      float nx = a->x + a->vx, ny = a->y + a->vy;
-      if (walkable(w, nx, ny)) { a->x = nx; a->y = ny; } else a->timer = 0;
+      if (a->hurt) a->hurt--;
+      behave(a, w, link, dx, dy);
     }
+    if (a->hidden) continue;                 // a Leever under the sand
     float bx, by, rx, ry;
     body(a, &bx, &by, &rx, &ry);
     float bdx = link->x - bx, bdy = link->y - by;
     // the sword
     if (sword.w > 0 && !a->hurt && bx + rx > sword.x && bx - rx < sword.x + sword.w && by + ry > sword.y && by - ry < sword.y + sword.h) {
+      if (a->behave == B_SEEDTREE) {          // a seed tree: its seeds fall
+        ev.seed_kind = a->k->subid % 5;
+        ev.seeds = 5;
+        a->hurt = 600;
+        sfx("SND_GETSEED");
+        continue;
+      }
+      if (a->invincible || a->behave == B_HARMLESS) { a->hurt = 16; sfx("SND_CLINK"); continue; }
       a->hp -= sword_damage;
       a->hurt = 16;
       sfx(a->hp <= 0 ? (a->boss ? "SND_BOSS_DEAD" : "SND_KILLENEMY") : a->boss ? "SND_BOSS_DAMAGE" : "SND_DAMAGE_ENEMY");
@@ -278,10 +440,29 @@ ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int
       }
     }
     // touching Link
+    if (a->behave == B_HARMLESS || a->behave == B_SEEDTREE || a->z > 6) continue;
     if (!ev.damage && SDL_fabsf(bdx) < rx + 4 && SDL_fabsf(bdy) < ry + 5) {
       ev.damage = a->k->damage < 0 ? -a->k->damage : 2;
       float len = SDL_sqrtf(dx * dx + dy * dy) + 0.01f;
       ev.push_x = dx / len * 3.0f; ev.push_y = dy / len * 3.0f;
+    }
+  }
+  // shots: rocks, arrows and fire
+  for (int i = 0; i < MAX_SHOTS; i++) {
+    EShot *e = &eshots[i];
+    if (!e->live) continue;
+    e->x += e->vx; e->y += e->vy;
+    if (--e->t <= 0 || world_solid(w, (int)e->x, (int)e->y)) { e->live = false; continue; }
+    if (SDL_fabsf(e->x - link->x) < 6 && SDL_fabsf(e->y - (link->y + 2)) < 7) {
+      e->live = false;
+      // the shield turns away what comes at Link's front
+      int from = SDL_fabsf(e->vx) > SDL_fabsf(e->vy) ? (e->vx > 0 ? DIR_LEFT : DIR_RIGHT) : (e->vy > 0 ? DIR_UP : DIR_DOWN);
+      if (game.item_level[ITEM_SHIELD] && link->dir == from && e->kind != SHOT_FIRE) { sfx("SND_CLINK"); continue; }
+      if (!ev.damage) {
+        ev.damage = 2;
+        float len = SDL_sqrtf(e->vx * e->vx + e->vy * e->vy) + 0.01f;
+        ev.push_x = e->vx / len * 3.0f; ev.push_y = e->vy / len * 3.0f;
+      }
     }
   }
   return ev;
@@ -290,6 +471,17 @@ ActorEvents actors_update(const World *w, const Link *link, SDL_FRect sword, int
 void (*pickup_icon)(SDL_Renderer *ren, int what, float cx, float cy, float px);
 
 void actors_draw(SDL_Renderer *ren, const View *v, bool behind_link, float link_y) {
+  if (!behind_link)
+    for (int i = 0; i < MAX_SHOTS; i++) {
+      const EShot *e = &eshots[i];
+      if (!e->live) continue;
+      float r = e->kind == SHOT_ROCK ? 3 : e->kind == SHOT_FIRE ? 3.5f : 2;
+      float w = e->kind == SHOT_ARROW && SDL_fabsf(e->vx) > SDL_fabsf(e->vy) ? 6 : r, h = e->kind == SHOT_ARROW && SDL_fabsf(e->vy) >= SDL_fabsf(e->vx) ? 6 : r;
+      float x0 = view_sx(v, e->x - w), y0 = view_sy(v, e->y - h), x1 = view_sx(v, e->x + w), y1 = view_sy(v, e->y + h);
+      if (e->kind == SHOT_ROCK) fill_rect(ren, x0, y0, x1 - x0, y1 - y0, 120, 80, 40, 255);
+      else if (e->kind == SHOT_ARROW) fill_rect(ren, x0, y0, x1 - x0, y1 - y0, 230, 220, 180, 255);
+      else { fill_rect(ren, x0, y0, x1 - x0, y1 - y0, 250, 120, 30, 255); fill_rect(ren, x0 + (x1 - x0) / 4, y0 + (y1 - y0) / 4, (x1 - x0) / 2, (y1 - y0) / 2, 255, 230, 80, 255); }
+    }
   for (int i = 0; i < n_actors; i++) {
     const Actor *a = &actors[i];
     if (!a->alive || (a->y < link_y) != behind_link) continue;
@@ -310,9 +502,10 @@ void actors_draw(SDL_Renderer *ren, const View *v, bool behind_link, float link_
     int t = total ? a->anim % total : 0, f = 0;
     while (f < a->k->n_frames - 1 && t >= (a->k->frames[f].dur ? a->k->frames[f].dur : 8)) { t -= a->k->frames[f].dur ? a->k->frames[f].dur : 8; f++; }
     const Frame *fr = &a->k->frames[f];
-    if (a->hurt && (a->hurt / 2) & 1) continue;               // flicker when hit
-    float x0 = view_sx(v, a->x + fr->ox), y0 = view_sy(v, a->y + fr->oy);
-    float x1 = view_sx(v, a->x + fr->ox + fr->w), y1 = view_sy(v, a->y + fr->oy + fr->h);
+    if (a->hidden) continue;
+    if (a->hurt && a->behave != B_SEEDTREE && (a->hurt / 2) & 1) continue;   // flicker when hit
+    float x0 = view_sx(v, a->x + fr->ox), y0 = view_sy(v, a->y - a->z + fr->oy);
+    float x1 = view_sx(v, a->x + fr->ox + fr->w), y1 = view_sy(v, a->y - a->z + fr->oy + fr->h);
     image_draw(ren, &sheet, fr->x, fr->y, fr->w, fr->h, x0, y0, x1 - x0, y1 - y0, false);
   }
 }
@@ -340,7 +533,7 @@ int actors_hit_area(float x, float y, float r, int damage) {
   int hits = 0;
   for (int i = 0; i < n_actors; i++) {
     Actor *a = &actors[i];
-    if (!a->alive || a->kind != ACTOR_ENEMY || a->hurt) continue;
+    if (!a->alive || a->kind != ACTOR_ENEMY || a->hurt || a->hidden || a->invincible || a->behave >= B_HARMLESS) continue;
     float bx, by, rx, ry;
     body(a, &bx, &by, &rx, &ry);
     float dx = bx - x, dy = by - y;
@@ -364,7 +557,7 @@ int actors_hit_area(float x, float y, float r, int damage) {
 int actors_enemy_at(float x, float y, float r) {
   for (int i = 0; i < n_actors; i++) {
     const Actor *a = &actors[i];
-    if (!a->alive || a->kind != ACTOR_ENEMY) continue;
+    if (!a->alive || a->kind != ACTOR_ENEMY || a->hidden) continue;
     float bx, by, rx, ry;
     body(a, &bx, &by, &rx, &ry);
     float dx = bx - x, dy = by - y;
@@ -378,7 +571,10 @@ void actors_set_pos(int i, float x, float y) { actors[i].x = x; actors[i].y = y;
 
 int actors_room_enemies(int room) {
   int n = 0;
-  for (int i = 0; i < n_actors; i++) n += actors[i].alive && actors[i].kind == ACTOR_ENEMY && actors[i].room == room;
+  for (int i = 0; i < n_actors; i++) {
+    const Actor *e = &actors[i];
+    n += e->alive && e->kind == ACTOR_ENEMY && e->room == room && !e->invincible && e->behave != B_HARMLESS && e->behave != B_SEEDTREE;
+  }
   return n;
 }
 
