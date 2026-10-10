@@ -48,8 +48,9 @@ The export contains stub copies of Unity packages. Replace them with the real pa
    DOTween, Unity.Splines, Unity.Mathematics, Unity.Burst, Unity.Collections.
 2. Install the real ones with Package Manager at the versions the game used (URP 17.3.x for
    Unity 6.3, Cinemachine 2.x since the game uses `CinemachineVirtualCamera`, TextMeshPro, etc.).
-   Keep the script GUIDs matching so scene references survive: AssetRipper's stubs use the same
-   GUIDs as the real packages when the versions match.
+   Check that scene references survive the swap (components like Cinemachine cameras or TMP text
+   shouldn't turn into "Missing script"). If they do, the stub and package GUIDs differ and the
+   references need remapping; a small editor script can rewrite the GUIDs in the scene files.
 3. Remove VR/online-only code paths: Oculus.*, Meta.XR.*, Unity.XR.*, Photon*, PlayFab, LIV,
    Unity.Services.* (leave the game's own classes that reference them as stubs for now).
 4. Assign the URP asset in Graphics settings. Materials then use URP, as in the original.
